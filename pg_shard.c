@@ -121,8 +121,6 @@ static void AcquireExecutorShardLocks(List *taskList, LOCKMODE lockMode);
 static int CompareTasksByShardId(const void *leftElement, const void *rightElement);
 static void ExecuteMultipleShardSelect(DistributedPlan *distributedPlan,
 									   RangeVar *intermediateTable);
-static bool ExecuteTaskAndStoreResults(Task *task, TupleDesc tupleDescriptor,
-									   Tuplestorestate *tupleStore);
 static bool SendQueryInSingleRowMode(PGconn *connection, StringInfo query);
 static bool StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 							 Tuplestorestate *tupleStore);
@@ -1363,7 +1361,7 @@ ExecuteMultipleShardSelect(DistributedPlan *distributedPlan,
  * the results and stores them in the given tuple store. If the task fails on
  * one of the placements, the function retries it on other placements.
  */
-static bool
+bool
 ExecuteTaskAndStoreResults(Task *task, TupleDesc tupleDescriptor,
 						   Tuplestorestate *tupleStore)
 {
