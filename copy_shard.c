@@ -82,21 +82,21 @@ worker_copy_shard_placement(PG_FUNCTION_ARGS)
 	if (!fetchSuccessful)
 	{
 		ereport(WARNING, (errmsg("could not receive query results")));
-		PG_RETURN_BOOL(false);
+		PG_RETURN_VOID();
 	}
 
 	loadSuccessful = CopyDataFromTupleStoreToRelation(tupleStore, distributedTable);
 	if (!loadSuccessful)
 	{
 		ereport(WARNING, (errmsg("could not load query results")));
-		PG_RETURN_BOOL(false);
+		PG_RETURN_VOID();
 	}
 
 	tuplestore_end(tupleStore);
 
 	heap_close(distributedTable, RowExclusiveLock);
 
-	PG_RETURN_BOOL(true);
+	PG_RETURN_VOID();
 }
 
 
