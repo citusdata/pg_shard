@@ -13,6 +13,7 @@
 #include "postgres.h"
 #include "c.h"
 #include "fmgr.h"
+#include "libpq-fe.h"
 #include "miscadmin.h"
 #include "postgres_ext.h"
 
@@ -20,12 +21,10 @@
 #include "repair_shards.h"
 #include "ddl_commands.h"
 #include "distribution_metadata.h"
-#include "pg_shard.h"
 #include "ruleutils.h"
 
 #include <string.h>
 
-#include "access/heapam.h"
 #include "catalog/pg_class.h"
 #include "lib/stringinfo.h"
 #include "nodes/pg_list.h"
@@ -34,7 +33,6 @@
 #include "utils/elog.h"
 #include "utils/errcodes.h"
 #include "utils/lsyscache.h"
-#include "utils/rel.h"
 
 
 /* local function forward declarations */
@@ -44,12 +42,9 @@ static List * RecreateTableDDLCommandList(Oid relationId, int64 shardId);
 static bool CopyDataFromFinalizedPlacement(ShardPlacement *placementToRepair,
 										   ShardPlacement *healthyPlacement,
 										   Oid distributedTableId, int64 shardId);
-static bool CopyDataFromTupleStoreToRelation(Tuplestorestate *tupleStore,
-											 Relation relation);
 
 /* declarations for dynamic loading */
 PG_FUNCTION_INFO_V1(master_copy_shard_placement);
-PG_FUNCTION_INFO_V1(worker_copy_shard_placement);
 
 
 /*
@@ -123,59 +118,6 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 	RESUME_INTERRUPTS();
 
 	PG_RETURN_VOID();
-}
-
-
-/*
- * worker_copy_shard_placement implements a internal UDF to copy a table's data from
- * a healthy placement into a receiving table on an unhealthy placement. This
- * function returns a boolean reflecting success or failure.
- */
-Datum
-worker_copy_shard_placement(PG_FUNCTION_ARGS)
-{
-	Oid distributedTableId = PG_GETARG_OID(0);
-	char *nodeName = PG_GETARG_CSTRING(1);
-	int32 nodePort = PG_GETARG_INT32(2);
-
-	Relation distributedTable = heap_open(distributedTableId, RowExclusiveLock);
-	char *relationName = RelationGetRelationName(distributedTable);
-	ShardPlacement *placement = (ShardPlacement *) palloc0(sizeof(ShardPlacement));
-	Task *task = (Task *) palloc0(sizeof(Task));
-	StringInfo selectAllQuery = makeStringInfo();
-
-	TupleDesc tupleDescriptor = RelationGetDescr(distributedTable);
-	Tuplestorestate *tupleStore = tuplestore_begin_heap(false, false, work_mem);
-	bool fetchSuccessful = false;
-	bool loadSuccessful = false;
-
-	appendStringInfo(selectAllQuery, SELECT_ALL_QUERY, quote_identifier(relationName));
-
-	placement->nodeName = nodeName;
-	placement->nodePort = nodePort;
-
-	task->queryString = selectAllQuery;
-	task->taskPlacementList = list_make1(placement);
-
-	fetchSuccessful = ExecuteTaskAndStoreResults(task, tupleDescriptor, tupleStore);
-	if (!fetchSuccessful)
-	{
-		ereport(WARNING, (errmsg("could not receive query results")));
-		PG_RETURN_BOOL(false);
-	}
-
-	loadSuccessful = CopyDataFromTupleStoreToRelation(tupleStore, distributedTable);
-	if (!loadSuccessful)
-	{
-		ereport(WARNING, (errmsg("could not load query results")));
-		PG_RETURN_BOOL(false);
-	}
-
-	tuplestore_end(tupleStore);
-
-	heap_close(distributedTable, RowExclusiveLock);
-
-	PG_RETURN_BOOL(true);
 }
 
 
@@ -325,46 +267,4 @@ CopyDataFromFinalizedPlacement(ShardPlacement *placementToRepair,
 	PQclear(result);
 
 	return true;
-}
-
-
-/*
- * CopyDataFromTupleStoreToRelation loads a specified relation with all tuples
- * stored in the provided tuplestore. This function assumes the relation's
- * layout (TupleDesc) exactly matches that of the provided tuplestore. This
- * function returns a boolean indicating success or failure.
- */
-static bool
-CopyDataFromTupleStoreToRelation(Tuplestorestate *tupleStore, Relation relation)
-{
-	TupleDesc tupleDescriptor = RelationGetDescr(relation);
-	TupleTableSlot *tupleTableSlot = MakeSingleTupleTableSlot(tupleDescriptor);
-	bool copySuccessful = false;
-
-	for (;;)
-	{
-		HeapTuple tupleToInsert = NULL;
-		Oid insertedOid = InvalidOid;
-		bool nextTuple = tuplestore_gettupleslot(tupleStore, true, false, tupleTableSlot);
-		if (!nextTuple)
-		{
-			copySuccessful = true;
-			break;
-		}
-
-		tupleToInsert = ExecMaterializeSlot(tupleTableSlot);
-
-		insertedOid = simple_heap_insert(relation, tupleToInsert);
-		if (insertedOid == InvalidOid)
-		{
-			copySuccessful = false;
-			break;
-		}
-
-		ExecClearTuple(tupleTableSlot);
-	}
-
-	ExecDropSingleTupleTableSlot(tupleTableSlot);
-
-	return copySuccessful;
 }
