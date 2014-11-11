@@ -263,6 +263,14 @@ RecreateTableDDLCommandList(Oid relationId, int64 shardId)
 	return extendedRecreateCommandList;
 }
 
+
+/*
+ * CopyDataFromFinalizedPlacement connects to an unhealthy placement and
+ * directs it to copy the specified shard from a certain healthy placement.
+ * This function assumes that the unhealthy placement already has a schema
+ * in place to receive rows from the healthy placement. This function returns
+ * a boolean indicating success or failure.
+ */
 static bool
 CopyDataFromFinalizedPlacement(ShardPlacement *placementToRepair,
 							   ShardPlacement *healthyPlacement,
@@ -320,6 +328,12 @@ CopyDataFromFinalizedPlacement(ShardPlacement *placementToRepair,
 }
 
 
+/*
+ * CopyDataFromTupleStoreToRelation loads a specified relation with all tuples
+ * stored in the provided tuplestore. This function assumes the relation's
+ * layout (TupleDesc) exactly matches that of the provided tuplestore. This
+ * function returns a boolean indicating success or failure.
+ */
 static bool
 CopyDataFromTupleStoreToRelation(Tuplestorestate *tupleStore, Relation relation)
 {
