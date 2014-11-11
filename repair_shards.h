@@ -20,6 +20,8 @@
 /* templates for SQL commands used during shard placement repair */
 #define DROP_REGULAR_TABLE_COMMAND "DROP TABLE IF EXISTS %s"
 #define DROP_FOREIGN_TABLE_COMMAND "DROP FOREIGN TABLE IF EXISTS %s"
+#define SELECT_ALL_QUERY "SELECT * FROM %s"
+#define COPY_RELATION_QUERY "SELECT worker_copy_shard_placement(%s, %s, %d)"
 
 
 /* function declarations for shard repair functionality */
