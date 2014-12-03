@@ -10,8 +10,8 @@
  *-------------------------------------------------------------------------
  */
 
-#ifndef PG_SHARD_TEST_HELPER_H
-#define PG_SHARD_TEST_HELPER_H
+#ifndef PG_SHARD_TEST_HELPER_FUNCTIONS_H
+#define PG_SHARD_TEST_HELPER_FUNCTIONS_H
 
 #include "postgres.h"
 #include "fmgr.h"
@@ -31,6 +31,12 @@ extern Datum load_shard_id_array(PG_FUNCTION_ARGS);
 extern Datum load_shard_interval_array(PG_FUNCTION_ARGS);
 extern Datum load_shard_placement_array(PG_FUNCTION_ARGS);
 extern Datum partition_column_id(PG_FUNCTION_ARGS);
+extern Datum insert_hash_partition_row(PG_FUNCTION_ARGS);
+extern Datum insert_monolithic_shard_row(PG_FUNCTION_ARGS);
+extern Datum insert_healthy_local_shard_placement_row(PG_FUNCTION_ARGS);
+extern Datum delete_shard_placement_row(PG_FUNCTION_ARGS);
+extern Datum next_shard_id(PG_FUNCTION_ARGS);
+extern Datum acquire_shared_shard_lock(PG_FUNCTION_ARGS);
 
 
-#endif /* PG_SHARD_TEST_HELPER_H */
+#endif /* PG_SHARD_TEST_HELPER_FUNCTIONS_H */
