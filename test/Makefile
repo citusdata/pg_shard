@@ -1,1 +1,1 @@
-OBJS += test/test_helper_functions.o
+OBJS += test/connection.o test/distribution_metadata.o
