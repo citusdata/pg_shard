@@ -8,8 +8,7 @@
 
 MODULE_big = pg_shard
 OBJS = connection.o create_shards.o distribution_metadata.o extend_ddl_commands.o \
-	   generate_ddl_commands.o pg_shard.o prune_shard_list.o repair_shards.o ruleutils.o \
-	   test_helper_functions.o
+	   generate_ddl_commands.o pg_shard.o prune_shard_list.o repair_shards.o ruleutils.o
 
 PG_CPPFLAGS = -std=c99 -Wall -Wextra -I$(libpq_srcdir)
 
@@ -42,6 +41,8 @@ REGRESS_PREP = sql/connection.sql expected/connection.out
 REGRESS = init connection distribution_metadata
 
 EXTRA_CLEAN += ${REGRESS_PREP}
+
+include test/Makefile
 
 PG_CONFIG = pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)
