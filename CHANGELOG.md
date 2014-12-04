@@ -1,3 +1,7 @@
+### pg_shard v1.0.1 (December 4, 2014) ###
+
+* Minor documentation fixes
+
 ### pg_shard v1.0.0 (December 4, 2014) ###
 
 * Public release under LGPLv3
