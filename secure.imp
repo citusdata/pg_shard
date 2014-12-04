@@ -1,0 +1,5 @@
+[
+	{ include: [ "<secure/_common.h>", private, "<common.h>", public ] },
+	{ include: [ "<secure/_stdio.h>", private, "<stdio.h>", public ] },
+	{ include: [ "<secure/_string.h>", private, "<string.h>", public ] }
+]

@@ -1,0 +1,95 @@
+-- ===================================================================
+-- create test functions
+-- ===================================================================
+CREATE FUNCTION initialize_remote_temp_table(cstring, integer)
+	RETURNS bool
+	AS 'pg_shard'
+	LANGUAGE C STRICT;
+CREATE FUNCTION count_remote_temp_table_rows(cstring, integer)
+	RETURNS integer
+	AS 'pg_shard'
+	LANGUAGE C STRICT;
+CREATE FUNCTION get_and_purge_connection(cstring, integer)
+	RETURNS bool
+	AS 'pg_shard'
+	LANGUAGE C STRICT;
+-- ===================================================================
+-- test connection hash functionality
+-- ===================================================================
+\set VERBOSITY terse
+-- connect to non-existant host
+SELECT initialize_remote_temp_table('dummy-host-name', $PGPORT);
+WARNING:  Connection failed to dummy-host-name:$PGPORT
+ initialize_remote_temp_table 
+------------------------------
+ f
+(1 row)
+
+\set VERBOSITY default
+-- try to use hostname over 255 characters
+SELECT initialize_remote_temp_table(repeat('a', 256)::cstring, $PGPORT);
+ERROR:  hostnames may not exceed 255 characters
+-- connect to localhost and build a temp table
+SELECT initialize_remote_temp_table('localhost', $PGPORT);
+ initialize_remote_temp_table 
+------------------------------
+ t
+(1 row)
+
+-- table should still be visible since session is reused
+SELECT count_remote_temp_table_rows('localhost', $PGPORT);
+ count_remote_temp_table_rows 
+------------------------------
+                          100
+(1 row)
+
+-- purge existing connection to localhost
+SELECT get_and_purge_connection('localhost', $PGPORT);
+ get_and_purge_connection 
+--------------------------
+ t
+(1 row)
+
+-- should not be able to see table anymore
+SELECT count_remote_temp_table_rows('localhost', $PGPORT);
+WARNING:  Bad result from localhost:$PGPORT
+DETAIL:  Remote message: relation "numbers" does not exist
+ count_remote_temp_table_rows 
+------------------------------
+                           -1
+(1 row)
+
+-- recreate once more
+SELECT initialize_remote_temp_table('localhost', $PGPORT);
+ initialize_remote_temp_table 
+------------------------------
+ t
+(1 row)
+
+-- kill backend to disconnect
+SELECT pg_terminate_backend(pid)
+	FROM pg_stat_activity
+	WHERE application_name = 'pg_shard';
+ pg_terminate_backend 
+----------------------
+ t
+(1 row)
+
+-- should get connection failure (cached connection bad)
+SELECT count_remote_temp_table_rows('localhost', $PGPORT);
+WARNING:  Bad result from localhost:$PGPORT
+DETAIL:  Remote message: terminating connection due to administrator command
+ count_remote_temp_table_rows 
+------------------------------
+                           -1
+(1 row)
+
+-- should get result failure (reconnected, so no temp table)
+SELECT count_remote_temp_table_rows('localhost', $PGPORT);
+WARNING:  Bad result from localhost:$PGPORT
+DETAIL:  Remote message: relation "numbers" does not exist
+ count_remote_temp_table_rows 
+------------------------------
+                           -1
+(1 row)
+
