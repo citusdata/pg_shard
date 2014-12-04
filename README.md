@@ -136,3 +136,14 @@ Each shard placement in `pg_shard` corresponds to one PostgreSQL table on a work
 * Distributed `JOIN`s also aren't supported in `pg_shard` - If you'd like to run complex analytic queries, please consider upgrading to CitusDB.
 
 Besides these limitations, we have a list of features that we're looking to add. Instead of prioritizing this list ourselves, we decided to keep an open discussion on GitHub issues and hear what you have to say. So, if you have a favorite feature missing from `pg_shard`, please do get in touch!
+
+## License
+
+Copyright © 2012–2014 Citus Data, Inc.
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Lesser General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version.
+
+See the [`LICENSE`](LICENSE) file for full details.
