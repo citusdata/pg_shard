@@ -46,6 +46,14 @@ Second, the master node in `pg_shard` reads worker host information from a file 
 
 Then, you can save these settings and restart the master node.
 
+### Worker Nodes
+
+Each worker node will need the following to function:
+
+* PostgreSQL up and running
+* PostgreSQL accepting connections from the master node using some form of passwordless connection, such as .pgpass files.
+* An empty database with a name matching the database you intend to shard on the master.  You will need to create this database.
+
 ### Table Sharding
 
 Now, let's log into the master node and create the extension:
