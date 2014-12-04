@@ -1,3 +1,7 @@
+### pg_shard v1.0.0 (December 4, 2014) ###
+
+* Public release under LGPLv3
+
 ### pg_shard v1.0.0-gm (December 3, 2014) ###
 
 * Adds support for PostgreSQL 9.4 in addition to 9.3

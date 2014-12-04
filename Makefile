@@ -25,7 +25,7 @@ else
 endif
 
 EXTENSION = pg_shard
-DATA = pg_shard--1.0-gm.sql
+DATA = pg_shard--1.0.sql
 
 # Default to 5432 if PGPORT is undefined. Replace placeholders in our tests
 # with actual port number in order to anticipate correct output during tests.
