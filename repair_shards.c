@@ -2,10 +2,10 @@
  *
  * repair_shards.c
  *
-  * This file contains functions to repair unhealthy shard placements using data
-  * from healthy ones.
+ * This file contains functions to repair unhealthy shard placements using data
+ * from healthy ones.
  *
-  * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */
