@@ -1543,9 +1543,9 @@ ExecuteDistributedModify(DistributedPlan *plan)
 		if (PQresultStatus(result) != PGRES_COMMAND_OK)
 		{
 			ReportRemoteError(connection, result);
-			PQclear(result);
+			PQclear(result);//
 
-			failedPlacementList = lappend(failedPlacementList, taskPlacement);
+			failedPlacementList = lappend(failedPlacementList, taskPlacement);//
 			continue;
 		}
 
