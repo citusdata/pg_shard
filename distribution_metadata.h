@@ -119,20 +119,20 @@ typedef struct ShardPlacement
 } ShardPlacement;
 
 
-/*
- * ShardIntervalListCacheEntry contains the information for a cache entry in
- * shard interval list cache entry.
- */
-typedef struct ShardIntervalListCacheEntry
-{
-	Oid distributedTableId;	/* cache key */
-	List *shardIntervalList;
-} ShardIntervalListCacheEntry;
-
-
+ /*
+  * ShardIntervalListCacheEntry contains the information for a cache entry in
+  * shard interval list cache entry.
+  */
+ typedef struct ShardIntervalListCacheEntry
+ {
+ 	Oid distributedTableId;	/* cache key */
+ 	List *shardIntervalList;
+ } ShardIntervalListCacheEntry;
+ 
+ 
 /* function declarations to access and manipulate the metadata */
-extern List * LookupShardIntervalList(Oid distributedTableId);
-extern List * LoadShardIntervalList(Oid distributedTableId);
+ extern List * LookupShardIntervalList(Oid distributedTableId);
+ extern List * LoadShardIntervalList(Oid distributedTableId);
 extern ShardInterval * LoadShardInterval(int64 shardId);
 extern List * LoadFinalizedShardPlacementList(uint64 shardId);
 extern List * LoadShardPlacementList(int64 shardId);

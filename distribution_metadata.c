@@ -43,20 +43,20 @@
 #include "utils/errcodes.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
-#include "utils/memutils.h"
+ #include "utils/memutils.h"
 #include "utils/palloc.h"
 #include "utils/rel.h"
 #include "utils/relcache.h"
 #include "utils/tqual.h"
 
 
-/*
- * ShardIntervalListCache is used for caching shard interval lists. It begins
- * initialized to empty list as there are no items in the cache.
- */
-static List *ShardIntervalListCache = NIL;
-
-
+ /*
+  * ShardIntervalListCache is used for caching shard interval lists. It begins
+  * initialized to empty list as there are no items in the cache.
+  */
+ static List *ShardIntervalListCache = NIL;
+ 
+ 
 /* local function forward declarations */
 static Var * ColumnNameToColumn(Oid relationId, char *columnName);
 static void LoadShardIntervalRow(int64 shardId, Oid *relationId,
@@ -66,67 +66,67 @@ static ShardPlacement * TupleToShardPlacement(HeapTuple heapTuple,
 
 
 /*
- * LookupShardIntervalList is wrapper around LoadShardIntervalList that uses a
- * cache to avoid multiple lookups of a distributed table's shards within a
- * single session.
- */
-List *
-LookupShardIntervalList(Oid distributedTableId)
-{
-	ShardIntervalListCacheEntry *matchingCacheEntry = NULL;
-	ListCell *cacheEntryCell = NULL;
-
-	/* search the cache */
-	foreach(cacheEntryCell, ShardIntervalListCache)
-	{
-		ShardIntervalListCacheEntry *cacheEntry = lfirst(cacheEntryCell);
-		if (cacheEntry->distributedTableId == distributedTableId)
-		{
-			matchingCacheEntry = cacheEntry;
-			break;
-		}
-	}
-
-	/* if not found in the cache, load the shard interval and put it in cache */
-	if (matchingCacheEntry == NULL)
-	{
-		MemoryContext oldContext = MemoryContextSwitchTo(CacheMemoryContext);
-
-		List *loadedIntervalList = LoadShardIntervalList(distributedTableId);
-		if (loadedIntervalList != NIL)
-		{
-			matchingCacheEntry = palloc0(sizeof(ShardIntervalListCacheEntry));
-			matchingCacheEntry->distributedTableId = distributedTableId;
-			matchingCacheEntry->shardIntervalList = loadedIntervalList;
-
-			ShardIntervalListCache = lappend(ShardIntervalListCache, matchingCacheEntry);
-		}
-
-		MemoryContextSwitchTo(oldContext);
-	}
-
-	/*
-	 * The only case we don't cache the shard list is when the distributed table
-	 * doesn't have any shards. This is to force reloading shard list on next call.
-	 */
-	if (matchingCacheEntry == NULL)
-	{
-		return NIL;
-	}
-
-	return matchingCacheEntry->shardIntervalList;
-}
-
-
-/*
- * LoadShardIntervalList returns a list of shard intervals related for a given
+  * LookupShardIntervalList is wrapper around LoadShardIntervalList that uses a
+  * cache to avoid multiple lookups of a distributed table's shards within a
+  * single session.
+  */
+ List *
+ LookupShardIntervalList(Oid distributedTableId)
+ {
+ 	ShardIntervalListCacheEntry *matchingCacheEntry = NULL;
+ 	ListCell *cacheEntryCell = NULL;
+ 
+ 	/* search the cache */
+ 	foreach(cacheEntryCell, ShardIntervalListCache)
+ 	{
+ 		ShardIntervalListCacheEntry *cacheEntry = lfirst(cacheEntryCell);
+ 		if (cacheEntry->distributedTableId == distributedTableId)
+ 		{
+ 			matchingCacheEntry = cacheEntry;
+ 			break;
+ 		}
+ 	}
+ 
+ 	/* if not found in the cache, load the shard interval and put it in cache */
+ 	if (matchingCacheEntry == NULL)
+ 	{
+ 		MemoryContext oldContext = MemoryContextSwitchTo(CacheMemoryContext);
+ 
+ 		List *loadedIntervalList = LoadShardIntervalList(distributedTableId);
+ 		if (loadedIntervalList != NIL)
+ 		{
+ 			matchingCacheEntry = palloc0(sizeof(ShardIntervalListCacheEntry));
+ 			matchingCacheEntry->distributedTableId = distributedTableId;
+ 			matchingCacheEntry->shardIntervalList = loadedIntervalList;
+ 
+ 			ShardIntervalListCache = lappend(ShardIntervalListCache, matchingCacheEntry);
+ 		}
+ 
+ 		MemoryContextSwitchTo(oldContext);
+ 	}
+ 
+ 	/*
+ 	 * The only case we don't cache the shard list is when the distributed table
+ 	 * doesn't have any shards. This is to force reloading shard list on next call.
+ 	 */
+ 	if (matchingCacheEntry == NULL)
+ 	{
+ 		return NIL;
+ 	}
+ 
+ 	return matchingCacheEntry->shardIntervalList;
+ }
+ 
+ 
+ /*
+  * LoadShardIntervalList returns a list of shard intervals related for a given
  * distributed table. The function returns an empty list if no shards can be
  * found for the given relation.
  */
-List *
-LoadShardIntervalList(Oid distributedTableId)
+ List *
+ LoadShardIntervalList(Oid distributedTableId)
 {
-	List *shardIntervalList = NIL;
+ 	List *shardIntervalList = NIL;
 	RangeVar *heapRangeVar = NULL;
 	RangeVar *indexRangeVar = NULL;
 	Relation heapRelation = NULL;
@@ -159,9 +159,9 @@ LoadShardIntervalList(Oid distributedTableId)
 										  tupleDescriptor, &isNull);
 
 		int64 shardId = DatumGetInt64(shardIdDatum);
-		ShardInterval *shardInterval = LoadShardInterval(shardId);
+ 		ShardInterval *shardInterval = LoadShardInterval(shardId);
 
-		shardIntervalList = lappend(shardIntervalList, shardInterval);
+ 		shardIntervalList = lappend(shardIntervalList, shardInterval);
 
 		heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
 	}
@@ -170,7 +170,7 @@ LoadShardIntervalList(Oid distributedTableId)
 	index_close(indexRelation, AccessShareLock);
 	relation_close(heapRelation, AccessShareLock);
 
-	return shardIntervalList;
+ 	return shardIntervalList;
 }
 
 

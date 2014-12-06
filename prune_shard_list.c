@@ -60,10 +60,10 @@ static void UpdateConstraint(Node *baseConstraint, ShardInterval *shardInterval)
  * and returns remaining shards in another list.
  */
 List *
-PruneShardList(Oid relationId, List *whereClauseList, List *shardIntervalList)
+ PruneShardList(Oid relationId, List *whereClauseList, List *shardIntervalList)
 {
 	List *remainingShardList = NIL;
-	ListCell *shardIntervalCell = NULL;
+ 	ListCell *shardIntervalCell = NULL;
 	List *restrictInfoList = NIL;
 	Node *baseConstraint = NULL;
 
@@ -94,9 +94,9 @@ PruneShardList(Oid relationId, List *whereClauseList, List *shardIntervalList)
 	baseConstraint = BuildBaseConstraint(partitionColumn);
 
 	/* walk over shard list and check if shards can be pruned */
-	foreach(shardIntervalCell, shardIntervalList)
+ 	foreach(shardIntervalCell, shardIntervalList)
 	{
-		ShardInterval *shardInterval = lfirst(shardIntervalCell);
+ 		ShardInterval *shardInterval = lfirst(shardIntervalCell);
 		List *constraintList = NIL;
 		bool shardPruned = false;
 
@@ -108,11 +108,11 @@ PruneShardList(Oid relationId, List *whereClauseList, List *shardIntervalList)
 		if (shardPruned)
 		{
 			ereport(DEBUG2, (errmsg("predicate pruning for shardId "
-									UINT64_FORMAT, shardInterval->id)));
+ 									UINT64_FORMAT, shardInterval->id)));
 		}
 		else
 		{
-			remainingShardList = lappend(remainingShardList, &(shardInterval->id));
+ 			remainingShardList = lappend(remainingShardList, &(shardInterval->id));
 		}
 	}
 
@@ -410,7 +410,7 @@ static OpExpr *
 MakeHashedOperatorExpression(OpExpr *operatorExpression)
 {
 	const Oid hashResultTypeId = INT4OID;
-	TypeCacheEntry *hashResultTypeEntry = NULL;
+ 	TypeCacheEntry *hashResultTypeEntry = NULL;
 	Oid operatorId = InvalidOid;
 	OpExpr *hashedExpression = NULL;
 	Var *hashedColumn = NULL;
@@ -432,14 +432,14 @@ MakeHashedOperatorExpression(OpExpr *operatorExpression)
 		constant = (Const *) leftOperand;
 	}
 
-	/* Load the operator from type cache */
-	hashResultTypeEntry = lookup_type_cache(hashResultTypeId, TYPECACHE_EQ_OPR);
-	operatorId = hashResultTypeEntry->eq_opr;
+ 	/* Load the operator from type cache */
+ 	hashResultTypeEntry = lookup_type_cache(hashResultTypeId, TYPECACHE_EQ_OPR);
+ 	operatorId = hashResultTypeEntry->eq_opr;
 
 	/* Get a column with int4 type */
 	hashedColumn = MakeInt4Column();
 
-	/* Load the hash function from type cache */
+ 	/* Load the hash function from type cache */
 	typeEntry = lookup_type_cache(constant->consttype, TYPECACHE_HASH_PROC_FINFO);
 	hashFunction = &(typeEntry->hash_proc_finfo);
 	if (!OidIsValid(hashFunction->fn_oid))
