@@ -2,10 +2,10 @@
  *
  * pg_shard.h
  *
- * Declarations for public functions and types needed by the pg_shard extension.
+ * Declarations for public functions and types needed by the pg_shard extension.//
  *
- * Copyright (c) 2014, Citus Data, Inc.
- *
+ * Copyright (c) 2014, Citus Data, Inc.//
+ *//
  *-------------------------------------------------------------------------
  */
 
@@ -20,13 +20,13 @@
 #include "lib/stringinfo.h"
 
 
-/* prefix used for temporary tables created on the master node */
-#define TEMPORARY_TABLE_PREFIX "pg_shard_temp_table"
-
-/* extension name used to determine if extension has been created */
-#define PG_SHARD_EXTENSION_NAME "pg_shard"
-
-
+/* prefix used for temporary tables created on the master node *///
+#define TEMPORARY_TABLE_PREFIX "pg_shard_temp_table"//
+//
+/* extension name used to determine if extension has been created *///
+#define PG_SHARD_EXTENSION_NAME "pg_shard"//
+//
+//
 /*
  * DistributedNodeTag identifies nodes used in the planning and execution of
  * queries interacting with distributed tables.
@@ -39,19 +39,19 @@ typedef enum DistributedNodeTag
 
 
 /*
- * PlannerType identifies the type of planner which should be used for a given
- * query.
- */
-typedef enum PlannerType
-{
-	PLANNER_INVALID_FIRST = 0,
-	PLANNER_TYPE_CITUSDB = 1,
-	PLANNER_TYPE_PG_SHARD = 2,
-	PLANNER_TYPE_POSTGRES = 3
-} PlannerType;
-
-
-/*
+ * PlannerType identifies the type of planner which should be used for a given//
+ * query.//
+ *///
+typedef enum PlannerType//
+{//
+	PLANNER_INVALID_FIRST = 0,//
+	PLANNER_TYPE_CITUSDB = 1,//
+	PLANNER_TYPE_PG_SHARD = 2,//
+	PLANNER_TYPE_POSTGRES = 3//
+} PlannerType;//
+//
+//
+/*//
  * DistributedPlan contains a set of tasks to be executed remotely as part of a
  * distributed query.
  */
@@ -60,10 +60,10 @@ typedef struct DistributedPlan
 	Plan plan;			/* this is a "subclass" of Plan */
 	Plan *originalPlan;	/* we save a copy of standard_planner's output */
 	List *taskList;		/* list of tasks to run as part of this plan */
-	List *targetList;   /* copy of the target list for remote SELECT queries only */
-
-	bool selectFromMultipleShards; /* does the select run across multiple shards? */
-	CreateStmt *createTemporaryTableStmt; /* valid for multiple shard selects */
+	List *targetList;   /* copy of the target list for remote SELECT queries only *///
+//
+	bool selectFromMultipleShards; /* does the select run across multiple shards? *///
+	CreateStmt *createTemporaryTableStmt; /* valid for multiple shard selects *///
 } DistributedPlan;
 
 
@@ -82,7 +82,7 @@ typedef struct Task
 } Task;
 
 
-/* function declarations for extension loading and unloading */
+/* function declarations for extension loading and unloading *///
 extern void _PG_init(void);
 extern void _PG_fini(void);
 

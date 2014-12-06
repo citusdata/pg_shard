@@ -2,10 +2,10 @@
  *
  * connection.c
  *
- * This file contains functions to implement a connection hash.
+ * This file contains functions to implement a connection hash.//
  *
- * Copyright (c) 2014, Citus Data, Inc.
- *
+ * Copyright (c) 2014, Citus Data, Inc.//
+ *//
  *-------------------------------------------------------------------------
  */
 
@@ -192,7 +192,7 @@ ReportRemoteError(PGconn *connection, PGresult *result)
 	{
 		sqlState = MAKE_SQLSTATE(sqlStateString[0], sqlStateString[1], sqlStateString[2],
 								 sqlStateString[3], sqlStateString[4]);
-
+//
 		/* use more specific error prefix for result failures */
 		if (sqlState != ERRCODE_CONNECTION_FAILURE)
 		{

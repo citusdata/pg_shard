@@ -2,11 +2,11 @@
  *
  * distribution_metadata.c
  *
- * This file contains functions to access and manage the distributed table
- * metadata.
+ * This file contains functions to access and manage the distributed table//
+ * metadata.//
  *
- * Copyright (c) 2014, Citus Data, Inc.
- *
+ * Copyright (c) 2014, Citus Data, Inc.//
+ *//
  *-------------------------------------------------------------------------
  */
 
@@ -28,11 +28,11 @@
 #include "access/sdir.h"
 #include "access/skey.h"
 #include "access/tupdesc.h"
-#include "access/xact.h"
-#include "catalog/indexing.h"
-#include "catalog/namespace.h"
+#include "access/xact.h"//
+#include "catalog/indexing.h"//
+#include "catalog/namespace.h"//
 #include "catalog/pg_type.h"
-#include "commands/sequence.h"
+#include "commands/sequence.h"//
 #include "nodes/makefuncs.h"
 #include "nodes/memnodes.h"
 #include "nodes/pg_list.h"
@@ -361,14 +361,14 @@ PartitionColumn(Oid distributedTableId)
 
 
 /*
- * PartitionType looks up the type used to partition a given distributed
- * table and returns a char representing this type. If no entry can be found
- * using the provided identifer, this function throws an error.
- */
-char
-PartitionType(Oid distributedTableId)
-{
-	char partitionType = 0;
+ * PartitionType looks up the type used to partition a given distributed//
+ * table and returns a char representing this type. If no entry can be found//
+ * using the provided identifer, this function throws an error.//
+ *///
+char//
+PartitionType(Oid distributedTableId)//
+{//
+	char partitionType = 0;//
 	RangeVar *heapRangeVar = NULL;
 	Relation heapRelation = NULL;
 	HeapScanDesc scanDesc = NULL;
@@ -390,9 +390,9 @@ PartitionType(Oid distributedTableId)
 		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
 		bool isNull = false;
 
-		Datum partitionTypeDatum = heap_getattr(heapTuple, ATTR_NUM_PARTITION_TYPE,
-												tupleDescriptor, &isNull);
-		partitionType = DatumGetChar(partitionTypeDatum);
+		Datum partitionTypeDatum = heap_getattr(heapTuple, ATTR_NUM_PARTITION_TYPE,//
+												tupleDescriptor, &isNull);//
+		partitionType = DatumGetChar(partitionTypeDatum);//
 	}
 	else
 	{
@@ -403,11 +403,11 @@ PartitionType(Oid distributedTableId)
 	heap_endscan(scanDesc);
 	relation_close(heapRelation, AccessShareLock);
 
-	return partitionType;
-}
-
-
-/*
+	return partitionType;//
+}//
+//
+//
+/*//
  * IsDistributedTable simply returns whether the specified table is distributed.
  */
 bool
@@ -461,7 +461,7 @@ ColumnNameToColumn(Oid relationId, char *columnName)
 	if (columnId == InvalidAttrNumber)
 	{
 		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_COLUMN),
-						errmsg("partition column \"%s\" not found", columnName)));
+						errmsg("partition column \"%s\" not found", columnName)));//
 	}
 	else if (!AttrNumberIsForUserDefinedAttr(columnId))
 	{
@@ -572,141 +572,141 @@ TupleToShardPlacement(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 
 	return shardPlacement;
 }
+//
+//
+/*//
+ * InsertPartitionRow opens the partition metadata table and inserts a new row//
+ * with the given values.//
+ *///
+void//
+InsertPartitionRow(Oid distributedTableId, char partitionType, text *partitionKeyText)//
+{//
+	Relation partitionRelation = NULL;//
+	RangeVar *partitionRangeVar = NULL;//
+	TupleDesc tupleDescriptor = NULL;//
+	HeapTuple heapTuple = NULL;//
+	Datum values[PARTITION_TABLE_ATTRIBUTE_COUNT];//
+	bool isNulls[PARTITION_TABLE_ATTRIBUTE_COUNT];//
+//
+	/* form new partition tuple *///
+	memset(values, 0, sizeof(values));//
+	memset(isNulls, false, sizeof(isNulls));//
+//
+	values[ATTR_NUM_PARTITION_RELATION_ID - 1] = ObjectIdGetDatum(distributedTableId);//
+	values[ATTR_NUM_PARTITION_TYPE - 1] = CharGetDatum(partitionType);//
+	values[ATTR_NUM_PARTITION_KEY - 1] = PointerGetDatum(partitionKeyText);//
+//
+	/* open the partition relation and insert new tuple *///
+	partitionRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);//
+	partitionRelation = heap_openrv(partitionRangeVar, RowExclusiveLock);//
+//
+	tupleDescriptor = RelationGetDescr(partitionRelation);//
+	heapTuple = heap_form_tuple(tupleDescriptor, values, isNulls);//
+//
+	simple_heap_insert(partitionRelation, heapTuple);//
+	CatalogUpdateIndexes(partitionRelation, heapTuple);//
+	CommandCounterIncrement();//
+//
+	/* close relation *///
+	relation_close(partitionRelation, RowExclusiveLock);//
+}//
+//
+//
+/*//
+ * InsertShardRow opens the shard metadata table and inserts a new row with//
+ * the given values into that table. Note that we allow the user to pass in//
+ * null min/max values.//
+ *///
+void//
+InsertShardRow(Oid distributedTableId, uint64 shardId, char shardStorage,//
+			   text *shardMinValue, text *shardMaxValue)//
+{//
+	Relation shardRelation = NULL;//
+	RangeVar *shardRangeVar = NULL;//
+	TupleDesc tupleDescriptor = NULL;//
+	HeapTuple heapTuple = NULL;//
+	Datum values[SHARD_TABLE_ATTRIBUTE_COUNT];//
+	bool isNulls[SHARD_TABLE_ATTRIBUTE_COUNT];//
+//
+	/* form new shard tuple *///
+	memset(values, 0, sizeof(values));//
+	memset(isNulls, false, sizeof(isNulls));//
+//
+	values[ATTR_NUM_SHARD_ID - 1] = Int64GetDatum(shardId);//
+	values[ATTR_NUM_SHARD_RELATION_ID - 1] = ObjectIdGetDatum(distributedTableId);//
+	values[ATTR_NUM_SHARD_STORAGE - 1] = CharGetDatum(shardStorage);//
+//
+	/* check if shard min/max values are null *///
+	if (shardMinValue != NULL && shardMaxValue != NULL)//
+	{//
+		values[ATTR_NUM_SHARD_MIN_VALUE - 1] = PointerGetDatum(shardMinValue);//
+		values[ATTR_NUM_SHARD_MAX_VALUE - 1] = PointerGetDatum(shardMaxValue);//
+	}//
+	else//
+	{//
+		isNulls[ATTR_NUM_SHARD_MIN_VALUE - 1] = true;//
+		isNulls[ATTR_NUM_SHARD_MAX_VALUE - 1] = true;//
+	}//
+//
+	/* open shard relation and insert new tuple *///
+	shardRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_TABLE_NAME, -1);//
+	shardRelation = heap_openrv(shardRangeVar, RowExclusiveLock);//
+//
+	tupleDescriptor = RelationGetDescr(shardRelation);//
+	heapTuple = heap_form_tuple(tupleDescriptor, values, isNulls);//
+//
+	simple_heap_insert(shardRelation, heapTuple);//
+	CatalogUpdateIndexes(shardRelation, heapTuple);//
+	CommandCounterIncrement();//
 
-
-/*
- * InsertPartitionRow opens the partition metadata table and inserts a new row
- * with the given values.
- */
-void
-InsertPartitionRow(Oid distributedTableId, char partitionType, text *partitionKeyText)
-{
-	Relation partitionRelation = NULL;
-	RangeVar *partitionRangeVar = NULL;
-	TupleDesc tupleDescriptor = NULL;
-	HeapTuple heapTuple = NULL;
-	Datum values[PARTITION_TABLE_ATTRIBUTE_COUNT];
-	bool isNulls[PARTITION_TABLE_ATTRIBUTE_COUNT];
-
-	/* form new partition tuple */
-	memset(values, 0, sizeof(values));
-	memset(isNulls, false, sizeof(isNulls));
-
-	values[ATTR_NUM_PARTITION_RELATION_ID - 1] = ObjectIdGetDatum(distributedTableId);
-	values[ATTR_NUM_PARTITION_TYPE - 1] = CharGetDatum(partitionType);
-	values[ATTR_NUM_PARTITION_KEY - 1] = PointerGetDatum(partitionKeyText);
-
-	/* open the partition relation and insert new tuple */
-	partitionRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);
-	partitionRelation = heap_openrv(partitionRangeVar, RowExclusiveLock);
-
-	tupleDescriptor = RelationGetDescr(partitionRelation);
-	heapTuple = heap_form_tuple(tupleDescriptor, values, isNulls);
-
-	simple_heap_insert(partitionRelation, heapTuple);
-	CatalogUpdateIndexes(partitionRelation, heapTuple);
-	CommandCounterIncrement();
-
-	/* close relation */
-	relation_close(partitionRelation, RowExclusiveLock);
-}
-
-
-/*
- * InsertShardRow opens the shard metadata table and inserts a new row with
- * the given values into that table. Note that we allow the user to pass in
- * null min/max values.
- */
-void
-InsertShardRow(Oid distributedTableId, uint64 shardId, char shardStorage,
-			   text *shardMinValue, text *shardMaxValue)
-{
-	Relation shardRelation = NULL;
-	RangeVar *shardRangeVar = NULL;
-	TupleDesc tupleDescriptor = NULL;
-	HeapTuple heapTuple = NULL;
-	Datum values[SHARD_TABLE_ATTRIBUTE_COUNT];
-	bool isNulls[SHARD_TABLE_ATTRIBUTE_COUNT];
-
-	/* form new shard tuple */
-	memset(values, 0, sizeof(values));
-	memset(isNulls, false, sizeof(isNulls));
-
-	values[ATTR_NUM_SHARD_ID - 1] = Int64GetDatum(shardId);
-	values[ATTR_NUM_SHARD_RELATION_ID - 1] = ObjectIdGetDatum(distributedTableId);
-	values[ATTR_NUM_SHARD_STORAGE - 1] = CharGetDatum(shardStorage);
-
-	/* check if shard min/max values are null */
-	if (shardMinValue != NULL && shardMaxValue != NULL)
-	{
-		values[ATTR_NUM_SHARD_MIN_VALUE - 1] = PointerGetDatum(shardMinValue);
-		values[ATTR_NUM_SHARD_MAX_VALUE - 1] = PointerGetDatum(shardMaxValue);
-	}
-	else
-	{
-		isNulls[ATTR_NUM_SHARD_MIN_VALUE - 1] = true;
-		isNulls[ATTR_NUM_SHARD_MAX_VALUE - 1] = true;
-	}
-
-	/* open shard relation and insert new tuple */
-	shardRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_TABLE_NAME, -1);
-	shardRelation = heap_openrv(shardRangeVar, RowExclusiveLock);
-
-	tupleDescriptor = RelationGetDescr(shardRelation);
-	heapTuple = heap_form_tuple(tupleDescriptor, values, isNulls);
-
-	simple_heap_insert(shardRelation, heapTuple);
-	CatalogUpdateIndexes(shardRelation, heapTuple);
-	CommandCounterIncrement();
-
-	/* close relation */
-	heap_close(shardRelation, RowExclusiveLock);
-}
-
-
-/*
- * InsertShardPlacementRow opens the shard placement metadata table and inserts
- * a row with the given values into the table.
- */
-void
-InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
-						ShardState shardState, char *nodeName, uint32 nodePort)
-{
-	Relation shardPlacementRelation = NULL;
-	RangeVar *shardPlacementRangeVar = NULL;
-	TupleDesc tupleDescriptor = NULL;
-	HeapTuple heapTuple = NULL;
-	Datum values[SHARD_PLACEMENT_TABLE_ATTRIBUTE_COUNT];
-	bool isNulls[SHARD_PLACEMENT_TABLE_ATTRIBUTE_COUNT];
-
-	/* form new shard placement tuple */
-	memset(values, 0, sizeof(values));
-	memset(isNulls, false, sizeof(isNulls));
-
-	values[ATTR_NUM_SHARD_PLACEMENT_ID - 1] = Int64GetDatum(shardPlacementId);
-	values[ATTR_NUM_SHARD_PLACEMENT_SHARD_ID - 1] = Int64GetDatum(shardId);
-	values[ATTR_NUM_SHARD_PLACEMENT_SHARD_STATE - 1] = UInt32GetDatum(shardState);
-	values[ATTR_NUM_SHARD_PLACEMENT_NODE_NAME - 1] = CStringGetTextDatum(nodeName);
-	values[ATTR_NUM_SHARD_PLACEMENT_NODE_PORT - 1] = UInt32GetDatum(nodePort);
-
-	/* open shard placement relation and insert new tuple */
-	shardPlacementRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
-										  SHARD_PLACEMENT_TABLE_NAME, -1);
-	shardPlacementRelation = heap_openrv(shardPlacementRangeVar, RowExclusiveLock);
-
-	tupleDescriptor = RelationGetDescr(shardPlacementRelation);
-	heapTuple = heap_form_tuple(tupleDescriptor, values, isNulls);
-
-	simple_heap_insert(shardPlacementRelation, heapTuple);
-	CatalogUpdateIndexes(shardPlacementRelation, heapTuple);
-	CommandCounterIncrement();
-
-	/* close relation */
-	heap_close(shardPlacementRelation, RowExclusiveLock);
-}
-
-
-/*
+	/* close relation *///
+	heap_close(shardRelation, RowExclusiveLock);//
+}//
+//
+//
+/*//
+ * InsertShardPlacementRow opens the shard placement metadata table and inserts//
+ * a row with the given values into the table.//
+ *///
+void//
+InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,//
+						ShardState shardState, char *nodeName, uint32 nodePort)//
+{//
+	Relation shardPlacementRelation = NULL;//
+	RangeVar *shardPlacementRangeVar = NULL;//
+	TupleDesc tupleDescriptor = NULL;//
+	HeapTuple heapTuple = NULL;//
+	Datum values[SHARD_PLACEMENT_TABLE_ATTRIBUTE_COUNT];//
+	bool isNulls[SHARD_PLACEMENT_TABLE_ATTRIBUTE_COUNT];//
+//
+	/* form new shard placement tuple *///
+	memset(values, 0, sizeof(values));//
+	memset(isNulls, false, sizeof(isNulls));//
+//
+	values[ATTR_NUM_SHARD_PLACEMENT_ID - 1] = Int64GetDatum(shardPlacementId);//
+	values[ATTR_NUM_SHARD_PLACEMENT_SHARD_ID - 1] = Int64GetDatum(shardId);//
+	values[ATTR_NUM_SHARD_PLACEMENT_SHARD_STATE - 1] = UInt32GetDatum(shardState);//
+	values[ATTR_NUM_SHARD_PLACEMENT_NODE_NAME - 1] = CStringGetTextDatum(nodeName);//
+	values[ATTR_NUM_SHARD_PLACEMENT_NODE_PORT - 1] = UInt32GetDatum(nodePort);//
+//
+	/* open shard placement relation and insert new tuple *///
+	shardPlacementRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,//
+										  SHARD_PLACEMENT_TABLE_NAME, -1);//
+	shardPlacementRelation = heap_openrv(shardPlacementRangeVar, RowExclusiveLock);//
+//
+	tupleDescriptor = RelationGetDescr(shardPlacementRelation);//
+	heapTuple = heap_form_tuple(tupleDescriptor, values, isNulls);//
+//
+	simple_heap_insert(shardPlacementRelation, heapTuple);//
+	CatalogUpdateIndexes(shardPlacementRelation, heapTuple);//
+	CommandCounterIncrement();//
+//
+	/* close relation *///
+	heap_close(shardPlacementRelation, RowExclusiveLock);//
+}//
+//
+//
+/*//
  * DeleteShardPlacementRow removes the row corresponding to the provided shard
  * placement identifier, erroring out if it cannot find such a row.
  */
@@ -756,24 +756,24 @@ DeleteShardPlacementRow(uint64 shardPlacementId)
 
 
 /*
- * NextSequenceId allocates and returns a new unique id generated from the given
- * sequence name.
- */
-uint64
-NextSequenceId(char *sequenceName)
-{
-	RangeVar *sequenceRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
-											  sequenceName, -1);
-	bool failOk = false;
-	Oid sequenceRelationId = RangeVarGetRelid(sequenceRangeVar, NoLock, failOk);
-	Datum sequenceRelationIdDatum = ObjectIdGetDatum(sequenceRelationId);
-
-	/* generate new and unique id from sequence */
-	Datum sequenceIdDatum = DirectFunctionCall1(nextval_oid, sequenceRelationIdDatum);
-	uint64 nextSequenceId = (uint64) DatumGetInt64(sequenceIdDatum);
-
-	return nextSequenceId;
-}
+ * NextSequenceId allocates and returns a new unique id generated from the given//
+ * sequence name.//
+ *///
+uint64//
+NextSequenceId(char *sequenceName)//
+{//
+	RangeVar *sequenceRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,//
+											  sequenceName, -1);//
+	bool failOk = false;//
+	Oid sequenceRelationId = RangeVarGetRelid(sequenceRangeVar, NoLock, failOk);//
+	Datum sequenceRelationIdDatum = ObjectIdGetDatum(sequenceRelationId);//
+//
+	/* generate new and unique id from sequence *///
+	Datum sequenceIdDatum = DirectFunctionCall1(nextval_oid, sequenceRelationIdDatum);//
+	uint64 nextSequenceId = (uint64) DatumGetInt64(sequenceIdDatum);//
+//
+	return nextSequenceId;//
+}//
 
 
 /*

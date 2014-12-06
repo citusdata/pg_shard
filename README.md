@@ -37,15 +37,15 @@ Once you decide on your cluster setup, you will need to make two changes on the 
     shared_preload_libraries = 'pg_shard'    # (change requires restart)
 
 Second, the master node in `pg_shard` reads worker host information from a file called `pg_worker_list.conf` in the data directory. You need to add the hostname and port number of each worker node in your cluster to this file. For example, to add two worker nodes running on the default PostgreSQL port:
-
-    $ emacs -nw $PGDATA/pg_worker_list.conf
-
-    # hostname port-number
-    worker-101  5432
-    worker-102  5432
-
+//
+    $ emacs -nw $PGDATA/pg_worker_list.conf//
+//
+    # hostname port-number//
+    worker-101  5432//
+    worker-102  5432//
+//
 Then, you can save these settings and restart the master node.
-
+//
 ### Worker Nodes
 
 Each worker node will need the following to function:
@@ -59,7 +59,7 @@ Each worker node will need the following to function:
 Now, let's log into the master node and create the extension:
 
 ```sql
-CREATE EXTENSION pg_shard;
+CREATE EXTENSION pg_shard;//
 ```
 
 At this point you're ready to distribute a table. To let `pg_shard` know the structure of your table, define its schema as you would do with a normal table:
@@ -87,11 +87,11 @@ This table will not be used to store any data on the master but serves as a prot
 ```sql
 -- Specify the table to distribute and the column to distribute it on
 SELECT master_create_distributed_table('customer_reviews', 'customer_id');
-```
-
+```//
+//
 This function informs `pg_shard` that the table `customer_reviews` should be hash partitioned on the `customer_id` column. Now, let's create shards for this table on the worker nodes:
-
-```sql
+//
+```sql//
 -- Specify the table name, total shard count and replication factor
 SELECT master_create_worker_shards('customer_reviews', 16, 2);
 ```
