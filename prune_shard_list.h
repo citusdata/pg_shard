@@ -32,8 +32,8 @@
 
 
 /* function declarations for shard pruning */
- extern List * PruneShardList(Oid relationId, List *whereClauseList,
- 							 List *shardIntervalList);
+extern List * PruneShardList(Oid relationId, List *whereClauseList,
+							 List *shardIntervalList);
 extern OpExpr * MakeOpExpression(Var *variable, int16 strategyNumber);
 
 
