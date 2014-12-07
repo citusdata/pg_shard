@@ -139,9 +139,15 @@ Each shard placement in `pg_shard` corresponds to one PostgreSQL table on a work
 
 `pg_shard` is intentionally limited in scope during its first release, but is fully functional within that scope. We classify `pg_shard`'s current limitations into two groups. In one group, we have features that we don't intend to support in the medium term due to architectural decisions we made:
 
-* Transactional semantics for queries that span across multiple shards - For example, you're a financial institution and you sharded your data based on `customer_id`. You'd now like to withdraw money from one customer's account and debit it to another one's account, in a single transaction block.
+* Transactional semantics for queries that span across multiple shards — For example, you're a financial institution and you sharded your data based on `customer_id`. You'd now like to withdraw money from one customer's account and debit it to another one's account, in a single transaction block.
 * Unique constraints on columns other than the partition key, or foreign key constraints.
 * Distributed `JOIN`s also aren't supported in `pg_shard` - If you'd like to run complex analytic queries, please consider upgrading to CitusDB.
+
+Another group of limitations are shorter-term but we're calling them out here to be clear about unsupported features:
+
+* Table alterations are not supported: customers who do need table alterations accomplish them by using a script that propagates such changes to all worker nodes.
+* `DROP TABLE` does not have any special semantics when used on a distributed table. An upcoming release will add a shard cleanup command to aid in removing shard objects from worker nodes.
+* Queries such as `INSERT INTO foo SELECT bar, baz FROM qux` are not supported as it is impossible to determine which shard will be affected before execution.
 
 Besides these limitations, we have a list of features that we're looking to add. Instead of prioritizing this list ourselves, we decided to keep an open discussion on GitHub issues and hear what you have to say. So, if you have a favorite feature missing from `pg_shard`, please do get in touch!
 
