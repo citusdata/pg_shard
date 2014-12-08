@@ -39,6 +39,8 @@ extern Datum next_shard_id(PG_FUNCTION_ARGS);
 extern Datum acquire_shared_shard_lock(PG_FUNCTION_ARGS);
 extern Datum table_ddl_command_array(PG_FUNCTION_ARGS);
 extern Datum alter_server_host_and_port_command(PG_FUNCTION_ARGS);
+extern Datum extend_ddl_command(PG_FUNCTION_ARGS);
+extern Datum extend_name(PG_FUNCTION_ARGS);
 
 
 #endif /* PG_SHARD_TEST_HELPER_FUNCTIONS_H */

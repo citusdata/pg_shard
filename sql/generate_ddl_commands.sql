@@ -108,9 +108,7 @@ ALTER TABLE fiddly_table
 
 SELECT table_ddl_command_array('fiddly_table');
 
--- no FDWs come built-in to PostgreSQL so use a dummy to test
-CREATE FOREIGN DATA WRAPPER fake_fdw;
-CREATE SERVER fake_fdw_server FOREIGN DATA WRAPPER fake_fdw;
+-- test foreign tables using fake FDW
 CREATE FOREIGN TABLE foreign_table (
 	id bigint not null,
 	full_name text not null default ''

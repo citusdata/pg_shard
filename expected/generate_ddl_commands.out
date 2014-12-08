@@ -128,9 +128,7 @@ SELECT table_ddl_command_array('fiddly_table');
  {"CREATE TABLE public.fiddly_table (hostname character(255) NOT NULL, os character(255) NOT NULL, ip_addr inet NOT NULL, traceroute text NOT NULL)","ALTER TABLE ONLY public.fiddly_table ALTER COLUMN hostname SET STORAGE PLAIN, ALTER COLUMN os SET STORAGE MAIN, ALTER COLUMN ip_addr SET STORAGE EXTENDED, ALTER COLUMN ip_addr SET STATISTICS 500, ALTER COLUMN traceroute SET STORAGE EXTERNAL"}
 (1 row)
 
--- no FDWs come built-in to PostgreSQL so use a dummy to test
-CREATE FOREIGN DATA WRAPPER fake_fdw;
-CREATE SERVER fake_fdw_server FOREIGN DATA WRAPPER fake_fdw;
+-- test foreign tables using fake FDW
 CREATE FOREIGN TABLE foreign_table (
 	id bigint not null,
 	full_name text not null default ''
