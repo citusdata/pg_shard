@@ -147,7 +147,7 @@ Another group of limitations are shorter-term but we're calling them out here to
 
 * Table alterations are not supported: customers who do need table alterations accomplish them by using a script that propagates such changes to all worker nodes.
 * `DROP TABLE` does not have any special semantics when used on a distributed table. An upcoming release will add a shard cleanup command to aid in removing shard objects from worker nodes.
-* Queries such as `INSERT INTO foo SELECT bar, baz FROM qux` are not supported as it is impossible to determine which shard will be affected before execution.
+* Queries such as `INSERT INTO foo SELECT bar, baz FROM qux` are not supported.
 
 Besides these limitations, we have a list of features that we're looking to add. Instead of prioritizing this list ourselves, we decided to keep an open discussion on GitHub issues and hear what you have to say. So, if you have a favorite feature missing from `pg_shard`, please do get in touch!
 
