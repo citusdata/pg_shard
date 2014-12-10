@@ -30,3 +30,5 @@
 # Generated test files
 /expected/connection.out
 /sql/connection.sql
+/expected/create_shards.out
+/sql/create_shards.sql
