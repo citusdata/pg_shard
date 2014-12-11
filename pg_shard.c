@@ -269,10 +269,12 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 	{
 		if(PreviousPlannerHook == NULL)
 		{
-			ereport(ERROR, (errmsg("could not execute select command"),
-							errhint("You should install CitusDB in order "
-									"to execute \"select\" commands when "
-									"\"use_citusdb_select_logic\" is set to true.")));
+			ereport(ERROR, (errmsg("could not plan SELECT query"),
+							errdetail("Configured to use CitusDB's SELECT "
+									  "logic, but CitusDB is not installed."),
+							errhint("Install CitusDB or set the "
+									"\"use_citusdb_select_logic\" "
+									"configuration parameter to \"false\".")));
 		}
 
 		plannedStatement = PreviousPlannerHook(query, cursorOptions, boundParams);
