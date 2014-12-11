@@ -77,3 +77,9 @@ CREATE FUNCTION worker_copy_shard_placement(table_name text, source_node_name te
 RETURNS void
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;
+
+-- citus metadata sync
+CREATE FUNCTION sync_table_metadata_to_citus(table_name text)
+RETURNS void
+AS 'MODULE_PATHNAME'
+LANGUAGE C STRICT;

@@ -149,6 +149,7 @@ extern void InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
 extern void DeleteShardPlacementRow(uint64 shardPlacementId);
 extern uint64 NextSequenceId(char *sequenceName);
 extern void LockShard(int64 shardId, LOCKMODE lockMode);
+extern Oid ResolveRelationId(text *relationName);
 
 
 #endif /* PG_SHARD_DISTRIBUTION_METADATA_H */

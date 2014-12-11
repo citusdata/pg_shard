@@ -806,3 +806,21 @@ LockShard(int64 shardId, LOCKMODE lockMode)
 		ereport(ERROR, (errmsg("attempted to lock shard using unsupported mode")));
 	}
 }
+
+
+/* Finds the relationId from a potentially qualified relation name. */
+Oid
+ResolveRelationId(text *relationName)
+{
+	List *relationNameList = NIL;
+	RangeVar *relation = NULL;
+	Oid  relationId = InvalidOid;
+	bool failOK = false;		/* error if relation cannot be found */
+
+	/* resolve relationId from passed in schema and relation name */
+	relationNameList = textToQualifiedNameList(relationName);
+	relation = makeRangeVarFromNameList(relationNameList);
+	relationId = RangeVarGetRelid(relation, NoLock, failOK);
+
+	return relationId;
+}
