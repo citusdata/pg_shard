@@ -267,7 +267,7 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 	}
 	else if (plannerType == PLANNER_TYPE_CITUSDB)
 	{
-		if(PreviousPlannerHook == NULL)
+		if (PreviousPlannerHook == NULL)
 		{
 			ereport(ERROR, (errmsg("could not plan SELECT query"),
 							errdetail("Configured to use CitusDB's SELECT "
