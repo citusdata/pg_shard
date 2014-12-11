@@ -40,7 +40,7 @@ expected/%: expected/%.tmpl
 REGRESS_PREP = sql/connection.sql expected/connection.out sql/create_shards.sql \
 			   expected/connection.out
 REGRESS = init connection distribution_metadata extend_ddl_commands \
-		  generate_ddl_commands create_shards
+		  generate_ddl_commands create_shards prune_shard_list
 REGRESS_OPTS = --launcher=./launcher.sh
 
 EXTRA_CLEAN += ${REGRESS_PREP}
