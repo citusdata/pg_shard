@@ -38,9 +38,9 @@ expected/%: expected/%.tmpl
 # REGRESS_PREP is a make target executed by the PGXS build system before any
 # tests are run. We use it to trigger variable interpolation in our tests.
 REGRESS_PREP = sql/connection.sql expected/connection.out sql/create_shards.sql \
-			   expected/connection.out
+			   expected/connection.out sql/repair_shards.sql expected/repair_shards.out
 REGRESS = init connection distribution_metadata extend_ddl_commands \
-		  generate_ddl_commands create_shards prune_shard_list
+		  generate_ddl_commands create_shards prune_shard_list repair_shards
 REGRESS_OPTS = --launcher=./launcher.sh
 
 EXTRA_CLEAN += ${REGRESS_PREP}
