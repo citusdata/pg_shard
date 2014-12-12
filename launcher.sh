@@ -25,7 +25,7 @@ fi
 
 sed -E -i '.bak' -e 's/^/#/g' -e "\$a\\
 localhost $PGPORT # added by installcheck\\
-adeadhost $PGPORT # added by installcheck" $PG_WORKER_LIST_CONF
+adeadhost 5432 # added by installcheck" $PG_WORKER_LIST_CONF
 
 $*
 

@@ -34,3 +34,4 @@
 /sql/create_shards.sql
 /expected/repair_shards.out
 /sql/repair_shards.sql
+/expected/modifications.out
