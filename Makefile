@@ -42,7 +42,7 @@ REGRESS_PREP = sql/connection.sql expected/connection.out sql/create_shards.sql 
 			   expected/repair_shards.out  expected/modifications.out
 REGRESS = init connection distribution_metadata extend_ddl_commands \
 		  generate_ddl_commands create_shards prune_shard_list repair_shards \
-		  modifications queries
+		  modifications queries utilities
 REGRESS_OPTS = --launcher=./launcher.sh
 
 EXTRA_CLEAN += ${REGRESS_PREP}
