@@ -23,10 +23,16 @@
 #include "lib/stringinfo.h"
 #include "nodes/pg_list.h"
 
+
 /* declarations for dynamic loading */
 PG_FUNCTION_INFO_V1(sort_names);
 PG_FUNCTION_INFO_V1(create_table_then_fail);
 
+
+/*
+ * sort_names accepts three strings, places them in a list, then calls SortList
+ * to test its sort functionality. Returns a string containing sorted lines.
+ */
 Datum
 sort_names(PG_FUNCTION_ARGS)
 {
@@ -48,6 +54,14 @@ sort_names(PG_FUNCTION_ARGS)
 	PG_RETURN_CSTRING(sortedNames->data);
 }
 
+
+/*
+ * create_table_then_fail tests ExecuteRemoteCommandList's ability to rollback
+ * after a failure by creating a table before issuing an unparsable command.
+ * The entire transaction should roll back, so the table that was created will
+ * no longer exist once control returns to the caller. Returns the same value
+ * as the underlying ExecuteRemoteCommandList.
+ */
 Datum
 create_table_then_fail(PG_FUNCTION_ARGS)
 {

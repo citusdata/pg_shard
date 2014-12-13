@@ -43,6 +43,10 @@ PG_FUNCTION_INFO_V1(table_ddl_command_array);
 PG_FUNCTION_INFO_V1(alter_server_host_and_port_command);
 
 
+/*
+ * table_ddl_command_array returns an array of strings, each of which is a DDL
+ * command required to recreate a table (specified by OID).
+ */
 Datum
 table_ddl_command_array(PG_FUNCTION_ARGS)
 {
@@ -72,6 +76,12 @@ table_ddl_command_array(PG_FUNCTION_ARGS)
 }
 
 
+/*
+ * alter_server_host_and_port_command is used to test foreign server OPTION
+ * generation. When provided with a foreign server name, hostname and port,
+ * the function will return an ALTER SERVER command to set the server's host
+ * and port options to the provided values.
+ */
 Datum
 alter_server_host_and_port_command(PG_FUNCTION_ARGS)
 {
