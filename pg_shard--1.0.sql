@@ -78,27 +78,60 @@ RETURNS void
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;
 
-CREATE FUNCTION partition_column_to_node_string(table_name text)
+CREATE FUNCTION partition_column_to_node_string(table_oid oid)
 RETURNS text
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;
 
 CREATE FUNCTION sync_table_metadata_to_citus(table_name text)
-RETURNS void
-AS '
-   INSERT INTO pg_dist_partition (logicalrelid, partmethod, partkey) SELECT
-   relation_id, partition_method, partition_column_to_node_string(table_name) FROM
-   pgs_distribution_metadata.partition WHERE relation_id = (SELECT relfilenode
-   FROM pg_class WHERE relname = table_name);
+RETURNS VOID AS $$
+DECLARE
+  table_relation_id oid := table_name::regclass::oid;
+BEGIN
 
-   INSERT INTO pg_dist_shard (shardid, logicalrelid, shardstorage,
-   shardminvalue, shardmaxvalue) SELECT * FROM pgs_distribution_metadata.shard
-   WHERE relation_id = (SELECT relfilenode FROM pg_class WHERE relname = table_name);
+  -- copy shard placement metadata
+  INSERT INTO pg_dist_shard_placement
+              (shardid,
+               shardstate,
+               shardlength,
+               nodename,
+               nodeport)
+  SELECT shard_id,
+         shard_state,
+         0,
+         node_name,
+         node_port
+  FROM   pgs_distribution_metadata.shard_placement
+  WHERE  shard_id IN (SELECT id
+                      FROM   pgs_distribution_metadata.shard
+                      WHERE  relation_id = table_relation_id);
 
-   INSERT INTO pg_dist_shard_placement SELECT shard_id, shard_state, 0,
-   node_name,node_port FROM pgs_distribution_metadata.shard_placement
-   WHERE shard_id in (SELECT id FROM pgs_distribution_metadata.shard
-   WHERE relation_id = (SELECT relfilenode FROM pg_class WHERE relname =
-   table_name));
-'
-LANGUAGE SQL;
+  -- copy shard metadata
+  INSERT INTO pg_dist_shard
+              (shardid,
+               logicalrelid,
+               shardstorage,
+               shardminvalue,
+               shardmaxvalue)
+  SELECT id,
+         relation_id,
+         storage,
+         min_value,
+         max_value
+  FROM   pgs_distribution_metadata.shard
+  WHERE  relation_id = table_relation_id;
+
+  -- copy partition metadata, which also converts the partition column to a
+  -- node string representation as expected by CitusDB
+  INSERT INTO pg_dist_partition
+              (logicalrelid,
+               partmethod,
+               partkey)
+  SELECT relation_id,
+         partition_method,
+         partition_column_to_node_string(table_relation_id)
+  FROM   pgs_distribution_metadata.partition
+  WHERE  relation_id = table_relation_id;
+
+END;
+$$ LANGUAGE 'plpgsql';

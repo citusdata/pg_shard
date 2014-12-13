@@ -44,6 +44,7 @@
 
 
 /* local function forward declarations */
+static Oid ResolveRelationId(text *relationName);
 static void CheckHashPartitionedTable(Oid distributedTableId);
 static List * ParseWorkerNodeFile(char *workerNodeFilename);
 static int CompareWorkerNodes(const void *leftElement, const void *rightElement);
@@ -272,6 +273,24 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 	RESUME_INTERRUPTS();
 
 	PG_RETURN_VOID();
+}
+
+
+/* Finds the relationId from a potentially qualified relation name. */
+static Oid
+ResolveRelationId(text *relationName)
+{
+	List *relationNameList = NIL;
+	RangeVar *relation = NULL;
+	Oid  relationId = InvalidOid;
+	bool failOK = false;		/* error if relation cannot be found */
+
+	/* resolve relationId from passed in schema and relation name */
+	relationNameList = textToQualifiedNameList(relationName);
+	relation = makeRangeVarFromNameList(relationNameList);
+	relationId = RangeVarGetRelid(relation, NoLock, failOK);
+
+	return relationId;
 }
 
 

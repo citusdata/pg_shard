@@ -23,8 +23,8 @@ PG_FUNCTION_INFO_V1(partition_column_to_node_string);
 Datum
 partition_column_to_node_string(PG_FUNCTION_ARGS)
 {
-	text *tableNameText = PG_GETARG_TEXT_P(0);
-	Oid distributedTableId = ResolveRelationId(tableNameText);
+	Oid distributedTableId = PG_GETARG_OID(0);
+
 	Var *partitionColumn = PartitionColumn(distributedTableId);
 	char *partitionColumnString = nodeToString(partitionColumn);
 	text *partitionColumnText = cstring_to_text(partitionColumnString);
