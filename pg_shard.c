@@ -869,6 +869,7 @@ CreateTemporaryTableLikeStmt(Oid sourceRelationId)
 	  createStmt = makeNode(CreateStmt);
 	  createStmt->relation = clonedRelation;
 	  createStmt->tableElts = list_make1(tableLikeClause);
+	  createStmt->oncommit = ONCOMMIT_DROP;
 
 	  return createStmt;
 }
