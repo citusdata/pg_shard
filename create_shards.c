@@ -30,6 +30,7 @@
 
 #include "access/attnum.h"
 #include "catalog/namespace.h"
+#include "catalog/pg_class.h"
 #include "lib/stringinfo.h"
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
@@ -68,10 +69,22 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 	text *partitionColumnText = PG_GETARG_TEXT_P(1);
 	char partitionMethod = PG_GETARG_CHAR(2);
 	Oid distributedTableId = ResolveRelationId(tableNameText);
-
-	/* verify column exists in given table */
+	char relationKind = get_rel_relkind(distributedTableId);
 	char *partitionColumnName = text_to_cstring(partitionColumnText);
 	AttrNumber partitionColumnId = get_attnum(distributedTableId, partitionColumnName);
+	char *tableNameCString = text_to_cstring(tableNameText);
+
+	/* we distribute only ordinary tables and foreign tables */
+	if (relationKind != RELKIND_RELATION && relationKind != RELKIND_FOREIGN_TABLE)
+	{
+		ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+						errmsg("could not distribute table"),
+						errdetail("\"%s\" is not a regular or foreign table.",
+								  tableNameCString),
+						errhint("Distribute regular or foreign tables only.")));
+	}
+
+	/* verify column exists in given table */
 	if (partitionColumnId == InvalidAttrNumber)
 	{
 		ereport(ERROR, (errmsg("could not find column: %s", partitionColumnName)));
