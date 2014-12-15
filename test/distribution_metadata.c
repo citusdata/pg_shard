@@ -28,13 +28,7 @@
 #include "storage/lock.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
-#include "utils/lsyscache.h"
 #include "utils/palloc.h"
-
-
-/* local function forward declarations */
-static ArrayType * DatumArrayToArrayType(Datum *datumArray, int datumCount,
-										 Oid datumTypeId);
 
 
 /* declarations for dynamic loading */
@@ -282,23 +276,4 @@ acquire_shared_shard_lock(PG_FUNCTION_ARGS)
 	LockShard(shardId, ShareLock);
 
 	PG_RETURN_VOID();
-}
-
-/*
- * DatumArrayToArrayType converts the provided Datum array (of the specified
- * length and type) into an ArrayType suitable for returning from a UDF.
- */
-static ArrayType *
-DatumArrayToArrayType(Datum *datumArray, int datumCount, Oid datumTypeId)
-{
-	ArrayType *arrayObject = NULL;
-	int16 typeLength = 0;
-	bool typeByValue = false;
-	char typeAlignment = 0;
-
-	get_typlenbyvalalign(datumTypeId, &typeLength, &typeByValue, &typeAlignment);
-	arrayObject = construct_array(datumArray, datumCount, datumTypeId,
-								  typeLength, typeByValue, typeAlignment);
-
-	return arrayObject;
 }

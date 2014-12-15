@@ -43,10 +43,14 @@ REGRESS_PREP = sql/connection.sql expected/connection.out sql/create_shards.sql 
 REGRESS = init connection distribution_metadata extend_ddl_commands \
 		  generate_ddl_commands create_shards prune_shard_list repair_shards \
 		  modifications queries utilities
+
+# The launcher regression flag lets us specify a special wrapper to handle
+# testing rather than psql directly. Our wrapper swaps in a known worker list.
 REGRESS_OPTS = --launcher=./launcher.sh
 
 EXTRA_CLEAN += ${REGRESS_PREP}
 
+# Let the test's makefile tell us what objects to build.
 include test/Makefile
 
 PG_CONFIG = pg_config

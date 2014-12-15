@@ -15,6 +15,9 @@
 
 #include "postgres.h"
 #include "fmgr.h"
+#include "postgres_ext.h"
+
+#include "utils/array.h"
 
 
 /* SQL statements for testing */
@@ -22,6 +25,10 @@
 							"AS SELECT * FROM generate_series(1, 100);"
 #define COUNT_TEMP_TABLE    "SELECT COUNT(*) FROM numbers;"
 
+
+/* function declarations for generic test functions */
+extern ArrayType * DatumArrayToArrayType(Datum *datumArray, int datumCount,
+                                         Oid datumTypeId);
 
 /* function declarations for exercising connection functions */
 extern Datum initialize_remote_temp_table(PG_FUNCTION_ARGS);

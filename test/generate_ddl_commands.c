@@ -11,7 +11,6 @@
  */
 
 #include "postgres.h"
-#include "c.h"
 #include "fmgr.h"
 #include "postgres_ext.h"
 
@@ -29,13 +28,7 @@
 #include "nodes/value.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
-#include "utils/lsyscache.h"
 #include "utils/palloc.h"
-
-
-/* local function forward declarations */
-static ArrayType * DatumArrayToArrayType(Datum *datumArray, int datumCount,
-										 Oid datumTypeId);
 
 
 /* declarations for dynamic loading */
@@ -97,24 +90,4 @@ alter_server_host_and_port_command(PG_FUNCTION_ARGS)
 	AppendOptionListToString(alterCommand, list_make2(hostElem, portElem));
 
 	PG_RETURN_TEXT_P(CStringGetTextDatum(alterCommand->data));
-}
-
-
-/*
- * DatumArrayToArrayType converts the provided Datum array (of the specified
- * length and type) into an ArrayType suitable for returning from a UDF.
- */
-static ArrayType *
-DatumArrayToArrayType(Datum *datumArray, int datumCount, Oid datumTypeId)
-{
-	ArrayType *arrayObject = NULL;
-	int16 typeLength = 0;
-	bool typeByValue = false;
-	char typeAlignment = 0;
-
-	get_typlenbyvalalign(datumTypeId, &typeLength, &typeByValue, &typeAlignment);
-	arrayObject = construct_array(datumArray, datumCount, datumTypeId,
-								  typeLength, typeByValue, typeAlignment);
-
-	return arrayObject;
 }

@@ -28,15 +28,12 @@
 #include "nodes/nodes.h"
 #include "optimizer/clauses.h"
 #include "utils/array.h"
-#include "utils/lsyscache.h"
 #include "utils/palloc.h"
 
 
 /* local function forward declarations */
 static Expr * MakeTextPartitionExpression(Oid distributedTableId, text *value);
 static ArrayType * PrunedShardIdsForTable(Oid distributedTableId, List *whereClauseList);
-static ArrayType * DatumArrayToArrayType(Datum *datumArray, int datumCount,
-										 Oid datumTypeId);
 
 
 /* declarations for dynamic loading */
@@ -207,24 +204,4 @@ PrunedShardIdsForTable(Oid distributedTableId, List *whereClauseList)
 											 shardIdTypeId);
 
 	return shardIdArrayType;
-}
-
-
-/*
- * DatumArrayToArrayType converts the provided Datum array (of the specified
- * length and type) into an ArrayType suitable for returning from a UDF.
- */
-static ArrayType *
-DatumArrayToArrayType(Datum *datumArray, int datumCount, Oid datumTypeId)
-{
-	ArrayType *arrayObject = NULL;
-	int16 typeLength = 0;
-	bool typeByValue = false;
-	char typeAlignment = 0;
-
-	get_typlenbyvalalign(datumTypeId, &typeLength, &typeByValue, &typeAlignment);
-	arrayObject = construct_array(datumArray, datumCount, datumTypeId,
-								  typeLength, typeByValue, typeAlignment);
-
-	return arrayObject;
 }
