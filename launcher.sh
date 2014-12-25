@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 PGPORT=${PGPORT:-5432}
 BINDIR=`pg_config --bindir`
@@ -23,7 +23,7 @@ then
   exit 70
 fi
 
-sed -E -i '.bak' -e 's/^/#/g' -e "\$a\\
+sed -E -i.bak -e's/^/#/g' -e"\$a\\
 localhost $PGPORT # added by installcheck\\
 adeadhost 5432 # added by installcheck" $PG_WORKER_LIST_CONF
 
