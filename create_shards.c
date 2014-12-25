@@ -72,17 +72,16 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 	char relationKind = '\0';
 	AttrNumber partitionColumnId = InvalidAttrNumber;
 	char *partitionColumnName = text_to_cstring(partitionColumnText);
-	char *tableNameCString = text_to_cstring(tableNameText);
+	char *tableName = text_to_cstring(tableNameText);
 
-	/* we distribute only ordinary tables and foreign tables */
+	/* verify target relation is either regular or foreign table */
 	relationKind = get_rel_relkind(distributedTableId);
 	if (relationKind != RELKIND_RELATION && relationKind != RELKIND_FOREIGN_TABLE)
 	{
 		ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-						errmsg("cannot distribute table"),
-						errdetail("\"%s\" is not a regular or foreign table.",
-								  tableNameCString),
-						errhint("Distribute regular or foreign tables only.")));
+						errmsg("cannot distribute relation: \"%s\"", tableName),
+						errdetail("Distributed relations must be regular or "
+								  "foreign tables.")));
 	}
 
 	/* verify column exists in given table */
