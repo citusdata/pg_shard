@@ -7,7 +7,7 @@ DATADIR=`$PSQL -p$PGPORT -AtXc 'SHOW data_directory' postgres`
 PG_WORKER_LIST_CONF=$DATADIR/pg_worker_list.conf
 
 function restore_worker_list {
-  if [ -e $PG_WORKER_LIST_CONF.bak ]
+  if [ -f $PG_WORKER_LIST_CONF.bak ]
   then
     mv -f $PG_WORKER_LIST_CONF.bak $PG_WORKER_LIST_CONF
   fi
@@ -17,7 +17,13 @@ function restore_worker_list {
 
 trap restore_worker_list HUP INT TERM
 
-if [ -e $PG_WORKER_LIST_CONF.bak ]
+# ensure configuration file exists
+if [ ! -f $PG_WORKER_LIST_CONF ]
+then
+  echo > $PG_WORKER_LIST_CONF
+fi
+
+if [ -f $PG_WORKER_LIST_CONF.bak ]
 then
   >&2 echo 'worker list backup file already present. Please inspect and remove'
   exit 70
