@@ -1,0 +1,79 @@
+-- ===================================================================
+-- test shard repair functionality
+-- ===================================================================
+
+CREATE TABLE customer_engagements ( id integer, created_at date, event_data text );
+
+INSERT INTO pgs_distribution_metadata.partition (relation_id, partition_method, key)
+VALUES
+	('customer_engagements'::regclass, 'h', 'id');
+
+INSERT INTO pgs_distribution_metadata.shard
+	(id, relation_id, storage, min_value, max_value)
+VALUES
+	(20, 'customer_engagements'::regclass, 't', '-2147483648', '2147483647');
+
+INSERT INTO pgs_distribution_metadata.shard_placement
+	(id, node_name, node_port, shard_id, shard_state)
+VALUES
+	(200, 'localhost', $PGPORT, 20, 1),
+	(201, 'localhost.', $PGPORT, 20, 3);
+
+CREATE TABLE customer_engagements_20 ( LIKE customer_engagements );
+
+\o /dev/null
+SELECT 'customer_engagements_20'::regclass::oid AS shardoid;
+\gset
+\o
+
+SELECT master_copy_shard_placement(20, 'localhost', $PGPORT, 'localhost.', $PGPORT);
+
+\o /dev/null
+SELECT 'customer_engagements_20'::regclass::oid AS repairedoid;
+\gset
+\o
+
+SELECT :shardoid != :repairedoid AS shard_recreated; 
+
+CREATE FOREIGN TABLE remote_engagements (
+	id integer,
+	created_at date,
+	event_data text
+) SERVER fake_fdw_server;
+
+INSERT INTO pgs_distribution_metadata.partition (relation_id, partition_method, key)
+VALUES
+	('remote_engagements'::regclass, 'h', 'id');
+
+INSERT INTO pgs_distribution_metadata.shard
+	(id, relation_id, storage, min_value, max_value)
+VALUES
+	(30, 'remote_engagements'::regclass, 'f', '-2147483648', '2147483647');
+
+INSERT INTO pgs_distribution_metadata.shard_placement
+	(id, node_name, node_port, shard_id, shard_state)
+VALUES
+	(300, 'localhost', $PGPORT, 30, 1),
+	(301, 'localhost.', $PGPORT, 30, 3);
+
+CREATE FOREIGN TABLE remote_engagements_30 (
+	id integer,
+	created_at date,
+	event_data text
+) SERVER fake_fdw_server;
+
+\o /dev/null
+SELECT 'remote_engagements_30'::regclass::oid AS shardoid;
+\gset
+\o
+
+SELECT master_copy_shard_placement(30, 'localhost', $PGPORT, 'localhost.', $PGPORT);
+
+\o /dev/null
+SELECT 'remote_engagements_30'::regclass::oid AS repairedoid;
+\gset
+\o
+
+SELECT :shardoid != :repairedoid AS shard_recreated; 
+
+SELECT worker_copy_shard_placement('customer_engagements', 'localhost', $PGPORT);

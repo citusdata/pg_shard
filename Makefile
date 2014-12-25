@@ -8,8 +8,7 @@
 
 MODULE_big = pg_shard
 OBJS = connection.o create_shards.o distribution_metadata.o extend_ddl_commands.o \
-	   generate_ddl_commands.o pg_shard.o prune_shard_list.o repair_shards.o ruleutils.o \
-	   test_helper_functions.o
+	   generate_ddl_commands.o pg_shard.o prune_shard_list.o repair_shards.o ruleutils.o
 
 PG_CPPFLAGS = -std=c99 -Wall -Wextra -I$(libpq_srcdir)
 
@@ -38,10 +37,21 @@ expected/%: expected/%.tmpl
 
 # REGRESS_PREP is a make target executed by the PGXS build system before any
 # tests are run. We use it to trigger variable interpolation in our tests.
-REGRESS_PREP = sql/connection.sql expected/connection.out
-REGRESS = init connection distribution_metadata
+REGRESS_PREP = sql/connection.sql expected/connection.out sql/create_shards.sql \
+			   expected/create_shards.out sql/repair_shards.sql \
+			   expected/repair_shards.out  expected/modifications.out
+REGRESS = init connection distribution_metadata extend_ddl_commands \
+		  generate_ddl_commands create_shards prune_shard_list repair_shards \
+		  modifications queries utilities
+
+# The launcher regression flag lets us specify a special wrapper to handle
+# testing rather than psql directly. Our wrapper swaps in a known worker list.
+REGRESS_OPTS = --launcher=./launcher.sh
 
 EXTRA_CLEAN += ${REGRESS_PREP}
+
+# Let the test's makefile tell us what objects to build.
+include test/Makefile
 
 PG_CONFIG = pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)

@@ -35,7 +35,7 @@
 
 /* local function forward declarations */
 static ShardPlacement * SearchShardPlacementInList(List *shardPlacementList,
-												   char *nodeName, int32 nodePort);
+												   text *nodeName, int32 nodePort);
 static List * RecreateTableDDLCommandList(Oid relationId, int64 shardId);
 
 
@@ -57,16 +57,16 @@ Datum
 master_copy_shard_placement(PG_FUNCTION_ARGS)
 {
 	int64 shardId = PG_GETARG_INT64(0);
-	char *sourceNodeName = PG_GETARG_CSTRING(1);
+	text *sourceNodeName = PG_GETARG_TEXT_P(1);
 	int32 sourceNodePort = PG_GETARG_INT32(2);
-	char *targetNodeName = PG_GETARG_CSTRING(3);
+	text *targetNodeName = PG_GETARG_TEXT_P(3);
 	int32 targetNodePort = PG_GETARG_INT32(4);
 	ShardInterval *shardInterval = LoadShardInterval(shardId);
 	Oid distributedTableId = shardInterval->relationId;
 
 	List *shardPlacementList = NIL;
-	ShardPlacement *targetPlacement = NULL;
 	ShardPlacement *sourcePlacement PG_USED_FOR_ASSERTS_ONLY = NULL;
+	ShardPlacement *targetPlacement = NULL;
 	List *ddlCommandList = NIL;
 	bool recreated = false;
 
@@ -78,13 +78,13 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 	LockShard(shardId, ExclusiveLock);
 
 	shardPlacementList = LoadShardPlacementList(shardId);
-	targetPlacement = SearchShardPlacementInList(shardPlacementList, targetNodeName,
-												 targetNodePort);
 	sourcePlacement = SearchShardPlacementInList(shardPlacementList, sourceNodeName,
 												 sourceNodePort);
+	targetPlacement = SearchShardPlacementInList(shardPlacementList, targetNodeName,
+												 targetNodePort);
 
-	Assert(targetPlacement->shardState == STATE_INACTIVE);
 	Assert(sourcePlacement->shardState == STATE_FINALIZED);
+	Assert(targetPlacement->shardState == STATE_INACTIVE);
 
 	/* retrieve the DDL commands for the table and run them */
 	ddlCommandList = RecreateTableDDLCommandList(distributedTableId, shardId);
@@ -134,16 +134,17 @@ worker_copy_shard_placement(PG_FUNCTION_ARGS __attribute__((unused)))
  * such placement exists in the provided list.
  */
 static ShardPlacement *
-SearchShardPlacementInList(List *shardPlacementList, char *nodeName, int32 nodePort)
+SearchShardPlacementInList(List *shardPlacementList, text *nodeNameText, int32 nodePort)
 {
 	ListCell *shardPlacementCell = NULL;
 	ShardPlacement *matchingPlacement = NULL;
+	char *nodeName = text_to_cstring(nodeNameText);
 
 	foreach(shardPlacementCell, shardPlacementList)
 	{
 		ShardPlacement *shardPlacement = lfirst(shardPlacementCell);
 
-		if (strncmp(nodeName, shardPlacement->nodeName, MAX_NODE_LENGTH) &&
+		if (strncmp(nodeName, shardPlacement->nodeName, MAX_NODE_LENGTH) == 0 &&
 			nodePort == shardPlacement->nodePort)
 		{
 			matchingPlacement = shardPlacement;
