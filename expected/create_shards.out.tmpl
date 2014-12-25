@@ -82,7 +82,8 @@ WARNING:  could not create shard on "adeadhost:$PGPORT"
 
 \set VERBOSITY default
 SELECT storage, min_value, max_value FROM pgs_distribution_metadata.shard
-	WHERE relation_id = 'table_to_distribute'::regclass ORDER BY min_value ASC;
+	WHERE relation_id = 'table_to_distribute'::regclass
+	ORDER BY (min_value COLLATE "C") ASC;
  storage |  min_value  |  max_value  
 ---------+-------------+-------------
  t       | -1073741828 | -805306374
