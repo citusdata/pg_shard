@@ -14,8 +14,12 @@ CREATE FUNCTION create_table_then_fail(cstring, integer)
 -- ===================================================================
 CREATE TABLE table_to_distribute (
 	name text,
-	id bigint
+	id bigint PRIMARY KEY
 );
+-- use an index instead of table name
+SELECT master_create_distributed_table('table_to_distribute_pkey', 'id');
+ERROR:  cannot distribute relation: "table_to_distribute_pkey"
+DETAIL:  Distributed relations must be regular or foreign tables.
 -- use a bad column name
 SELECT master_create_distributed_table('table_to_distribute', 'bad_column');
 ERROR:  could not find column: bad_column
@@ -112,7 +116,7 @@ SELECT DISTINCT ON (node_name, node_port) node_name, node_port
  localhost |      $PGPORT
 (1 row)
 
-SELECT COUNT(*) FROM pg_class WHERE relname LIKE 'table_to_distribute%';
+SELECT COUNT(*) FROM pg_class WHERE relname LIKE 'table_to_distribute%' AND relkind = 'r';
  count 
 -------
     18
@@ -141,7 +145,7 @@ DETAIL:  Remote message: syntax error at or near "THIS"
  f
 (1 row)
 
-SELECT COUNT(*) FROM pg_class WHERE relname LIKE 'throwaway%';
+SELECT COUNT(*) FROM pg_class WHERE relname LIKE 'throwaway%' AND relkind = 'r';
  count 
 -------
      0
