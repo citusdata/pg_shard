@@ -1,5 +1,10 @@
 # pg_shard
 
+[![Build Status](https://img.shields.io/travis/citusdata/pg_shard.svg)][status]
+[![Coverage](https://img.shields.io/coveralls/citusdata/pg_shard.svg)][coverage]
+[![Release](https://img.shields.io/github/release/citusdata/pg_shard.svg)][release]
+[![License](https://img.shields.io/:license-LGPLv3-blue.svg)][license]
+
 `pg_shard` is a sharding extension for PostgreSQL. It shards and replicates your PostgreSQL tables for horizontal scale and high availability. The extension also seamlessly distributes your SQL statements, without requiring any changes to your application.
 
 As a standalone extension, `pg_shard` addresses many NoSQL use cases. It also enables real-time analytics, and has an easy upgrade path to [CitusDB](http://citusdata.com/) for complex analytical workloads (distributed joins). Further, the extension provides access to standard SQL tools, and powerful PostgreSQL features, such as diverse set of indexes and semi-structured data types.
@@ -160,4 +165,9 @@ the terms of the GNU Lesser General Public License as published by the Free
 Software Foundation, either version 3 of the License, or (at your option) any
 later version.
 
-See the [`LICENSE`](LICENSE) file for full details.
+See the [`LICENSE`][license] file for full details.
+
+[status]: https://travis-ci.org/citusdata/pg_shard
+[coverage]: https://coveralls.io/r/citusdata/pg_shard
+[release]: https://github.com/citusdata/pg_shard/releases/latest
+[license]: LICENSE
