@@ -62,9 +62,17 @@ endif
 # Let the test's makefile tell us what objects to build.
 include test/Makefile
 
+ifndef NO_PGXS
 PG_CONFIG = pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
+else
+SHLIB_PREREQS = submake-libpq
+subdir = contrib/pg_shard
+top_builddir = ../..
+include $(top_builddir)/src/Makefile.global
+include $(top_srcdir)/contrib/contrib-global.mk
+endif
 
 # Build the 9.3- or 9.4-derived ruleutils, depending upon active version
 ifneq (,$(findstring $(MAJORVERSION), 9.3))
