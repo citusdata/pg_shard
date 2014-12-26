@@ -59,9 +59,13 @@ SELECT storage, min_value, max_value FROM pgs_distribution_metadata.shard
 	WHERE relation_id = 'table_to_distribute'::regclass
 	ORDER BY (min_value COLLATE "C") ASC;
 
-SELECT DISTINCT ON (node_name, node_port) node_name, node_port
-	FROM pgs_distribution_metadata.shard_placement, pgs_distribution_metadata.shard
-	WHERE shard_placement.shard_id = shard.id;
+-- all shards should be on a single node
+WITH unique_nodes AS (
+	SELECT DISTINCT ON (node_name, node_port) node_name, node_port
+		FROM pgs_distribution_metadata.shard_placement, pgs_distribution_metadata.shard
+		WHERE shard_placement.shard_id = shard.id
+	)
+SELECT COUNT(*) FROM unique_nodes;
 
 SELECT COUNT(*) FROM pg_class WHERE relname LIKE 'table_to_distribute%' AND relkind = 'r';
 
