@@ -32,6 +32,8 @@ An easy way to get started is by running your master and worker instances on the
 
 Alternatively, you could start up one PostgreSQL database per machine; this is more applicable for production workloads. If you do this, you'll need to configure your Postgres instances so that they can talk to each other. For that, you'll need to update the `listen_addresses` setting in your `postgresql.conf` file, and change access control settings in `pg_hba.conf`.
 
+Whatever you decide, the master must be able to connect to the workers over TCP without any interactive authentication. In addition, a database using the same name as the master's database must already exist on all worker nodes.
+
 Once you decide on your cluster setup, you will need to make two changes on the master node. First, you will need to add `pg_shard` to `shared_preload_libraries` in your `postgresql.conf`:
 
     shared_preload_libraries = 'pg_shard'    # (change requires restart)
@@ -45,14 +47,6 @@ Second, the master node in `pg_shard` reads worker host information from a file 
     worker-102  5432
 
 Then, you can save these settings and restart the master node.
-
-### Worker Nodes
-
-Each worker node will need the following to function:
-
-* PostgreSQL up and running
-* PostgreSQL accepting connections from the master node using some form of passwordless connection, such as .pgpass files.
-* An empty database with a name matching the database you intend to shard on the master.  You will need to create this database.
 
 ### Table Sharding
 
