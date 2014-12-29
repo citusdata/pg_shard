@@ -121,3 +121,8 @@ SELECT author_id, sum(word_count) AS corpus_size FROM articles
 	HAVING sum(word_count) > 25000
 	ORDER BY sum(word_count) DESC
 	LIMIT 5;
+
+-- verify temp tables used by cross-shard queries do not persist
+SELECT COUNT(*) FROM pg_class WHERE relname LIKE 'pg_shard_temp_table%' AND
+									relkind = 'r';
+
