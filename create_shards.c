@@ -108,7 +108,8 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 	int32 replicationFactor = PG_GETARG_INT32(2);
 
 	Oid distributedTableId = ResolveRelationId(tableNameText);
-	char relationKind = '\0';
+	char relationKind = get_rel_relkind(distributedTableId);
+	char shardStorageType = '\0';
 	int32 shardIndex = 0;
 	List *workerNodeList = NIL;
 	List *ddlCommandList = NIL;
@@ -116,7 +117,6 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 	uint32 placementAttemptCount = 0;
 	uint32 hashTokenIncrement = 0;
 	List *existingShardList = NIL;
-	char shardStorageType = '\0';
 
 	/* make sure table is hash partitioned */
 	CheckHashPartitionedTable(distributedTableId);
@@ -174,7 +174,6 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 	}
 
 	/* set shard storage type according to relation type */
-	relationKind = get_rel_relkind(distributedTableId);
 	if (relationKind == RELKIND_FOREIGN_TABLE)
 	{
 		shardStorageType = SHARD_STORAGE_FOREIGN;
