@@ -50,6 +50,12 @@ REGRESS_OPTS = --launcher=./launcher.sh
 
 EXTRA_CLEAN += ${REGRESS_PREP}
 
+ifeq ($(enable_coverage),yes)
+	PG_CPPFLAGS += --coverage
+	SHLIB_LINK  += --coverage
+	EXTRA_CLEAN += *.gcno *.gcda test/*.gcno test/*.gcda
+endif
+
 # Let the test's makefile tell us what objects to build.
 include test/Makefile
 
