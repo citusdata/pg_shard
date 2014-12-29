@@ -1,0 +1,23 @@
+-- ===================================================================
+-- test utility statement functionality
+-- ===================================================================
+CREATE TABLE sharded_table ( name text, id bigint );
+SELECT master_create_distributed_table('sharded_table', 'id');
+ master_create_distributed_table 
+---------------------------------
+ 
+(1 row)
+
+-- COPY is not supported with distributed tables
+COPY sharded_table TO STDOUT;
+ERROR:  COPY statements on distributed tables are unsupported
+COPY (SELECT COUNT(*) FROM sharded_table) TO STDOUT;
+ERROR:  COPY statements involving distributed tables are unsupported
+COPY sharded_table FROM STDIN;
+ERROR:  COPY statements on distributed tables are unsupported
+-- cursors may not involve distributed tables
+DECLARE all_sharded_rows CURSOR FOR SELECT * FROM sharded_table;
+ERROR:  unsupported utility statement
+-- EXPLAIN support isn't implemented
+EXPLAIN SELECT * FROM sharded_table;
+ERROR:  EXPLAIN statements on distributed tables are unsupported

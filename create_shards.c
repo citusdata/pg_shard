@@ -69,10 +69,23 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 	text *partitionColumnText = PG_GETARG_TEXT_P(1);
 	char partitionMethod = PG_GETARG_CHAR(2);
 	Oid distributedTableId = ResolveRelationId(tableNameText);
+	char relationKind = '\0';
+	AttrNumber partitionColumnId = InvalidAttrNumber;
+	char *partitionColumnName = text_to_cstring(partitionColumnText);
+	char *tableName = text_to_cstring(tableNameText);
+
+	/* verify target relation is either regular or foreign table */
+	relationKind = get_rel_relkind(distributedTableId);
+	if (relationKind != RELKIND_RELATION && relationKind != RELKIND_FOREIGN_TABLE)
+	{
+		ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+						errmsg("cannot distribute relation: \"%s\"", tableName),
+						errdetail("Distributed relations must be regular or "
+								  "foreign tables.")));
+	}
 
 	/* verify column exists in given table */
-	char *partitionColumnName = text_to_cstring(partitionColumnText);
-	AttrNumber partitionColumnId = get_attnum(distributedTableId, partitionColumnName);
+	partitionColumnId = get_attnum(distributedTableId, partitionColumnName);
 	if (partitionColumnId == InvalidAttrNumber)
 	{
 		ereport(ERROR, (errmsg("could not find column: %s", partitionColumnName)));
