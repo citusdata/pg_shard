@@ -24,6 +24,10 @@
 #include "nodes/pg_list.h"
 
 
+/* local function forward declarations */
+static int CompareStrings(const void *leftElement, const void *rightElement);
+
+
 /* declarations for dynamic loading */
 PG_FUNCTION_INFO_V1(sort_names);
 PG_FUNCTION_INFO_V1(create_table_then_fail);
@@ -40,7 +44,7 @@ sort_names(PG_FUNCTION_ARGS)
 	char *second = PG_GETARG_CSTRING(1);
 	char *third = PG_GETARG_CSTRING(2);
 	List *nameList = SortList(list_make3(first, second, third),
-	                          (int (*)(const void *, const void *)) &strcmp);
+	                          (int (*)(const void *, const void *)) &CompareStrings);
 	StringInfo sortedNames = makeStringInfo();
 
 	ListCell *nameCell = NULL;
@@ -71,4 +75,16 @@ create_table_then_fail(PG_FUNCTION_ARGS)
 	bool commandsExecuted = ExecuteRemoteCommandList(nodeName, nodePort, sqlCommandList);
 
 	PG_RETURN_BOOL(commandsExecuted);
+}
+
+/*
+ * A simple wrapper around strcmp suitable for use with SortList or qsort.
+ */
+static int
+CompareStrings(const void *leftElement, const void *rightElement)
+{
+	const char *leftString = *((const char **) leftElement);
+	const char *rightString = *((const char **) rightElement);
+
+	return strcmp(leftString, rightString);
 }
