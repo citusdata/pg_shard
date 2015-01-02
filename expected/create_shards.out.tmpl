@@ -191,6 +191,7 @@ WARNING:  could not create shard on "adeadhost:5432"
  
 (1 row)
 
+\set VERBOSITY default
 SELECT storage, min_value, max_value FROM pgs_distribution_metadata.shard
 	WHERE relation_id = 'foreign_table_to_distribute'::regclass
 	ORDER BY (min_value COLLATE "C") ASC;
@@ -214,3 +215,13 @@ SELECT storage, min_value, max_value FROM pgs_distribution_metadata.shard
  f       | 805306357   | 1073741811
 (16 rows)
 
+-- cleanup foreign table, related shards and shard placements
+DELETE FROM pgs_distribution_metadata.shard_placement
+	WHERE shard_id IN (SELECT shard_id FROM pgs_distribution_metadata.shard
+					   WHERE relation_id = 'foreign_table_to_distribute'::regclass);
+	
+DELETE FROM pgs_distribution_metadata.shard
+	WHERE relation_id = 'foreign_table_to_distribute'::regclass;
+	
+DELETE FROM pgs_distribution_metadata.partition
+	WHERE relation_id = 'foreign_table_to_distribute'::regclass;	
