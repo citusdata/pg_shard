@@ -58,27 +58,27 @@ DETAIL:  Replication factor: 3 exceeds worker node count: 2
 -- use a replication factor higher than healthy node count
 -- this will create a shard on the healthy node but fail right after
 SELECT master_create_worker_shards('table_to_distribute', 16, 2);
-WARNING:  Connection failed to adeadhost:$PGPORT
-WARNING:  could not create shard on "adeadhost:$PGPORT"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
 ERROR:  could only create 1 of 2 of required shard replicas
 -- finally, create shards and inspect metadata
 SELECT master_create_worker_shards('table_to_distribute', 16, 1);
-WARNING:  Connection failed to adeadhost:$PGPORT
-WARNING:  could not create shard on "adeadhost:$PGPORT"
-WARNING:  Connection failed to adeadhost:$PGPORT
-WARNING:  could not create shard on "adeadhost:$PGPORT"
-WARNING:  Connection failed to adeadhost:$PGPORT
-WARNING:  could not create shard on "adeadhost:$PGPORT"
-WARNING:  Connection failed to adeadhost:$PGPORT
-WARNING:  could not create shard on "adeadhost:$PGPORT"
-WARNING:  Connection failed to adeadhost:$PGPORT
-WARNING:  could not create shard on "adeadhost:$PGPORT"
-WARNING:  Connection failed to adeadhost:$PGPORT
-WARNING:  could not create shard on "adeadhost:$PGPORT"
-WARNING:  Connection failed to adeadhost:$PGPORT
-WARNING:  could not create shard on "adeadhost:$PGPORT"
-WARNING:  Connection failed to adeadhost:$PGPORT
-WARNING:  could not create shard on "adeadhost:$PGPORT"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
  master_create_worker_shards 
 -----------------------------
  
@@ -108,12 +108,16 @@ SELECT storage, min_value, max_value FROM pgs_distribution_metadata.shard
  t       | 805306357   | 1073741811
 (16 rows)
 
-SELECT DISTINCT ON (node_name, node_port) node_name, node_port
-	FROM pgs_distribution_metadata.shard_placement, pgs_distribution_metadata.shard
-	WHERE shard_placement.shard_id = shard.id;
- node_name | node_port 
------------+-----------
- localhost |      $PGPORT
+-- all shards should be on a single node
+WITH unique_nodes AS (
+	SELECT DISTINCT ON (node_name, node_port) node_name, node_port
+		FROM pgs_distribution_metadata.shard_placement, pgs_distribution_metadata.shard
+		WHERE shard_placement.shard_id = shard.id
+	)
+SELECT COUNT(*) FROM unique_nodes;
+ count 
+-------
+     1
 (1 row)
 
 SELECT COUNT(*) FROM pg_class WHERE relname LIKE 'table_to_distribute%' AND relkind = 'r';
@@ -150,4 +154,63 @@ SELECT COUNT(*) FROM pg_class WHERE relname LIKE 'throwaway%' AND relkind = 'r';
 -------
      0
 (1 row)
+
+\set VERBOSITY terse
+-- test foreign table creation
+CREATE FOREIGN TABLE foreign_table_to_distribute
+(
+	name text,
+	id bigint
+)
+SERVER fake_fdw_server;
+SELECT master_create_distributed_table('foreign_table_to_distribute', 'id');
+ master_create_distributed_table 
+---------------------------------
+ 
+(1 row)
+
+SELECT master_create_worker_shards('foreign_table_to_distribute', 16, 1);
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+ master_create_worker_shards 
+-----------------------------
+ 
+(1 row)
+
+SELECT storage, min_value, max_value FROM pgs_distribution_metadata.shard
+	WHERE relation_id = 'foreign_table_to_distribute'::regclass
+	ORDER BY (min_value COLLATE "C") ASC;
+ storage |  min_value  |  max_value  
+---------+-------------+-------------
+ f       | -1073741828 | -805306374
+ f       | -1342177283 | -1073741829
+ f       | -1610612738 | -1342177284
+ f       | -1879048193 | -1610612739
+ f       | -2147483648 | -1879048194
+ f       | -268435463  | -9
+ f       | -536870918  | -268435464
+ f       | -8          | 268435446
+ f       | -805306373  | -536870919
+ f       | 1073741812  | 1342177266
+ f       | 1342177267  | 1610612721
+ f       | 1610612722  | 1879048176
+ f       | 1879048177  | 2147483647
+ f       | 268435447   | 536870901
+ f       | 536870902   | 805306356
+ f       | 805306357   | 1073741811
+(16 rows)
 
