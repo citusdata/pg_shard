@@ -13,6 +13,11 @@ SELECT master_create_distributed_table('articles', 'author_id');
  
 (1 row)
 
+-- test when a table is distributed but no shards created yet
+SELECT count(*) from articles;
+ERROR:  cannot plan SELECT query
+DETAIL:  There are no existing shards for the distributed table.
+HINT:  Run "master_create_worker_shards" to create shards for the distributed table.
 \set VERBOSITY terse
 SELECT master_create_worker_shards('articles', 2, 1);
 WARNING:  Connection failed to adeadhost:5432
