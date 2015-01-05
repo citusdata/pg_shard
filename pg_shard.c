@@ -226,8 +226,18 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 
 		ErrorIfQueryNotSupported(distributedQuery);
 
-		/* compute the list of shards this query needs to access */
+		/*
+		 * Compute the list of shards this query needs to access.
+		 * Error out if there are no existing shards for the table.
+		 */
 		queryShardList = DistributedQueryShardList(distributedQuery);
+		if (queryShardList == NIL)
+		{
+			ereport(ERROR, (errmsg("cannot plan SELECT query"),
+					errdetail("There are no existing shards for the distributed table."),
+					errhint("Run \"master_create_worker_shards\" to create shards "
+							"for the distributed table.")));
+		}
 
 		/*
 		 * If a select query touches multiple shards, we don't push down the
