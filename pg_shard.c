@@ -375,6 +375,17 @@ ErrorIfQueryNotSupported(Query *queryTree)
 						errmsg("unsupported utility statement")));
 	}
 
+	/*
+	 * Reject subqueries which are not in FROM clause.
+	 * Queries which include subqueries in FROM clauses are rejected below.
+	 */
+	if (queryTree->hasSubLinks == true)
+	{
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("cannot perform distributed planning on this query"),
+						errdetail("Subqueries are currently unsupported.")));
+	}
+
 	/* extract range table entries */
 	ExtractRangeTableEntryWalker((Node *) queryTree, &rangeTableList);
 
@@ -391,9 +402,37 @@ ErrorIfQueryNotSupported(Query *queryTree)
 		}
 		else
 		{
-			/* reject subquery, join, function or CTE range table entries */
-			ereport(ERROR, (errmsg("unsupported range table type: %d",
-								   rangeTableEntry->rtekind)));
+			/*
+			 * Error out for rangeTableEntries that we do not support.
+			 * We do not explicitly specify "in FROM clause" in the error detail
+			 * since we not support these features at all.
+			 */
+			char *rangeTableEntryErrorDetail = NULL;
+			if (rangeTableEntry->rtekind == RTE_SUBQUERY)
+			{
+				rangeTableEntryErrorDetail = "Subqueries are currently unsupported.";
+			}
+			else if (rangeTableEntry->rtekind == RTE_JOIN)
+			{
+				rangeTableEntryErrorDetail = "Joins are currently unsupported.";
+			}
+			else if (rangeTableEntry->rtekind == RTE_FUNCTION)
+			{
+				rangeTableEntryErrorDetail = "Functions are currently unsupported.";
+			}
+			else if (rangeTableEntry->rtekind == RTE_CTE)
+			{
+				rangeTableEntryErrorDetail = "Common table expressions are"
+											 " currently unsupported.";
+			}
+			else
+			{
+				rangeTableEntryErrorDetail = "Unrecognized range table entry.";
+			}
+
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("cannot perform distributed planning on this query"),
+							errdetail("%s", rangeTableEntryErrorDetail)));
 		}
 	}
 
@@ -402,7 +441,7 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						errmsg("cannot perform distributed planning on this query"),
-						errdetail("Joins are currently unsupported")));
+						errdetail("Joins are currently unsupported.")));
 	}
 
 	/* reject queries which involve multi-row inserts */
