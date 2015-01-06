@@ -174,7 +174,7 @@ SELECT title, authors.name FROM authors, articles WHERE authors.id = articles.au
 ERROR:  cannot perform distributed planning on this query
 DETAIL:  Joins are currently unsupported.
 -- joins are unsupported in FROM clause
-SELECT * FROM  (articles INNER JOIN authors ON articles.id=authors.id);
+SELECT * FROM  (articles INNER JOIN authors ON articles.id = authors.id);
 ERROR:  cannot perform distributed planning on this query
 DETAIL:  Joins are currently unsupported.
 -- test cross-shard queries
