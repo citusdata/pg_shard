@@ -111,7 +111,7 @@ SELECT title FROM articles;
 SELECT * FROM articles WHERE author_id IN (SELECT id FROM authors WHERE name LIKE '%a');
 
 -- subqueries are not supported in FROM clause
-SELECT articles.id,test.word_count from articles, (SELECT id, word_count FROM articles) AS test where test.id = articles.id;
+SELECT articles.id,test.word_count FROM articles, (SELECT id, word_count FROM articles) AS test where test.id = articles.id;
 
 -- subqueries are not supported in SELECT clause
 SELECT  a.title AS  name,(SELECT a2.id FROM authors a2 WHERE a.id = a2.id  LIMIT 1) AS special_price FROM articles a;

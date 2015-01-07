@@ -376,7 +376,7 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	}
 
 	/*
-	 * Reject subqueries which are not in FROM clause.
+	 * Reject subqueries which are in SELECT or WHERE clause.
 	 * Queries which include subqueries in FROM clauses are rejected below.
 	 */
 	if (queryTree->hasSubLinks == true)
