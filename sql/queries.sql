@@ -116,11 +116,14 @@ SELECT articles.id,test.word_count FROM articles, (SELECT id, word_count FROM ar
 -- subqueries are not supported in SELECT clause
 SELECT  a.title AS  name,(SELECT a2.id FROM authors a2 WHERE a.id = a2.id  LIMIT 1) AS special_price FROM articles a;
 
--- joins are unsupported in WHERE clause
+-- joins are not supported in WHERE clause
 SELECT title, authors.name FROM authors, articles WHERE authors.id = articles.author_id;
 
--- joins are unsupported in FROM clause
+-- joins are not supported in FROM clause
 SELECT * FROM  (articles INNER JOIN authors ON articles.id = authors.id);
+
+
+
 
 -- test cross-shard queries
 SELECT COUNT(*) FROM articles;
