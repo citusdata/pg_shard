@@ -121,6 +121,8 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 	int32 replicationFactor = PG_GETARG_INT32(2);
 
 	Oid distributedTableId = ResolveRelationId(tableNameText);
+	char relationKind = get_rel_relkind(distributedTableId);
+	char shardStorageType = '\0';
 	int32 shardIndex = 0;
 	List *workerNodeList = NIL;
 	List *ddlCommandList = NIL;
@@ -182,6 +184,16 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 	if (workerNodeCount > replicationFactor)
 	{
 		placementAttemptCount++;
+	}
+
+	/* set shard storage type according to relation type */
+	if (relationKind == RELKIND_FOREIGN_TABLE)
+	{
+		shardStorageType = SHARD_STORAGE_FOREIGN;
+	}
+	else
+	{
+		shardStorageType = SHARD_STORAGE_TABLE;
 	}
 
 	for (shardIndex = 0; shardIndex < shardCount; shardIndex++)
@@ -248,7 +260,7 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 		/* insert the shard metadata row along with its min/max values */
 		minHashTokenText = IntegerToText(shardMinHashToken);
 		maxHashTokenText = IntegerToText(shardMaxHashToken);
-		InsertShardRow(distributedTableId, shardId, SHARD_STORAGE_TABLE,
+		InsertShardRow(distributedTableId, shardId, shardStorageType,
 					   minHashTokenText, maxHashTokenText);
 	}
 
