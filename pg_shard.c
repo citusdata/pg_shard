@@ -549,14 +549,13 @@ DistributedQueryShardList(Query *query)
 	/* error out if no shards exists for the table */
 	if (shardIntervalList == NIL)
 	{
-		char *relName = get_rel_name(distributedTableId);
+		char *relationName = get_rel_name(distributedTableId);
 
 		ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 						errmsg("could not find any shards for query"),
-						errdetail("No shards exist for distributed table"
-								  " \"%s\".", relName),
-						errhint("Run master_create_worker_shards to "
-								"create shards "
+						errdetail("No shards exist for distributed table \"%s\".",
+								  relationName),
+						errhint("Run master_create_worker_shards to create shards "
 								"and try again.")));
 	}
 
