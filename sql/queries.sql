@@ -11,6 +11,9 @@ CREATE TABLE articles (
 
 SELECT master_create_distributed_table('articles', 'author_id');
 
+-- test when a table is distributed but no shards created yet
+SELECT count(*) from articles;
+
 \set VERBOSITY terse
 SELECT master_create_worker_shards('articles', 2, 1);
 \set VERBOSITY default
