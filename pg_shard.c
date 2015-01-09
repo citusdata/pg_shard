@@ -226,7 +226,10 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 
 		ErrorIfQueryNotSupported(distributedQuery);
 
-		/* compute the list of shards this query needs to access */
+		/*
+		 * Compute the list of shards this query needs to access.
+		 * Error out if there are no existing shards for the table.
+		 */
 		queryShardList = DistributedQueryShardList(distributedQuery);
 
 		/*
@@ -530,17 +533,35 @@ ExtractRangeTableEntryWalker(Node *node, List **rangeTableList)
 
 /*
  * DistributedQueryShardList prunes the shards for the table in the query based
- * on the query's restriction qualifiers, and returns this list.
+ * on the query's restriction qualifiers, and returns this list. If the function
+ * cannot find any shards for the distributed table, it errors out. In other sense,
+ * the function errors out or returns a non-empty list.
  */
 static List *
 DistributedQueryShardList(Query *query)
 {
-	Oid distributedTableId = ExtractFirstDistributedTableId(query);
+	List *restrictClauseList = NIL;
+	List *prunedShardList = NIL;
 
-	List *restrictClauseList = QueryRestrictList(query);
+	Oid distributedTableId = ExtractFirstDistributedTableId(query);
 	List *shardIntervalList = LookupShardIntervalList(distributedTableId);
-	List *prunedShardList = PruneShardList(distributedTableId, restrictClauseList,
-										   shardIntervalList);
+
+	/* error out if no shards exists for the table */
+	if (shardIntervalList == NIL)
+	{
+		char *relationName = get_rel_name(distributedTableId);
+
+		ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+						errmsg("could not find any shards for query"),
+						errdetail("No shards exist for distributed table \"%s\".",
+								  relationName),
+						errhint("Run master_create_worker_shards to create shards "
+								"and try again.")));
+	}
+
+	restrictClauseList = QueryRestrictList(query);
+	prunedShardList = PruneShardList(distributedTableId, restrictClauseList,
+									 shardIntervalList);
 
 	return prunedShardList;
 }
