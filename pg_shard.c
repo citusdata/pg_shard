@@ -389,6 +389,14 @@ ErrorIfQueryNotSupported(Query *queryTree)
 						errdetail("Subqueries are currently unsupported.")));
 	}
 
+	/* reject queries which include CommonTableExpr */
+	if (queryTree->cteList != NIL)
+	{
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("cannot perform distributed planning on this query"),
+						errdetail("Common table entries are currently unsupported.")));
+	}
+
 	/* extract range table entries */
 	ExtractRangeTableEntryWalker((Node *) queryTree, &rangeTableList);
 
@@ -408,7 +416,9 @@ ErrorIfQueryNotSupported(Query *queryTree)
 			/*
 			 * Error out for rangeTableEntries that we do not support.
 			 * We do not explicitly specify "in FROM clause" in the error detail
-			 * since we not support these features at all.
+			 * for the features that we do not support at all (SUBQUERY, JOIN).
+			 * We do not need to check for RTE_CTE because all common table expressions
+			 * are rejected above with queryTree->cteList check.
 			 */
 			char *rangeTableEntryErrorDetail = NULL;
 			if (rangeTableEntry->rtekind == RTE_SUBQUERY)
@@ -421,12 +431,8 @@ ErrorIfQueryNotSupported(Query *queryTree)
 			}
 			else if (rangeTableEntry->rtekind == RTE_FUNCTION)
 			{
-				rangeTableEntryErrorDetail = "Functions are currently unsupported.";
-			}
-			else if (rangeTableEntry->rtekind == RTE_CTE)
-			{
-				rangeTableEntryErrorDetail = "Common table expressions are"
-											 " currently unsupported.";
+				rangeTableEntryErrorDetail = "Functions are currently unsupported"
+											 " in FROM clause.";
 			}
 			else
 			{
