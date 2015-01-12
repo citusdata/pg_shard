@@ -162,6 +162,10 @@ WITH long_names AS ( SELECT id FROM authors WHERE char_length(name) > 15 )
 SELECT title FROM articles;
 ERROR:  cannot perform distributed planning on this query
 DETAIL:  Common table entries are currently unsupported.
+--  queries which involve functions in FROM clause are unsupported.
+select * from  articles, position('om' in 'Thomas');
+ERROR:  cannot perform distributed planning on this query
+DETAIL:  Functions are currently unsupported in FROM clause.
 -- subqueries are not supported in WHERE clause
 SELECT * FROM articles WHERE author_id IN (SELECT id FROM authors WHERE name LIKE '%a');
 ERROR:  cannot perform distributed planning on this query

@@ -110,6 +110,9 @@ CREATE TABLE authors ( name text, id bigint );
 WITH long_names AS ( SELECT id FROM authors WHERE char_length(name) > 15 )
 SELECT title FROM articles;
 
+--  queries which involve functions in FROM clause are unsupported.
+select * from  articles, position('om' in 'Thomas');
+
 -- subqueries are not supported in WHERE clause
 SELECT * FROM articles WHERE author_id IN (SELECT id FROM authors WHERE name LIKE '%a');
 
