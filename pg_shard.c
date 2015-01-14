@@ -82,6 +82,9 @@ bool AllModificationsCommutative = false;
 /* informs pg_shard to use the CitusDB planner */
 bool UseCitusDBSelectLogic = false;
 
+/* logs each statement used in a distributed plan */
+bool LogDistributedStatements = false;
+
 
 /* planner functions forward declarations */
 static PlannedStmt * PgShardPlanner(Query *parse, int cursorOptions,
@@ -177,6 +180,11 @@ _PG_init(void)
 	DefineCustomBoolVariable("pg_shard.use_citusdb_select_logic",
 							 "Informs pg_shard to use CitusDB's select logic", NULL,
 							 &UseCitusDBSelectLogic, false, PGC_USERSET, 0, NULL,
+							 NULL, NULL);
+
+	DefineCustomBoolVariable("pg_shard.log_distributed_statements",
+							 "Logs each statement used in a distributed plan", NULL,
+							 &LogDistributedStatements, false, PGC_USERSET, 0, NULL,
 							 NULL, NULL);
 
 	EmitWarningsOnPlaceholders("pg_shard");
@@ -989,6 +997,12 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 		}
 
 		deparse_shard_query(query, shardId, queryString);
+
+		if (LogDistributedStatements)
+		{
+			ereport(LOG, (errmsg("distributed statement: %s", queryString->data),
+						  errhidestmt(true)));
+		}
 
 		task = (Task *) palloc0(sizeof(Task));
 		task->queryString = queryString;
