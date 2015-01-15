@@ -207,6 +207,19 @@ SELECT author_id, sum(word_count) AS corpus_size FROM articles
          6 |       50867
 (5 rows)
 
+-- verify pg_shard produces correct remote SQL
+SET pg_shard.log_distributed_statements = on;
+SET client_min_messages = log;
+SELECT count(*) FROM articles WHERE word_count > 10000;
+LOG:  distributed statement: SELECT NULL::unknown FROM ONLY articles_10037 WHERE (word_count > 10000)
+LOG:  distributed statement: SELECT NULL::unknown FROM ONLY articles_10036 WHERE (word_count > 10000)
+ count 
+-------
+    23
+(1 row)
+
+SET client_min_messages = DEFAULT;
+SET pg_shard.log_distributed_statements = DEFAULT;
 -- verify temp tables used by cross-shard queries do not persist
 SELECT COUNT(*) FROM pg_class WHERE relname LIKE 'pg_shard_temp_table%' AND
 									relkind = 'r';

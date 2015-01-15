@@ -95,9 +95,11 @@ static Oid ExtractFirstDistributedTableId(Query *query);
 static bool ExtractRangeTableEntryWalker(Node *node, List **rangeTableList);
 static List * DistributedQueryShardList(Query *query);
 static bool SelectFromMultipleShards(Query *query, List *queryShardList);
+static Query * BuildLocalQuery(Query *query, List *localRestrictList);
 static PlannedStmt * PlanSequentialScan(Query *query, int cursorOptions,
 										ParamListInfo boundParams);
-static Query * RowAndColumnFilterQuery(Query *query);
+static Query * RowAndColumnFilterQuery(Query *query, List *remoteRestrictList,
+                                       List *localRestrictList);
 static List * QueryRestrictList(Query *query);
 static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
 static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
@@ -254,15 +256,26 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 		if (selectFromMultipleShards)
 		{
 			Oid distributedTableId = InvalidOid;
+			Query *localQuery = NULL;
+			List *queryRestrictList = QueryRestrictList(distributedQuery);
+			List *remoteRestrictList = NIL;
+			List *localRestrictList = NIL;
+
+			/* TODO: replace with call to classify restrictions */
+			remoteRestrictList = queryRestrictList;
+
+			/* build local and distributed query */
+			distributedQuery = RowAndColumnFilterQuery(distributedQuery,
+			                                           remoteRestrictList,
+			                                           localRestrictList);
+			localQuery = BuildLocalQuery(query, localRestrictList);
 
 			/*
 			 * Force a sequential scan as we change the underlying table to
 			 * point to our intermediate temporary table which contains the
 			 * fetched data.
 			 */
-			plannedStatement = PlanSequentialScan(query, cursorOptions, boundParams);
-
-			distributedQuery = RowAndColumnFilterQuery(distributedQuery);
+			plannedStatement = PlanSequentialScan(localQuery, cursorOptions, boundParams);
 
 			/* construct a CreateStmt to clone the existing table */
 			distributedTableId = ExtractFirstDistributedTableId(distributedQuery);
@@ -647,6 +660,25 @@ SelectFromMultipleShards(Query *query, List *queryShardList)
 
 
 /*
+ * TODO: Add documentation
+ */
+static Query *
+BuildLocalQuery(Query *query, List *localRestrictList)
+{
+	Query *localQuery = copyObject(query);
+	FromExpr *joinTree = localQuery->jointree;
+
+	if (joinTree != NULL)
+	{
+		Assert(list_length(joinTree->fromlist) == 1);
+		joinTree->quals = (Node *) make_ands_explicit((List *) localRestrictList);
+	}
+
+	return localQuery;
+}
+
+
+/*
  * PlanSequentialScan attempts to plan the given query using only a sequential
  * scan of the underlying table. The function disables index scan types and
  * plans the query. If the plan still contains a non-sequential scan plan node,
@@ -658,7 +690,6 @@ PlanSequentialScan(Query *query, int cursorOptions, ParamListInfo boundParams)
 	PlannedStmt *sequentialScanPlan = NULL;
 	bool indexScanEnabledOldValue = false;
 	bool bitmapScanEnabledOldValue = false;
-	Query *queryCopy = NULL;
 	List *rangeTableList = NIL;
 	ListCell *rangeTableCell = NULL;
 
@@ -686,8 +717,7 @@ PlanSequentialScan(Query *query, int cursorOptions, ParamListInfo boundParams)
 	enable_indexscan = false;
 	enable_bitmapscan = false;
 
-	queryCopy = copyObject(query);
-	sequentialScanPlan = standard_planner(queryCopy, cursorOptions, boundParams);
+	sequentialScanPlan = standard_planner(query, cursorOptions, boundParams);
 
 	enable_indexscan = indexScanEnabledOldValue;
 	enable_bitmapscan = bitmapScanEnabledOldValue;
@@ -702,14 +732,13 @@ PlanSequentialScan(Query *query, int cursorOptions, ParamListInfo boundParams)
  * query. This new query can then be pushed down to the worker nodes.
  */
 static Query *
-RowAndColumnFilterQuery(Query *query)
+RowAndColumnFilterQuery(Query *query, List *remoteRestrictList, List *localRestrictList)
 {
 	Query *filterQuery = NULL;
 	List *rangeTableList = NIL;
-	List *whereClauseList = NIL;
-	List *whereClauseColumnList = NIL;
-	List *projectColumnList = NIL;
 	List *columnList = NIL;
+	List *localColumnList = NIL;
+	List *projectColumnList = NIL;
 	ListCell *columnCell = NULL;
 	List *uniqueColumnList = NIL;
 	List *targetList = NIL;
@@ -720,24 +749,23 @@ RowAndColumnFilterQuery(Query *query)
 	ExtractRangeTableEntryWalker((Node *) query, &rangeTableList);
 	Assert(list_length(rangeTableList) == 1);
 
-	/* build the where-clause expression */
-	whereClauseList = QueryRestrictList(query);
+	/* build the expression to supply FROM/WHERE for the remote query */
 	fromExpr = makeNode(FromExpr);
-	fromExpr->quals = (Node *) make_ands_explicit((List *) whereClauseList);
+	fromExpr->quals = (Node *) make_ands_explicit((List *) remoteRestrictList);
 	fromExpr->fromlist = QueryFromList(rangeTableList);
 
-	/* extract columns from both the where and projection clauses */
-	whereClauseColumnList = pull_var_clause((Node *) fromExpr, aggregateBehavior,
-											placeHolderBehavior);
-	projectColumnList = pull_var_clause((Node *) query->targetList, aggregateBehavior,
-										placeHolderBehavior);
-	columnList = list_union(whereClauseColumnList, projectColumnList);
+	/* extract columns from WHERE clauses to be executed locally */
+	localColumnList = pull_var_clause((Node *) localRestrictList, aggregateBehavior,
+	                                  placeHolderBehavior);
 
-	/*
-	 * list_union() filters duplicates, but only between the lists. For example,
-	 * if we have a where clause like (where order_id = 1 OR order_id = 2), we
-	 * end up with two order_id columns. We therefore de-dupe the columns here.
-	 */
+	/* extract columns from projection clauses for use in remote target list */
+	projectColumnList = pull_var_clause((Node *) query->targetList, aggregateBehavior,
+	                                    placeHolderBehavior);
+
+	columnList = list_concat(columnList, localColumnList);
+	columnList = list_concat(columnList, projectColumnList);
+
+	/* pull_var_clause does nothing to avoid duplicates, so we need to  */
 	foreach(columnCell, columnList)
 	{
 		Var *column = (Var *) lfirst(columnCell);
@@ -746,9 +774,9 @@ RowAndColumnFilterQuery(Query *query)
 	}
 
 	/*
-	 * If the query is a simple "SELECT count(*)", add a NULL constant. This
-	 * constant deparses to "SELECT NULL FROM ...". postgres_fdw generates a
-	 * similar string when no columns are selected.
+	 * If we still have no columns, possible in a query like "SELECT count(*)",
+	 * add a NULL constant. This constant results in "SELECT NULL FROM ...".
+	 * postgres_fdw generates a similar string when no columns are selected.
 	 */
 	if (uniqueColumnList == NIL)
 	{
@@ -764,8 +792,8 @@ RowAndColumnFilterQuery(Query *query)
 	filterQuery = makeNode(Query);
 	filterQuery->commandType = CMD_SELECT;
 	filterQuery->rtable = rangeTableList;
-	filterQuery->targetList = targetList;
 	filterQuery->jointree = fromExpr;
+	filterQuery->targetList = targetList;
 
 	return filterQuery;
 }
