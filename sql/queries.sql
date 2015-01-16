@@ -131,6 +131,7 @@ SELECT * FROM  (articles INNER JOIN authors ON articles.id = authors.id);
 -- test cross-shard queries
 SELECT COUNT(*) FROM articles;
 
+-- try query with more SQL features
 SELECT author_id, sum(word_count) AS corpus_size FROM articles
 	GROUP BY author_id
 	HAVING sum(word_count) > 25000
@@ -145,6 +146,12 @@ SELECT count(*) FROM articles WHERE word_count > 10000;
 
 SET client_min_messages = DEFAULT;
 SET pg_shard.log_distributed_statements = DEFAULT;
+
+-- use HAVING without its variable in target list
+SELECT author_id FROM articles
+	GROUP BY author_id
+	HAVING sum(word_count) > 50000
+	ORDER BY author_id;
 
 -- verify temp tables used by cross-shard queries do not persist
 SELECT COUNT(*) FROM pg_class WHERE relname LIKE 'pg_shard_temp_table%' AND
