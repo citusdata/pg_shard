@@ -4,6 +4,7 @@ env:
   global:
     - enable_coverage=yes
   matrix:
+    - PGVERSION=9.3
     - PGVERSION=9.4
 before_install:
   - sudo apt-get update -qq
