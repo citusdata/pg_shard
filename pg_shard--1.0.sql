@@ -81,7 +81,7 @@ LANGUAGE C STRICT;
 CREATE FUNCTION partition_column_to_node_string(table_oid oid)
 RETURNS text
 AS 'MODULE_PATHNAME'
-LANGUAGE C STRICT;
+LANGUAGE C;
 
 CREATE FUNCTION sync_table_metadata_to_citus(table_name text)
 RETURNS VOID AS $$
