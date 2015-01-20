@@ -7,8 +7,9 @@
 #-------------------------------------------------------------------------
 
 MODULE_big = pg_shard
-OBJS = connection.o create_shards.o distribution_metadata.o extend_ddl_commands.o \
-	   generate_ddl_commands.o pg_shard.o prune_shard_list.o repair_shards.o ruleutils.o
+OBJS = connection.o create_shards.o citus_metadata_sync.o distribution_metadata.o \
+	   extend_ddl_commands.o generate_ddl_commands.o pg_shard.o prune_shard_list.o \
+	   repair_shards.o ruleutils.o
 
 PG_CPPFLAGS = -std=c99 -Wall -Wextra -I$(libpq_srcdir)
 
@@ -42,7 +43,7 @@ REGRESS_PREP = sql/connection.sql expected/connection.out sql/create_shards.sql 
 			   expected/repair_shards.out  expected/modifications.out
 REGRESS = init connection distribution_metadata extend_ddl_commands \
 		  generate_ddl_commands create_shards prune_shard_list repair_shards \
-		  modifications queries utilities
+		  modifications queries utilities citus_metadata_sync
 
 # The launcher regression flag lets us specify a special wrapper to handle
 # testing rather than psql directly. Our wrapper swaps in a known worker list.
