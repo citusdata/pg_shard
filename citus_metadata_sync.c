@@ -16,10 +16,20 @@
 #include "distribution_metadata.h"
 
 #include "utils/builtins.h"
+#include "utils/lsyscache.h"
 
 
 /* declarations for dynamic loading */
 PG_FUNCTION_INFO_V1(partition_column_to_node_string);
+
+
+/*
+ * partition_column_to_node_string is an internal UDF to obtain the textual
+ * representation of a partition column node (Var), suitable for use within
+ * CitusDB's metadata tables. This function expects an Oid identifying a table
+ * previously distributed using pg_shard and will raise an ERROR if the Oid
+ * is NULL, or does not identify a pg_shard-distributed table.
+ */
 Datum
 partition_column_to_node_string(PG_FUNCTION_ARGS)
 {
