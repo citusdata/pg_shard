@@ -98,6 +98,8 @@ static bool SelectFromMultipleShards(Query *query, List *queryShardList);
 static Query * BuildLocalQuery(Query *query, List *localRestrictList);
 static PlannedStmt * PlanSequentialScan(Query *query, int cursorOptions,
 										ParamListInfo boundParams);
+static void ClassifyRestrictions(List *queryRestrictList, List **remoteRestrictList,
+                                 List **localRestrictList);
 static Query * RowAndColumnFilterQuery(Query *query, List *remoteRestrictList,
                                        List *localRestrictList);
 static List * QueryRestrictList(Query *query);
@@ -261,8 +263,9 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			List *remoteRestrictList = NIL;
 			List *localRestrictList = NIL;
 
-			/* TODO: replace with call to classify restrictions */
-			remoteRestrictList = queryRestrictList;
+			/* partition restrictions into remote and local lists */
+			ClassifyRestrictions(queryRestrictList, &remoteRestrictList,
+			                     &localRestrictList);
 
 			/* build local and distributed query */
 			distributedQuery = RowAndColumnFilterQuery(distributedQuery,
@@ -660,7 +663,9 @@ SelectFromMultipleShards(Query *query, List *queryShardList)
 
 
 /*
- * TODO: Add documentation
+ * BuildLocalQuery returns a copy of query with its quals replaced by those
+ * in localRestrictList. Expects queries with a single entry in their FROM
+ * list.
  */
 static Query *
 BuildLocalQuery(Query *query, List *localRestrictList)
@@ -668,11 +673,9 @@ BuildLocalQuery(Query *query, List *localRestrictList)
 	Query *localQuery = copyObject(query);
 	FromExpr *joinTree = localQuery->jointree;
 
-	if (joinTree != NULL)
-	{
-		Assert(list_length(joinTree->fromlist) == 1);
-		joinTree->quals = (Node *) make_ands_explicit((List *) localRestrictList);
-	}
+	Assert(joinTree != NULL);
+	Assert(list_length(joinTree->fromlist) == 1);
+	joinTree->quals = (Node *) make_ands_explicit((List *) localRestrictList);
 
 	return localQuery;
 }
@@ -682,7 +685,8 @@ BuildLocalQuery(Query *query, List *localRestrictList)
  * PlanSequentialScan attempts to plan the given query using only a sequential
  * scan of the underlying table. The function disables index scan types and
  * plans the query. If the plan still contains a non-sequential scan plan node,
- * the function errors out.
+ * the function errors out. Note this function modifies the query parameter, so
+ * make a copy before calling PlanSequentialScan if that is unacceptable.
  */
 static PlannedStmt *
 PlanSequentialScan(Query *query, int cursorOptions, ParamListInfo boundParams)
@@ -723,6 +727,41 @@ PlanSequentialScan(Query *query, int cursorOptions, ParamListInfo boundParams)
 	enable_bitmapscan = bitmapScanEnabledOldValue;
 
 	return sequentialScanPlan;
+}
+
+
+/*
+ * ClassifyRestrictions divides a query's restriction list in two: the subset
+ * of restrictions safe for remote evaluation and the subset of restrictions
+ * that must be evaluated locally. remoteRestrictList and localRestrictList are
+ * output parameters to receive these two subsets.
+ *
+ * Currently places all restrictions in the remote list and leaves the local
+ * one totally empty.
+ */
+static void
+ClassifyRestrictions(List *queryRestrictList, List **remoteRestrictList,
+                     List **localRestrictList)
+{
+	ListCell *restrictCell = NULL;
+
+	*remoteRestrictList = NIL;
+	*localRestrictList = NIL;
+
+	foreach(restrictCell, queryRestrictList)
+	{
+		Node *restriction = (Node *) lfirst(restrictCell);
+		bool restrictionSafeToSend = true;
+
+		if (restrictionSafeToSend)
+		{
+			*remoteRestrictList = lappend(*remoteRestrictList, restriction);
+		}
+		else
+		{
+			*localRestrictList = lappend(*localRestrictList, restriction);
+		}
+	}
 }
 
 
@@ -1028,8 +1067,7 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 
 		if (LogDistributedStatements)
 		{
-			ereport(LOG, (errmsg("distributed statement: %s", queryString->data),
-						  errhidestmt(true)));
+			ereport(LOG, (errmsg("distributed statement: %s", queryString->data)));
 		}
 
 		task = (Task *) palloc0(sizeof(Task));
