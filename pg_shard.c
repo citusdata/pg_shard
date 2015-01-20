@@ -385,16 +385,20 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	if (queryTree->hasSubLinks == true)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("cannot perform distributed planning on this query"),
-						errdetail("Subqueries are currently unsupported.")));
+						errmsg("cannot perform distributed planning for the given"
+							   " query"),
+						errdetail("Subqueries are not supported in distributed"
+								  " queries.")));
 	}
 
 	/* reject queries which include CommonTableExpr */
 	if (queryTree->cteList != NIL)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("cannot perform distributed planning on this query"),
-						errdetail("Common table entries are currently unsupported.")));
+						errmsg("cannot perform distributed planning for the given"
+							   " query"),
+						errdetail("Common table expressions are not supported in"
+								  " distributed queries.")));
 	}
 
 	/* extract range table entries */
@@ -423,16 +427,18 @@ ErrorIfQueryNotSupported(Query *queryTree)
 			char *rangeTableEntryErrorDetail = NULL;
 			if (rangeTableEntry->rtekind == RTE_SUBQUERY)
 			{
-				rangeTableEntryErrorDetail = "Subqueries are currently unsupported.";
+				rangeTableEntryErrorDetail = "Subqueries are not supported in"
+											 " distributed queries.";
 			}
 			else if (rangeTableEntry->rtekind == RTE_JOIN)
 			{
-				rangeTableEntryErrorDetail = "Joins are currently unsupported.";
+				rangeTableEntryErrorDetail = "Joins are not supported in distributed"
+											 " queries.";
 			}
 			else if (rangeTableEntry->rtekind == RTE_FUNCTION)
 			{
-				rangeTableEntryErrorDetail = "Functions are currently unsupported"
-											 " in FROM clause.";
+				rangeTableEntryErrorDetail = "Functions must not appear in the FROM"
+											 " clause of a distributed query.";
 			}
 			else
 			{
@@ -440,7 +446,8 @@ ErrorIfQueryNotSupported(Query *queryTree)
 			}
 
 			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("cannot perform distributed planning on this query"),
+							errmsg("cannot perform distributed planning for the given"
+								   " query"),
 							errdetail("%s", rangeTableEntryErrorDetail)));
 		}
 	}
@@ -449,8 +456,9 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	if (queryTableCount != 1)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("cannot perform distributed planning on this query"),
-						errdetail("Joins are currently unsupported.")));
+						errmsg("cannot perform distributed planning for the given"
+							   " query"),
+						errdetail("Joins are not supported in distributed queries.")));
 	}
 
 	/* reject queries which involve multi-row inserts */

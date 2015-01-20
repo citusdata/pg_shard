@@ -111,7 +111,7 @@ WITH long_names AS ( SELECT id FROM authors WHERE char_length(name) > 15 )
 SELECT title FROM articles;
 
 --  queries which involve functions in FROM clause are unsupported.
-select * from  articles, position('om' in 'Thomas');
+SELECT * FROM articles, position('om' in 'Thomas');
 
 -- subqueries are not supported in WHERE clause
 SELECT * FROM articles WHERE author_id IN (SELECT id FROM authors WHERE name LIKE '%a');
@@ -127,9 +127,6 @@ SELECT title, authors.name FROM authors, articles WHERE authors.id = articles.au
 
 -- joins are not supported in FROM clause
 SELECT * FROM  (articles INNER JOIN authors ON articles.id = authors.id);
-
-
-
 
 -- test cross-shard queries
 SELECT COUNT(*) FROM articles;
