@@ -7,8 +7,9 @@
 #-------------------------------------------------------------------------
 
 MODULE_big = pg_shard
-OBJS = connection.o create_shards.o distribution_metadata.o extend_ddl_commands.o \
-	   generate_ddl_commands.o pg_shard.o prune_shard_list.o repair_shards.o ruleutils.o
+OBJS = connection.o create_shards.o citus_metadata_sync.o distribution_metadata.o \
+	   extend_ddl_commands.o generate_ddl_commands.o pg_shard.o prune_shard_list.o \
+	   repair_shards.o ruleutils.o
 
 PG_CPPFLAGS = -std=c99 -Wall -Wextra -I$(libpq_srcdir)
 
