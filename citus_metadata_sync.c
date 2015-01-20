@@ -11,12 +11,19 @@
  */
 
 #include "postgres.h"
+#include "c.h"
+#include "postgres_ext.h"
 
 #include "citus_metadata_sync.h"
 #include "distribution_metadata.h"
 
+#include <stddef.h>
+
+#include "nodes/nodes.h"
+#include "nodes/primnodes.h"
 #include "utils/builtins.h"
-#include "utils/lsyscache.h"
+#include "utils/elog.h"
+#include "utils/errcodes.h"
 
 
 /* declarations for dynamic loading */
