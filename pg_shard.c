@@ -775,9 +775,9 @@ RowAndColumnFilterQuery(Query *query, List *remoteRestrictList, List *localRestr
 {
 	Query *filterQuery = NULL;
 	List *rangeTableList = NIL;
-	List *columnList = NIL;
-	List *localColumnList = NIL;
+	List *whereColumnList = NIL;
 	List *projectColumnList = NIL;
+	List *requiredColumnList = NIL;
 	ListCell *columnCell = NULL;
 	List *uniqueColumnList = NIL;
 	List *targetList = NIL;
@@ -793,19 +793,20 @@ RowAndColumnFilterQuery(Query *query, List *remoteRestrictList, List *localRestr
 	fromExpr->quals = (Node *) make_ands_explicit((List *) remoteRestrictList);
 	fromExpr->fromlist = QueryFromList(rangeTableList);
 
-	/* extract columns from WHERE clauses to be executed locally */
-	localColumnList = pull_var_clause((Node *) localRestrictList, aggregateBehavior,
+	/* must retrieve all columns referenced by local WHERE clauses... */
+	whereColumnList = pull_var_clause((Node *) localRestrictList, aggregateBehavior,
 	                                  placeHolderBehavior);
 
-	/* extract columns from projection clauses for use in remote target list */
+	/* as well as any used in projections (GROUP BY, etc.) */
 	projectColumnList = pull_var_clause((Node *) query->targetList, aggregateBehavior,
 	                                    placeHolderBehavior);
 
-	columnList = list_concat(columnList, localColumnList);
-	columnList = list_concat(columnList, projectColumnList);
+	/* put them together to get list of required columns for query */
+	requiredColumnList = list_concat(requiredColumnList, whereColumnList);
+	requiredColumnList = list_concat(requiredColumnList, projectColumnList);
 
-	/* pull_var_clause does nothing to avoid duplicates, so we need to  */
-	foreach(columnCell, columnList)
+	/* ensure there are no duplicates in the list  */
+	foreach(columnCell, requiredColumnList)
 	{
 		Var *column = (Var *) lfirst(columnCell);
 
