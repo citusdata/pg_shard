@@ -610,9 +610,10 @@ ExtractRangeTableEntryWalker(Node *node, List **rangeTableList)
 
 /*
  * DistributedQueryShardList prunes the shards for the table in the query based
- * on the query's restriction qualifiers, and returns this list. If the function
- * cannot find any shards for the distributed table, it errors out. In other sense,
- * the function errors out or returns a non-empty list.
+ * on the query's restriction qualifiers, and returns this list. It is possible
+ * that all shards will be pruned if a query's restrictions are unsatisfiable.
+ * In that case, this function can return an empty list; however, if the table
+ * being queried has no shards created whatsoever, this function errors out.
  */
 static List *
 DistributedQueryShardList(Query *query)
