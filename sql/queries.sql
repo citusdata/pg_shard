@@ -69,6 +69,9 @@ INSERT INTO articles VALUES (48,  8, 'alkylic', 18610);
 INSERT INTO articles VALUES (49,  9, 'anyone', 2681);
 INSERT INTO articles VALUES (50, 10, 'anjanette', 19519);
 
+-- first, test zero-shard query
+SELECT COUNT(*) FROM articles WHERE author_id = 1 AND author_id = 2;
+
 -- single-shard tests
 
 -- test simple select for a single row
