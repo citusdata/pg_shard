@@ -640,9 +640,6 @@ DistributedQueryShardList(Query *query)
 	prunedShardList = PruneShardList(distributedTableId, restrictClauseList,
 									 shardIntervalList);
 
-	/* shouldn't be an empty list, but assert in case something's very wrong */
-	Assert(prunedShardList != NIL);
-
 	return prunedShardList;
 }
 
