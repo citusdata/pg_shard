@@ -95,13 +95,13 @@ static Oid ExtractFirstDistributedTableId(Query *query);
 static bool ExtractRangeTableEntryWalker(Node *node, List **rangeTableList);
 static List * DistributedQueryShardList(Query *query);
 static bool SelectFromMultipleShards(Query *query, List *queryShardList);
-static Query * BuildLocalQuery(Query *query, List *localRestrictList);
-static PlannedStmt * PlanSequentialScan(Query *query, int cursorOptions,
-										ParamListInfo boundParams);
 static void ClassifyRestrictions(List *queryRestrictList, List **remoteRestrictList,
                                  List **localRestrictList);
 static Query * RowAndColumnFilterQuery(Query *query, List *remoteRestrictList,
                                        List *localRestrictList);
+static Query * BuildLocalQuery(Query *query, List *localRestrictList);
+static PlannedStmt * PlanSequentialScan(Query *query, int cursorOptions,
+										ParamListInfo boundParams);
 static List * QueryRestrictList(Query *query);
 static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
 static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
@@ -663,74 +663,6 @@ SelectFromMultipleShards(Query *query, List *queryShardList)
 
 
 /*
- * BuildLocalQuery returns a copy of query with its quals replaced by those
- * in localRestrictList. Expects queries with a single entry in their FROM
- * list.
- */
-static Query *
-BuildLocalQuery(Query *query, List *localRestrictList)
-{
-	Query *localQuery = copyObject(query);
-	FromExpr *joinTree = localQuery->jointree;
-
-	Assert(joinTree != NULL);
-	Assert(list_length(joinTree->fromlist) == 1);
-	joinTree->quals = (Node *) make_ands_explicit((List *) localRestrictList);
-
-	return localQuery;
-}
-
-
-/*
- * PlanSequentialScan attempts to plan the given query using only a sequential
- * scan of the underlying table. The function disables index scan types and
- * plans the query. If the plan still contains a non-sequential scan plan node,
- * the function errors out. Note this function modifies the query parameter, so
- * make a copy before calling PlanSequentialScan if that is unacceptable.
- */
-static PlannedStmt *
-PlanSequentialScan(Query *query, int cursorOptions, ParamListInfo boundParams)
-{
-	PlannedStmt *sequentialScanPlan = NULL;
-	bool indexScanEnabledOldValue = false;
-	bool bitmapScanEnabledOldValue = false;
-	List *rangeTableList = NIL;
-	ListCell *rangeTableCell = NULL;
-
-	/* error out if the table is a foreign table */
-	ExtractRangeTableEntryWalker((Node *) query, &rangeTableList);
-
-	foreach(rangeTableCell, rangeTableList)
-	{
-		RangeTblEntry *rangeTableEntry = (RangeTblEntry *) lfirst(rangeTableCell);
-		if (rangeTableEntry->rtekind == RTE_RELATION)
-		{
-			if (rangeTableEntry->relkind == RELKIND_FOREIGN_TABLE)
-			{
-				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("select from multiple shards is unsupported "
-									   "for foreign tables")));
-			}
-		}
-	}
-
-	/* disable index scan types */
-	indexScanEnabledOldValue = enable_indexscan;
-	bitmapScanEnabledOldValue = enable_bitmapscan;
-
-	enable_indexscan = false;
-	enable_bitmapscan = false;
-
-	sequentialScanPlan = standard_planner(query, cursorOptions, boundParams);
-
-	enable_indexscan = indexScanEnabledOldValue;
-	enable_bitmapscan = bitmapScanEnabledOldValue;
-
-	return sequentialScanPlan;
-}
-
-
-/*
  * ClassifyRestrictions divides a query's restriction list in two: the subset
  * of restrictions safe for remote evaluation and the subset of restrictions
  * that must be evaluated locally. remoteRestrictList and localRestrictList are
@@ -836,6 +768,74 @@ RowAndColumnFilterQuery(Query *query, List *remoteRestrictList, List *localRestr
 	filterQuery->targetList = targetList;
 
 	return filterQuery;
+}
+
+
+/*
+ * BuildLocalQuery returns a copy of query with its quals replaced by those
+ * in localRestrictList. Expects queries with a single entry in their FROM
+ * list.
+ */
+static Query *
+BuildLocalQuery(Query *query, List *localRestrictList)
+{
+	Query *localQuery = copyObject(query);
+	FromExpr *joinTree = localQuery->jointree;
+
+	Assert(joinTree != NULL);
+	Assert(list_length(joinTree->fromlist) == 1);
+	joinTree->quals = (Node *) make_ands_explicit((List *) localRestrictList);
+
+	return localQuery;
+}
+
+
+/*
+ * PlanSequentialScan attempts to plan the given query using only a sequential
+ * scan of the underlying table. The function disables index scan types and
+ * plans the query. If the plan still contains a non-sequential scan plan node,
+ * the function errors out. Note this function modifies the query parameter, so
+ * make a copy before calling PlanSequentialScan if that is unacceptable.
+ */
+static PlannedStmt *
+PlanSequentialScan(Query *query, int cursorOptions, ParamListInfo boundParams)
+{
+	PlannedStmt *sequentialScanPlan = NULL;
+	bool indexScanEnabledOldValue = false;
+	bool bitmapScanEnabledOldValue = false;
+	List *rangeTableList = NIL;
+	ListCell *rangeTableCell = NULL;
+
+	/* error out if the table is a foreign table */
+	ExtractRangeTableEntryWalker((Node *) query, &rangeTableList);
+
+	foreach(rangeTableCell, rangeTableList)
+	{
+		RangeTblEntry *rangeTableEntry = (RangeTblEntry *) lfirst(rangeTableCell);
+		if (rangeTableEntry->rtekind == RTE_RELATION)
+		{
+			if (rangeTableEntry->relkind == RELKIND_FOREIGN_TABLE)
+			{
+				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("select from multiple shards is unsupported "
+									   "for foreign tables")));
+			}
+		}
+	}
+
+	/* disable index scan types */
+	indexScanEnabledOldValue = enable_indexscan;
+	bitmapScanEnabledOldValue = enable_bitmapscan;
+
+	enable_indexscan = false;
+	enable_bitmapscan = false;
+
+	sequentialScanPlan = standard_planner(query, cursorOptions, boundParams);
+
+	enable_indexscan = indexScanEnabledOldValue;
+	enable_bitmapscan = bitmapScanEnabledOldValue;
+
+	return sequentialScanPlan;
 }
 
 
