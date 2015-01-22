@@ -1111,6 +1111,17 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 			bool topLevel = true;
 			LOCKMODE lockMode = NoLock;
 			EState *executorState = NULL;
+			bool zeroShardQuery = list_length(distributedPlan->taskList) == 0;
+
+			/* if query involves zero shards, just let it hit local table */
+			if (zeroShardQuery)
+			{
+				Plan *originalPlan = distributedPlan->originalPlan;
+				plannedStatement->planTree = originalPlan;
+
+				PgShardExecutorStart(queryDesc, eflags);
+				return;
+			}
 
 			/* disallow transactions and triggers during distributed commands */
 			PreventTransactionChain(topLevel, "distributed commands");
@@ -1776,10 +1787,7 @@ ExecuteSingleShardSelect(DistributedPlan *distributedPlan, EState *executorState
 	TupleTableSlot *tupleTableSlot = NULL;
 
 	List *taskList = distributedPlan->taskList;
-	if (list_length(taskList) != 1)
-	{
-		ereport(ERROR, (errmsg("cannot execute select over multiple shards")));
-	}
+	Assert(list_length(taskList) == 1);
 
 	task = (Task *) linitial(taskList);
 	tupleStore = tuplestore_begin_heap(false, false, work_mem);
