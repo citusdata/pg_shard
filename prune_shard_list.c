@@ -275,10 +275,9 @@ LookupOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber)
 	/* if not found in the cache, call GetOperatorByType and put the result in cache */
 	if (matchingCacheEntry == NULL)
 	{
-		Oid operatorId;
-		MemoryContext oldContext;
+		MemoryContext oldContext = NULL;
+		Oid operatorId = GetOperatorByType(typeId, accessMethodId, strategyNumber);
 
-		operatorId = GetOperatorByType(typeId, accessMethodId, strategyNumber);
 		if (operatorId == InvalidOid)
 		{
 			/* if operatorId is invalid, return and do not cache its value */
