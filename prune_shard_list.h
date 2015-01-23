@@ -31,6 +31,17 @@
 #define RESERVED_HASHED_COLUMN_ID MaxAttrNumber
 
 
+ /* OperatorIdCacheEntry contains information for each element in OperatorIdCache */
+typedef struct OperatorIdCacheEntry
+{
+	/* cache key consists of typeId, accessMethodId and strategyNumber */
+	Oid typeId;
+	Oid accessMethodId;
+	int16 strategyNumber;
+	Oid operatorId;
+} OperatorIdCacheEntry;
+
+
 /* function declarations for shard pruning */
 extern List * PruneShardList(Oid relationId, List *whereClauseList,
 							 List *shardIntervalList);

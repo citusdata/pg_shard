@@ -39,9 +39,19 @@
 #include "utils/errcodes.h"
 #include "utils/lsyscache.h"
 #include "utils/typcache.h"
+#include "utils/memutils.h"
+
+
+/*
+ * OperatorIdCache is used for caching operator identifiers for given typeId,
+ * accessMethodId and strategyNumber. It is initialized to empty list as
+ * there are no items in the cache.
+ */
+static List *OperatorIdCache = NIL;
 
 
 /* local function forward declarations */
+static Oid LookupOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber);
 static Oid GetOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber);
 static bool SimpleOpExpression(Expr *clause);
 static Node * HashableClauseMutator(Node *originalNode, Var *partitionColumn);
@@ -218,7 +228,7 @@ MakeOpExpression(Var *variable, int16 strategyNumber)
 	OpExpr *expression = NULL;
 
 	/* Load the operator from system catalogs */
-	operatorId = GetOperatorByType(typeId, accessMethodId, strategyNumber);
+	operatorId = LookupOperatorByType(typeId, accessMethodId, strategyNumber);
 
 	constantValue = makeNullConst(typeId, typeModId, collationId);
 
@@ -235,6 +245,59 @@ MakeOpExpression(Var *variable, int16 strategyNumber)
 	expression->opresulttype = get_func_rettype(expression->opfuncid);
 
 	return expression;
+}
+
+
+/*
+ * LookupOperatorByType is a wrapper around GetOperatorByType that uses a cache
+ * to avoid multiple lookups of operators within a single session by their types.
+ */
+static Oid
+LookupOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber)
+{
+	OperatorIdCacheEntry *matchingCacheEntry = NULL;
+	ListCell *cacheEntryCell = NULL;
+
+	/* search the cache */
+	foreach(cacheEntryCell, OperatorIdCache)
+	{
+		OperatorIdCacheEntry *cacheEntry = lfirst(cacheEntryCell);
+
+		if ((cacheEntry->typeId == typeId) &&
+			(cacheEntry->accessMethodId == accessMethodId) &&
+			(cacheEntry->strategyNumber == strategyNumber))
+		{
+			matchingCacheEntry = cacheEntry;
+			break;
+		}
+	}
+
+	/* if not found in the cache, call GetOperatorByType and put the result in cache */
+	if (matchingCacheEntry == NULL)
+	{
+		MemoryContext oldContext = NULL;
+		Oid operatorId = GetOperatorByType(typeId, accessMethodId, strategyNumber);
+
+		if (operatorId == InvalidOid)
+		{
+			/* if operatorId is invalid, return and do not cache its value */
+			return operatorId;
+		}
+
+		oldContext = MemoryContextSwitchTo(CacheMemoryContext);
+
+		matchingCacheEntry = palloc0(sizeof(OperatorIdCacheEntry));
+		matchingCacheEntry->typeId = typeId;
+		matchingCacheEntry->accessMethodId = accessMethodId;
+		matchingCacheEntry->strategyNumber = strategyNumber;
+		matchingCacheEntry->operatorId = operatorId;
+
+		OperatorIdCache = lappend(OperatorIdCache, matchingCacheEntry);
+
+		MemoryContextSwitchTo(oldContext);
+	}
+
+	return matchingCacheEntry->operatorId;
 }
 
 
