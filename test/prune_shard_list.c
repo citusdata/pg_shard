@@ -54,7 +54,7 @@ prune_using_no_values(PG_FUNCTION_ARGS)
 	Oid distributedTableId = PG_GETARG_OID(0);
 	List *whereClauseList = NIL;
 	ArrayType *shardIdArrayType = PrunedShardIdsForTable(distributedTableId,
-	                                                     whereClauseList);
+														 whereClauseList);
 
 	PG_RETURN_ARRAYTYPE_P(shardIdArrayType);
 }
@@ -72,7 +72,7 @@ prune_using_single_value(PG_FUNCTION_ARGS)
 	Expr *equalityExpr = MakeTextPartitionExpression(distributedTableId, value);
 	List *whereClauseList = list_make1(equalityExpr);
 	ArrayType *shardIdArrayType = PrunedShardIdsForTable(distributedTableId,
-	                                                     whereClauseList);
+														 whereClauseList);
 
 	PG_RETURN_ARRAYTYPE_P(shardIdArrayType);
 }
@@ -93,7 +93,7 @@ prune_using_either_value(PG_FUNCTION_ARGS)
 	Expr *orClause = make_orclause(list_make2(firstQual, secondQual));
 	List *whereClauseList = list_make1(orClause);
 	ArrayType *shardIdArrayType = PrunedShardIdsForTable(distributedTableId,
-	                                                     whereClauseList);
+														 whereClauseList);
 
 	PG_RETURN_ARRAYTYPE_P(shardIdArrayType);
 }
@@ -114,7 +114,7 @@ prune_using_both_values(PG_FUNCTION_ARGS)
 
 	List *whereClauseList = list_make2(firstQual, secondQual);
 	ArrayType *shardIdArrayType = PrunedShardIdsForTable(distributedTableId,
-	                                                     whereClauseList);
+														 whereClauseList);
 
 	PG_RETURN_ARRAYTYPE_P(shardIdArrayType);
 }

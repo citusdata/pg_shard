@@ -43,7 +43,7 @@ extend_ddl_command(PG_FUNCTION_ARGS)
 	char *ddlCommand = text_to_cstring(ddlCommandText);
 
 	List *extendedCommands = ExtendedDDLCommandList(distributedTableId, shardId,
-	                                                list_make1(ddlCommand));
+													list_make1(ddlCommand));
 
 	if (list_length(extendedCommands) != 1)
 	{

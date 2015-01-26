@@ -96,9 +96,9 @@ static bool ExtractRangeTableEntryWalker(Node *node, List **rangeTableList);
 static List * DistributedQueryShardList(Query *query);
 static bool SelectFromMultipleShards(Query *query, List *queryShardList);
 static void ClassifyRestrictions(List *queryRestrictList, List **remoteRestrictList,
-                                 List **localRestrictList);
+								 List **localRestrictList);
 static Query * RowAndColumnFilterQuery(Query *query, List *remoteRestrictList,
-                                       List *localRestrictList);
+									   List *localRestrictList);
 static Query * BuildLocalQuery(Query *query, List *localRestrictList);
 static PlannedStmt * PlanSequentialScan(Query *query, int cursorOptions,
 										ParamListInfo boundParams);
@@ -265,12 +265,12 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 
 			/* partition restrictions into remote and local lists */
 			ClassifyRestrictions(queryRestrictList, &remoteRestrictList,
-			                     &localRestrictList);
+								 &localRestrictList);
 
 			/* build local and distributed query */
 			distributedQuery = RowAndColumnFilterQuery(distributedQuery,
-			                                           remoteRestrictList,
-			                                           localRestrictList);
+													   remoteRestrictList,
+													   localRestrictList);
 			localQuery = BuildLocalQuery(query, localRestrictList);
 
 			/*
@@ -673,7 +673,7 @@ SelectFromMultipleShards(Query *query, List *queryShardList)
  */
 static void
 ClassifyRestrictions(List *queryRestrictList, List **remoteRestrictList,
-                     List **localRestrictList)
+					 List **localRestrictList)
 {
 	ListCell *restrictCell = NULL;
 
@@ -727,11 +727,11 @@ RowAndColumnFilterQuery(Query *query, List *remoteRestrictList, List *localRestr
 
 	/* must retrieve all columns referenced by local WHERE clauses... */
 	whereColumnList = pull_var_clause((Node *) localRestrictList, aggregateBehavior,
-	                                  placeHolderBehavior);
+									  placeHolderBehavior);
 
 	/* as well as any used in projections (GROUP BY, etc.) */
 	projectColumnList = pull_var_clause((Node *) query->targetList, aggregateBehavior,
-	                                    placeHolderBehavior);
+										placeHolderBehavior);
 
 	/* put them together to get list of required columns for query */
 	requiredColumnList = list_concat(requiredColumnList, whereColumnList);
@@ -1103,7 +1103,7 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 
 		bool selectFromMultipleShards = distributedPlan->selectFromMultipleShards;
 		if (!selectFromMultipleShards)
-		  {
+		{
 			bool topLevel = true;
 			LOCKMODE lockMode = NoLock;
 			EState *executorState = NULL;
@@ -1134,34 +1134,34 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 			 * original one.
 			 */
 			Plan *originalPlan = NULL;
-			  RangeTblEntry *sequentialScanRangeTable = NULL;
-			  Oid intermediateResultTableId = InvalidOid;
-			  bool missingOK = false;
+			RangeTblEntry *sequentialScanRangeTable = NULL;
+			Oid intermediateResultTableId = InvalidOid;
+			bool missingOK = false;
 
-			  /* execute the previously created statement to create a temp table */
-			  CreateStmt *createStmt = distributedPlan->createTemporaryTableStmt;
-			  const char *queryDescription = "create temp table like";
-			  RangeVar *intermediateResultTable = createStmt->relation;
+			/* execute the previously created statement to create a temp table */
+			CreateStmt *createStmt = distributedPlan->createTemporaryTableStmt;
+			const char *queryDescription = "create temp table like";
+			RangeVar *intermediateResultTable = createStmt->relation;
 
-			  ProcessUtility((Node *) createStmt, queryDescription,
-							 PROCESS_UTILITY_TOPLEVEL, NULL, None_Receiver, NULL);
+			ProcessUtility((Node *) createStmt, queryDescription,
+						   PROCESS_UTILITY_TOPLEVEL, NULL, None_Receiver, NULL);
 
-			  /* execute select queries and fetch results into the temp table */
-			  ExecuteMultipleShardSelect(distributedPlan, intermediateResultTable);
+			/* execute select queries and fetch results into the temp table */
+			ExecuteMultipleShardSelect(distributedPlan, intermediateResultTable);
 
-			  /* update the query descriptor snapshot so results are visible */
-			  UnregisterSnapshot(queryDesc->snapshot);
-			  UpdateActiveSnapshotCommandId();
-			  queryDesc->snapshot = RegisterSnapshot(GetActiveSnapshot());
+			/* update the query descriptor snapshot so results are visible */
+			UnregisterSnapshot(queryDesc->snapshot);
+			UpdateActiveSnapshotCommandId();
+			queryDesc->snapshot = RegisterSnapshot(GetActiveSnapshot());
 
-			  /* update sequential scan's table entry to point to intermediate table */
-			  intermediateResultTableId = RangeVarGetRelid(intermediateResultTable,
-														   NoLock, missingOK);
+			/* update sequential scan's table entry to point to intermediate table */
+			intermediateResultTableId = RangeVarGetRelid(intermediateResultTable,
+														 NoLock, missingOK);
 
-			  Assert(list_length(plannedStatement->rtable) == 1);
-			  sequentialScanRangeTable = linitial(plannedStatement->rtable);
-			  Assert(sequentialScanRangeTable->rtekind == RTE_RELATION);
-			  sequentialScanRangeTable->relid = intermediateResultTableId;
+			Assert(list_length(plannedStatement->rtable) == 1);
+			sequentialScanRangeTable = linitial(plannedStatement->rtable);
+			Assert(sequentialScanRangeTable->rtekind == RTE_RELATION);
+			sequentialScanRangeTable->relid = intermediateResultTableId;
 
 			/* swap in modified (local) plan for compatibility with standard start hook */
 			originalPlan = distributedPlan->originalPlan;
@@ -1186,9 +1186,9 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 			PreviousExecutorStartHook(queryDesc, eflags);
 		}
 		else
-		 {
-		   standard_ExecutorStart(queryDesc, eflags);
-		 }
+		{
+			standard_ExecutorStart(queryDesc, eflags);
+		}
 	}
 }
 
