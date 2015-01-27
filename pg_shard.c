@@ -996,35 +996,35 @@ TargetEntryList(List *expressionList)
 static CreateStmt *
 CreateTemporaryTableLikeStmt(Oid sourceRelationId)
 {
-	  static unsigned long temporaryTableId = 0;
-	  CreateStmt *createStmt = NULL;
-	  StringInfo clonedTableName = NULL;
-	  RangeVar *clonedRelation = NULL;
+	static unsigned long temporaryTableId = 0;
+	CreateStmt *createStmt = NULL;
+	StringInfo clonedTableName = NULL;
+	RangeVar *clonedRelation = NULL;
 
-	  char *sourceTableName = get_rel_name(sourceRelationId);
-	  Oid sourceSchemaId = get_rel_namespace(sourceRelationId);
-	  char *sourceSchemaName = get_namespace_name(sourceSchemaId);
-	  RangeVar *sourceRelation = makeRangeVar(sourceSchemaName, sourceTableName, -1);
+	char *sourceTableName = get_rel_name(sourceRelationId);
+	Oid sourceSchemaId = get_rel_namespace(sourceRelationId);
+	char *sourceSchemaName = get_namespace_name(sourceSchemaId);
+	RangeVar *sourceRelation = makeRangeVar(sourceSchemaName, sourceTableName, -1);
 
-	  TableLikeClause *tableLikeClause = makeNode(TableLikeClause);
-	  tableLikeClause->relation = sourceRelation;
-	  tableLikeClause->options = 0; /* don't copy over indexes/constraints etc */
+	TableLikeClause *tableLikeClause = makeNode(TableLikeClause);
+	tableLikeClause->relation = sourceRelation;
+	tableLikeClause->options = 0; /* don't copy over indexes/constraints etc */
 
-	  /* create a unique name for the cloned table */
-	  clonedTableName = makeStringInfo();
-	  appendStringInfo(clonedTableName, "%s_%d_%lu",
-					   TEMPORARY_TABLE_PREFIX, MyProcPid, temporaryTableId);
-	  temporaryTableId++;
+	/* create a unique name for the cloned table */
+	clonedTableName = makeStringInfo();
+	appendStringInfo(clonedTableName, "%s_%d_%lu", TEMPORARY_TABLE_PREFIX, MyProcPid,
+	                 temporaryTableId);
+	temporaryTableId++;
 
-	  clonedRelation = makeRangeVar(NULL, clonedTableName->data, -1);
-	  clonedRelation->relpersistence = RELPERSISTENCE_TEMP;
+	clonedRelation = makeRangeVar(NULL, clonedTableName->data, -1);
+	clonedRelation->relpersistence = RELPERSISTENCE_TEMP;
 
-	  createStmt = makeNode(CreateStmt);
-	  createStmt->relation = clonedRelation;
-	  createStmt->tableElts = list_make1(tableLikeClause);
-	  createStmt->oncommit = ONCOMMIT_DROP;
+	createStmt = makeNode(CreateStmt);
+	createStmt->relation = clonedRelation;
+	createStmt->tableElts = list_make1(tableLikeClause);
+	createStmt->oncommit = ONCOMMIT_DROP;
 
-	  return createStmt;
+	return createStmt;
 }
 
 
