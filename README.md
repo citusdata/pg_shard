@@ -1,7 +1,7 @@
 # pg_shard
 
-[![Build Status](https://img.shields.io/travis/citusdata/pg_shard.svg)][status]
-[![Coverage](https://img.shields.io/coveralls/citusdata/pg_shard.svg)][coverage]
+[![Build Status](https://img.shields.io/travis/citusdata/pg_shard/develop.svg)][status]
+[![Coverage](https://img.shields.io/coveralls/citusdata/pg_shard/develop.svg)][coverage]
 [![Release](https://img.shields.io/github/release/citusdata/pg_shard.svg)][release]
 [![License](https://img.shields.io/:license-LGPLv3-blue.svg)][license]
 
