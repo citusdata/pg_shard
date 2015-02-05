@@ -1,0 +1,52 @@
+{
+    "name": "pg_shard",
+    "abstract": "Easy sharding for PostgreSQL",
+    "description": "Shards and replicates PostgreSQL tables for horizontal scale and high availability. Seamlessly distributes SQL statements, without requiring any application changes.",
+    "version": "1.0.2",
+    "maintainer": "\"Jason Petersen\" <jason@citusdata.com>",
+    "license": "lgpl_3_0",
+    "prereqs": {
+       "runtime": {
+          "requires": {
+             "PostgreSQL": "9.3.4"
+          }
+       }
+    },
+    "provides": {
+        "pg_shard": {
+            "abstract": "Easy sharding for PostgreSQL",
+            "file": "pg_shard--1.0.sql",
+            "docfile": "README.md",
+            "version": "1.0.2"
+        }
+    },
+    "release_status": "stable",
+    "resources": {
+        "homepage": "http://citusdata.com/docs/pg-shard",
+        "bugtracker": {
+            "web": "https://github.com/citusdata/pg_shard/issues",
+            "mailto": "support@citusdata.com"
+        },
+        "repository": {
+          "url":  "git://github.com/citusdata/pg_shard.git",
+          "web":  "https://github.com/citusdata/pg_shard",
+          "type": "git"
+        }
+    },
+
+    "generated_by": "\"Jason Petersen\" <jason@citusdata.com>",
+
+    "tags": [
+        "sharding",
+        "replication",
+        "failover",
+        "distribution",
+        "scale",
+        "cluster"
+    ],
+
+    "meta-spec": {
+        "version": "1.0.0",
+        "url": "http://pgxn.org/meta/spec.txt"
+    }
+}
