@@ -58,7 +58,6 @@ static List *ShardIntervalListCache = NIL;
 
 
 /* local function forward declarations */
-static Var * ColumnNameToColumn(Oid relationId, char *columnName);
 static void LoadShardIntervalRow(int64 shardId, Oid *relationId,
 								 char **minValue, char **maxValue);
 static ShardPlacement * TupleToShardPlacement(HeapTuple heapTuple,
@@ -445,7 +444,7 @@ IsDistributedTable(Oid tableId)
  * a Var that represents that column in that relation. This function throws an
  * error if the column doesn't exist or is a system column.
  */
-static Var *
+Var *
 ColumnNameToColumn(Oid relationId, char *columnName)
 {
 	Var *partitionColumn = NULL;

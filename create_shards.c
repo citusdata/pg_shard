@@ -21,6 +21,7 @@
 #include "create_shards.h"
 #include "ddl_commands.h"
 #include "distribution_metadata.h"
+#include "prune_shard_list.h"
 
 #include <ctype.h>
 #include <limits.h>
@@ -29,8 +30,11 @@
 #include <string.h>
 
 #include "access/attnum.h"
+#include "access/skey.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_class.h"
+#include "catalog/pg_am.h"
+#include "commands/defrem.h"
 #include "lib/stringinfo.h"
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
@@ -73,6 +77,11 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 	AttrNumber partitionColumnId = InvalidAttrNumber;
 	char *partitionColumnName = text_to_cstring(partitionColumnText);
 	char *tableName = text_to_cstring(tableNameText);
+	Var* partitionColumnVar = NULL;
+	Oid partitionColumnTypeId = InvalidOid;
+	Oid partitionColumnOpClassId = InvalidOid;
+	Oid lessEqualOperatorId = InvalidOid;
+	Oid greaterEqualOperatorId = InvalidOid;
 
 	/* verify target relation is either regular or foreign table */
 	relationKind = get_rel_relkind(distributedTableId);
@@ -95,6 +104,35 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 	if (partitionMethod != HASH_PARTITION_TYPE)
 	{
 		ereport(ERROR, (errmsg("unsupported partition method: %c", partitionMethod)));
+	}
+
+	partitionColumnVar = ColumnNameToColumn(distributedTableId, partitionColumnName);
+	partitionColumnTypeId = partitionColumnVar->vartype;
+	partitionColumnOpClassId = GetDefaultOpClass(partitionColumnTypeId, BTREE_AM_OID);
+
+	/* if there is no operator class for the partition column, error out */
+	if (partitionColumnOpClassId == InvalidOid)
+	{
+		ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+						errmsg("cannot distribute relation: \"%s\"", tableName),
+						errdetail("Column \"%s\" is not eligible to be the distribution "
+								  "column.", partitionColumnName),
+						errhint("Try another column as the distribution column.")));
+	}
+
+	lessEqualOperatorId = GetOperatorByType(partitionColumnTypeId, BTREE_AM_OID,
+											BTLessEqualStrategyNumber);
+	greaterEqualOperatorId =  GetOperatorByType(partitionColumnTypeId, BTREE_AM_OID,
+												BTGreaterEqualStrategyNumber);
+
+	/* if partition column does not support <= and >= operators, error out*/
+	if (lessEqualOperatorId == InvalidOid ||  greaterEqualOperatorId == InvalidOid)
+	{
+		ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+						errmsg("cannot distribute relation: \"%s\"", tableName),
+						errdetail("Column \"%s\" does not support comparison operators.",
+								  partitionColumnName),
+						errhint("Try another column as the distribution column.")));
 	}
 
 	/* insert row into the partition metadata table */

@@ -46,6 +46,7 @@ typedef struct OperatorIdCacheEntry
 extern List * PruneShardList(Oid relationId, List *whereClauseList,
 							 List *shardIntervalList);
 extern OpExpr * MakeOpExpression(Var *variable, int16 strategyNumber);
+extern Oid GetOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber);
 
 
 #endif /* PG_SHARD_PRUNE_SHARD_LIST_H */

@@ -52,7 +52,6 @@ static List *OperatorIdCache = NIL;
 
 /* local function forward declarations */
 static Oid LookupOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber);
-static Oid GetOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber);
 static bool SimpleOpExpression(Expr *clause);
 static Node * HashableClauseMutator(Node *originalNode, Var *partitionColumn);
 static bool OpExpressionContainsColumn(OpExpr *operatorExpression, Var *partitionColumn);
@@ -305,7 +304,7 @@ LookupOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber)
  * GetOperatorByType returns the operator oid for the given type, access
  * method, and strategy number.
  */
-static Oid
+Oid
 GetOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber)
 {
 	/* Get default operator class from pg_opclass */
