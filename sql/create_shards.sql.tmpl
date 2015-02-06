@@ -18,7 +18,8 @@ CREATE FUNCTION create_table_then_fail(cstring, integer)
 
 CREATE TABLE table_to_distribute (
 	name text,
-	id bigint PRIMARY KEY
+	id bigint PRIMARY KEY,
+	data	json
 );
 
 -- use an index instead of table name
@@ -29,6 +30,9 @@ SELECT master_create_distributed_table('table_to_distribute', 'bad_column');
 
 -- use unsupported partition type
 SELECT master_create_distributed_table('table_to_distribute', 'name', 'r');
+
+-- use unsupported partition column
+SELECT master_create_distributed_table('table_to_distribute', 'data');
 
 -- distribute table and inspect side effects
 SELECT master_create_distributed_table('table_to_distribute', 'name');

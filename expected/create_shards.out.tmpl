@@ -14,7 +14,8 @@ CREATE FUNCTION create_table_then_fail(cstring, integer)
 -- ===================================================================
 CREATE TABLE table_to_distribute (
 	name text,
-	id bigint PRIMARY KEY
+	id bigint PRIMARY KEY,
+	data	json
 );
 -- use an index instead of table name
 SELECT master_create_distributed_table('table_to_distribute_pkey', 'id');
@@ -26,6 +27,11 @@ ERROR:  could not find column: bad_column
 -- use unsupported partition type
 SELECT master_create_distributed_table('table_to_distribute', 'name', 'r');
 ERROR:  unsupported partition method: r
+-- use unsupported partition column
+SELECT master_create_distributed_table('table_to_distribute', 'data');
+ERROR:  cannot distribute relation: "table_to_distribute"
+DETAIL:  Column "data" is not eligible to be the distribution column.
+HINT:  Try another column as the distribution column.
 -- distribute table and inspect side effects
 SELECT master_create_distributed_table('table_to_distribute', 'name');
  master_create_distributed_table 
