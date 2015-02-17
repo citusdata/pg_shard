@@ -59,6 +59,7 @@
 
 /* denotes partition type of the distributed table */
 #define HASH_PARTITION_TYPE 'h'
+#define RANGE_PARTITION_TYPE 'r'
 
 /* human-readable names for addressing columns of partition table */
 #define PARTITION_TABLE_ATTRIBUTE_COUNT 3

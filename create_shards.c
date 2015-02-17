@@ -30,6 +30,8 @@
 #include <string.h>
 
 #include "access/attnum.h"
+#include "access/hash.h"
+#include "access/nbtree.h"
 #include "access/skey.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_class.h"
@@ -54,6 +56,7 @@ static List * ParseWorkerNodeFile(char *workerNodeFilename);
 static int CompareWorkerNodes(const void *leftElement, const void *rightElement);
 static bool ExecuteRemoteCommand(PGconn *connection, const char *sqlCommand);
 static text * IntegerToText(int32 value);
+static Oid GetSupportRoutine(Oid columnOid, Oid accessMethodId, int16 supportFunctionNumber);
 
 
 /* declarations for dynamic loading */
@@ -80,8 +83,8 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 	Var* partitionColumnVar = NULL;
 	Oid partitionColumnTypeId = InvalidOid;
 	Oid partitionColumnOpClassId = InvalidOid;
-	Oid lessEqualOperatorId = InvalidOid;
-	Oid greaterEqualOperatorId = InvalidOid;
+	Oid btreeSupportRoutine = InvalidOid;
+	Oid hashSupportRoutine = InvalidOid;
 
 	/* verify target relation is either regular or foreign table */
 	relationKind = get_rel_relkind(distributedTableId);
@@ -100,39 +103,67 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 		ereport(ERROR, (errmsg("could not find column: %s", partitionColumnName)));
 	}
 
-	/* we only support hash partitioning method for now */
-	if (partitionMethod != HASH_PARTITION_TYPE)
+	partitionColumnVar = ColumnNameToColumn(distributedTableId, partitionColumnName);
+	partitionColumnTypeId = partitionColumnVar->vartype;
+
+	if (partitionMethod == HASH_PARTITION_TYPE)
 	{
+		partitionColumnOpClassId = GetDefaultOpClass(partitionColumnTypeId, HASH_AM_OID);
+	}
+	else
+	{
+		/* we only support hash partitioning right now */
 		ereport(ERROR, (errmsg("unsupported partition method: %c", partitionMethod)));
 	}
 
-	partitionColumnVar = ColumnNameToColumn(distributedTableId, partitionColumnName);
-	partitionColumnTypeId = partitionColumnVar->vartype;
-	partitionColumnOpClassId = GetDefaultOpClass(partitionColumnTypeId, BTREE_AM_OID);
-
-	/* if there is no operator class for the partition column, error out */
+	/*
+	 * If data type of the partition column does not have a default operator class, we
+	 * should prevent distribution of the table on this column. It is because there are
+	 * no operators/procedures that can manipulate the value of the column.
+	 */
 	if (partitionColumnOpClassId == InvalidOid)
 	{
 		ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
 						errmsg("cannot distribute relation: \"%s\"", tableName),
-						errdetail("Column \"%s\" is not eligible to be the distribution "
-								  "column.", partitionColumnName),
+						errdetail("Column \"%s\" does not have a default operator class"
+								  " with the provided partition method.",
+								  partitionColumnName),
 						errhint("Try another column as the distribution column.")));
 	}
 
-	lessEqualOperatorId = GetOperatorByType(partitionColumnTypeId, BTREE_AM_OID,
-											BTLessEqualStrategyNumber);
-	greaterEqualOperatorId =  GetOperatorByType(partitionColumnTypeId, BTREE_AM_OID,
-												BTGreaterEqualStrategyNumber);
-
-	/* if partition column does not support <= and >= operators, error out*/
-	if (lessEqualOperatorId == InvalidOid ||  greaterEqualOperatorId == InvalidOid)
+	/* depending on the partition type, check for the existence of support procedure */
+	if (partitionMethod == HASH_PARTITION_TYPE)
 	{
-		ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-						errmsg("cannot distribute relation: \"%s\"", tableName),
-						errdetail("Column \"%s\" does not support comparison operators.",
-								  partitionColumnName),
-						errhint("Try another column as the distribution column.")));
+		hashSupportRoutine = GetSupportRoutine(partitionColumnTypeId, HASH_AM_OID,
+											   HASHPROC);
+		if (hashSupportRoutine == InvalidOid)
+		{
+			ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+							errmsg("cannot distribute relation: \"%s\"", tableName),
+							errdetail("Hash operator is not defined for the data type"
+									  " of column \"%s\".", partitionColumnName),
+							errhint("Try another column as the distribution column.")));
+		}
+	}
+	else if (partitionMethod == RANGE_PARTITION_TYPE)
+	{
+		/*
+		 * Currently we do not support RANGE_PARTITION_TYPE. However, for the
+		 * completeness of the code, we also check operators for range partitioning.
+		 * TODO: Add regression tests for this check when RANGE_PARTITION_TYPE is
+		 * supported.
+		 */
+		btreeSupportRoutine = GetSupportRoutine(partitionColumnTypeId, BTREE_AM_OID,
+												BTORDER_PROC);
+		if (btreeSupportRoutine == InvalidOid)
+		{
+			ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+							errmsg("cannot distribute relation: \"%s\"", tableName),
+							errdetail("Required comparison operator is not defined "
+									  "for the data type of column \"%s\".",
+									  partitionColumnName),
+							errhint("Try another column as the distribution column.")));
+		}
 	}
 
 	/* insert row into the partition metadata table */
@@ -571,4 +602,31 @@ IntegerToText(int32 value)
 	valueText = cstring_to_text(valueString->data);
 
 	return valueText;
+}
+
+
+/*
+ *	GetSupportRoutine helps to find the support routine given a column, an access method
+ *	and id of a support function. This function returns InvalidOid if there is no support
+ *	routine associated with the data type of the column or there is no default operator
+ *	class for the data type of the column.
+ */
+Oid
+GetSupportRoutine(Oid columnOid, Oid accessMethodId, int16 supportFunctionNumber)
+{
+	Oid operatorFamilyId = InvalidOid;
+	Oid supportRoutineOid = InvalidOid;
+	Oid operatorClassId = GetDefaultOpClass(columnOid, accessMethodId);
+
+	if (operatorClassId == InvalidOid)
+	{
+		/* return InvalidOid in order to prevent get_opclass_family to error-out */
+		return InvalidOid;
+	}
+
+	operatorFamilyId = get_opclass_family(operatorClassId);
+	supportRoutineOid = get_opfamily_proc(operatorFamilyId, columnOid, columnOid,
+										  supportFunctionNumber);
+
+	return supportRoutineOid;
 }
