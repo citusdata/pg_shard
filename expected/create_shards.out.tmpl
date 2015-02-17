@@ -12,22 +12,22 @@ CREATE FUNCTION create_table_then_fail(cstring, integer)
 -- ===================================================================
 -- create test type, operator, operator family and operator class
 -- ===================================================================
-CREATE TYPE test_type AS (
+CREATE TYPE dummy_type AS (
     i integer
 );
-CREATE FUNCTION test_type_function(test_type, test_type) RETURNS boolean
+CREATE FUNCTION dummy_type_function(dummy_type, dummy_type) RETURNS boolean
 AS ' SELECT TRUE;'
 LANGUAGE SQL
 IMMUTABLE
 RETURNS NULL ON NULL INPUT;
 CREATE OPERATOR = (
-    LEFTARG = test_type,
-    RIGHTARG = test_type,
-    PROCEDURE = test_type_function);
-CREATE OPERATOR FAMILY test_op_family USING hash;
+    LEFTARG = dummy_type,
+    RIGHTARG = dummy_type,
+    PROCEDURE = dummy_type_function);
+CREATE OPERATOR FAMILY dummy_op_family USING hash;
 -- create operator class with no support routine
-CREATE OPERATOR CLASS test_op_family_class
-DEFAULT FOR TYPE test_type USING hash FAMILY test_op_family AS
+CREATE OPERATOR CLASS dummy_op_family_class
+DEFAULT FOR TYPE dummy_type USING hash FAMILY dummy_op_family AS
 OPERATOR 1 =;
 -- ===================================================================
 -- test shard creation functionality
@@ -36,7 +36,7 @@ CREATE TABLE table_to_distribute (
 	name text,
 	id bigint PRIMARY KEY,
 	json_data json,
-	test_type_data test_type
+	test_type_data dummy_type
 );
 -- use an index instead of table name
 SELECT master_create_distributed_table('table_to_distribute_pkey', 'id');
