@@ -10,12 +10,33 @@ CREATE FUNCTION create_table_then_fail(cstring, integer)
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 -- ===================================================================
+-- create test type, operator, operator family and operator class
+-- ===================================================================
+CREATE TYPE test_type AS (
+    i integer
+);
+CREATE FUNCTION test_type_function(test_type, test_type) RETURNS boolean
+AS ' SELECT TRUE;'
+LANGUAGE SQL
+IMMUTABLE
+RETURNS NULL ON NULL INPUT;
+CREATE OPERATOR = (
+    LEFTARG = test_type,
+    RIGHTARG = test_type,
+    PROCEDURE = test_type_function);
+CREATE OPERATOR FAMILY test_op_family USING hash;
+-- create operator class with no support routine
+CREATE OPERATOR CLASS test_op_family_class
+DEFAULT FOR TYPE test_type USING hash FAMILY test_op_family AS
+OPERATOR 1 =;
+-- ===================================================================
 -- test shard creation functionality
 -- ===================================================================
 CREATE TABLE table_to_distribute (
 	name text,
 	id bigint PRIMARY KEY,
-	data	json
+	json_data json,
+	test_type_data test_type
 );
 -- use an index instead of table name
 SELECT master_create_distributed_table('table_to_distribute_pkey', 'id');
@@ -27,10 +48,15 @@ ERROR:  could not find column: bad_column
 -- use unsupported partition type
 SELECT master_create_distributed_table('table_to_distribute', 'name', 'r');
 ERROR:  unsupported partition method: r
--- use unsupported partition column
-SELECT master_create_distributed_table('table_to_distribute', 'data');
+-- use unsupported partition column which does not have any default op class
+SELECT master_create_distributed_table('table_to_distribute', 'json_data');
 ERROR:  cannot distribute relation: "table_to_distribute"
-DETAIL:  Column "data" is not eligible to be the distribution column.
+DETAIL:  Column "json_data" does not have a default operator class with the provided partition method.
+HINT:  Try another column as the distribution column.
+-- use unsupported partition column which does not have required support routines
+SELECT master_create_distributed_table('table_to_distribute', 'test_type_data');
+ERROR:  cannot distribute relation: "table_to_distribute"
+DETAIL:  Hash operator is not defined for the data type of column "test_type_data".
 HINT:  Try another column as the distribution column.
 -- distribute table and inspect side effects
 SELECT master_create_distributed_table('table_to_distribute', 'name');
