@@ -709,6 +709,7 @@ RowAndColumnFilterQuery(Query *query, List *remoteRestrictList, List *localRestr
 	List *rangeTableList = NIL;
 	List *whereColumnList = NIL;
 	List *projectColumnList = NIL;
+	List *havingClauseColumnList = NIL;
 	List *requiredColumnList = NIL;
 	ListCell *columnCell = NULL;
 	List *uniqueColumnList = NIL;
@@ -733,9 +734,14 @@ RowAndColumnFilterQuery(Query *query, List *remoteRestrictList, List *localRestr
 	projectColumnList = pull_var_clause((Node *) query->targetList, aggregateBehavior,
 										placeHolderBehavior);
 
+	/* finally, need those used in any HAVING quals */
+	havingClauseColumnList = pull_var_clause(query->havingQual, aggregateBehavior,
+											 placeHolderBehavior);
+
 	/* put them together to get list of required columns for query */
 	requiredColumnList = list_concat(requiredColumnList, whereColumnList);
 	requiredColumnList = list_concat(requiredColumnList, projectColumnList);
+	requiredColumnList = list_concat(requiredColumnList, havingClauseColumnList);
 
 	/* ensure there are no duplicates in the list  */
 	foreach(columnCell, requiredColumnList)
