@@ -140,6 +140,7 @@ extern List * LoadShardPlacementList(int64 shardId);
 extern Var * PartitionColumn(Oid distributedTableId);
 extern char PartitionType(Oid distributedTableId);
 extern bool IsDistributedTable(Oid tableId);
+extern bool DistributedTablesExist(void);
 extern Var * ColumnNameToColumn(Oid relationId, char *columnName);
 extern void InsertPartitionRow(Oid distributedTableId, char partitionType,
 							   text *partitionKeyText);

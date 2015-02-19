@@ -440,6 +440,40 @@ IsDistributedTable(Oid tableId)
 
 
 /*
+ *  DistributedTablesExist returns true if there exists at least one distributed
+ *  table on metadata tables.
+ */
+bool
+DistributedTablesExist(void)
+{
+
+	bool distributedTablesExist = false;
+	RangeVar *heapRangeVar = NULL;
+	Relation heapRelation = NULL;
+	HeapScanDesc scanDesc = NULL;
+	HeapTuple heapTuple = NULL;
+
+	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);
+	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
+
+	scanDesc = heap_beginscan(heapRelation, SnapshotSelf, 0, NULL);
+
+	heapTuple = heap_getnext(scanDesc, ForwardScanDirection);
+
+	/*
+	 * Check if there exists any tuples in the partition table. If there are any tables,
+	 * we can conclude that there are at least one distributed table.
+	 */
+	distributedTablesExist = HeapTupleIsValid(heapTuple);
+
+	heap_endscan(scanDesc);
+	relation_close(heapRelation, AccessShareLock);
+
+	return distributedTablesExist;
+}
+
+
+/*
  * ColumnNameToColumn accepts a relation identifier and column name and returns
  * a Var that represents that column in that relation. This function throws an
  * error if the column doesn't exist or is a system column.

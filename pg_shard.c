@@ -38,6 +38,7 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_type.h"
+#include "catalog/objectaddress.h"
 #include "commands/extension.h"
 #include "executor/execdesc.h"
 #include "executor/executor.h"
@@ -2016,6 +2017,71 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 			}
 		}
 	}
+	else if (statementType == T_DropStmt)
+	{
+		DropStmt   *dropStatement = (DropStmt *) parsetree;
+
+		/* only apply hook for tables and extension */
+		if (dropStatement->removeType == OBJECT_TABLE)
+		{
+			ListCell *dropObjectCell = NULL;
+			foreach(dropObjectCell, dropStatement->objects)
+			{
+				List *tableNameList = (List *) lfirst(dropObjectCell);
+				RangeVar *rangeVar = makeRangeVarFromNameList(tableNameList);
+
+				Oid relationId = RangeVarGetRelid(rangeVar, AccessShareLock, true);
+				if (IsDistributedTable(relationId))
+				{
+					/*
+					 * Not implemented yet.
+					 */
+				}
+			}
+		}
+		else if (dropStatement->removeType == OBJECT_EXTENSION)
+		{
+			ListCell *dropStatementObject = NULL;
+
+			foreach(dropStatementObject, dropStatement->objects)
+			{
+				List *objectNameList = lfirst(dropStatementObject);
+				char *objectName = NameListToString(objectNameList);;
+
+				if (strcmp(PG_SHARD_EXTENSION_NAME, objectName) == 0)
+				{
+					/*
+					 * If pg_shard is dropped with CASCADE modifier, let it to be dropped.
+					 * However, inform the user that shards on the worker nodes will not
+					 * be dropeed.
+					 *
+					 * If CASCADE modifier is not used, check for existence of any
+					 * distributed tables. If there exists any distributed table, do not
+					 * let pg_shard to be dropped. Otherwise, let pg_shard to be dropped.
+					 *
+					 */
+					if (dropStatement->behavior == DROP_CASCADE)
+					{
+						ereport(INFO, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+										errmsg("shards on the worker nodes will not be "
+											   "dropped")));
+					}
+					else
+					{
+						bool distributedTableExists = DistributedTablesExist();
+						if (distributedTableExists == true)
+						{
+							ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+											errmsg("cannot drop %s because distributed"
+												   " table(s) exists", PG_SHARD_EXTENSION_NAME),
+											errhint("Try dropping the extension with"
+													    " CASCADE modifier.")));
+						}
+					}
+				}
+			}
+		}
+	}
 
 	if (PreviousProcessUtilityHook != NULL)
 	{
@@ -2028,3 +2094,4 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 								params, dest, completionTag);
 	}
 }
+
