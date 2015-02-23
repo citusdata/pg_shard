@@ -2021,7 +2021,7 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 	{
 		DropStmt   *dropStatement = (DropStmt *) parsetree;
 
-		/* only apply hook for tables and extension */
+		/* only apply for tables and extension */
 		if (dropStatement->removeType == OBJECT_TABLE)
 		{
 			ListCell *dropObjectCell = NULL;
@@ -2058,7 +2058,6 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 					 * If CASCADE modifier is not used, check for existence of any
 					 * distributed tables. If there exists any distributed table, do not
 					 * let pg_shard to be dropped. Otherwise, let pg_shard to be dropped.
-					 *
 					 */
 					if (dropStatement->behavior == DROP_CASCADE)
 					{
@@ -2072,10 +2071,11 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 						if (distributedTableExists == true)
 						{
 							ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-											errmsg("cannot drop %s because distributed"
-												   " table(s) exists", PG_SHARD_EXTENSION_NAME),
+											errmsg("cannot drop %s because distributed "
+												   "table(s) exists",
+												   PG_SHARD_EXTENSION_NAME),
 											errhint("Try dropping the extension with"
-													    " CASCADE modifier.")));
+												    " CASCADE modifier.")));
 						}
 					}
 				}

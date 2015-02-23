@@ -441,7 +441,7 @@ IsDistributedTable(Oid tableId)
 
 /*
  *  DistributedTablesExist returns true if there exists at least one distributed
- *  table on metadata tables.
+ *  table on metadata tables. Else, returns false.
  */
 bool
 DistributedTablesExist(void)
@@ -462,7 +462,7 @@ DistributedTablesExist(void)
 
 	/*
 	 * Check if there exists any tuples in the partition table. If there are any tables,
-	 * we can conclude that there are at least one distributed table.
+	 * we can conclude that there is at least one distributed table and return true.
 	 */
 	distributedTablesExist = HeapTupleIsValid(heapTuple);
 
