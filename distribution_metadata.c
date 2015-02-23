@@ -62,6 +62,9 @@ static void LoadShardIntervalRow(int64 shardId, Oid *relationId,
 								 char **minValue, char **maxValue);
 static ShardPlacement * TupleToShardPlacement(HeapTuple heapTuple,
 											  TupleDesc tupleDescriptor);
+static void DeletePartitionRow(Oid relationId);
+static void DeleteShardRow(uint64 shardId);
+
 
 
 /*
@@ -446,7 +449,6 @@ IsDistributedTable(Oid tableId)
 bool
 DistributedTablesExist(void)
 {
-
 	bool distributedTablesExist = false;
 	RangeVar *heapRangeVar = NULL;
 	Relation heapRelation = NULL;
@@ -736,6 +738,132 @@ InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
 
 	/* close relation */
 	heap_close(shardPlacementRelation, RowExclusiveLock);
+}
+
+
+/*
+ * DeleteDistributedTableMetadata deletes all the information in the metadata tables
+ * which are dependent to the distributed table with given distributedTableId. The
+ * metadata tables that are searched include partition, shard and shard_placement.
+ */
+void
+DeleteDistributedTableMetadata(Oid distributedTableId)
+{
+	List *shardIntervalList = LookupShardIntervalList(distributedTableId);
+	ListCell *shardIntervalCell = NULL;
+
+	/*
+	 * Iterate over each shard that is dependent to the distributed table. On each
+	 * iteration, delete all corresponding shard placements from the metadata. Then,
+	 * delete the shard's row from the metadata.
+	 */
+	foreach(shardIntervalCell, shardIntervalList)
+	{
+		ShardInterval *shardInterval = lfirst(shardIntervalCell);
+		uint64 shardId = shardInterval->id;
+		List *shardPlacementList = LoadShardPlacementList(shardId);
+		ListCell *shardPlacementCell = NULL;
+
+		foreach(shardPlacementCell, shardPlacementList)
+		{
+			ShardPlacement *shardPlacement = (ShardPlacement *) lfirst(shardPlacementCell);
+			uint64 shardPlacementId = shardPlacement->id;
+			DeleteShardPlacementRow(shardPlacementId);
+		}
+
+		/* After deleting related shard placement rows, now delete shard row in the metedata */
+		DeleteShardRow(shardId);
+	}
+
+	/* lastly delete partition row */
+	DeletePartitionRow(distributedTableId);
+}
+
+
+/*
+ * DeleteShardRow removes the row corresponding to the provided shard
+ * identifier, erroring out if it cannot find such a row.
+ */
+void
+DeletePartitionRow(Oid relationId)
+{
+	RangeVar *heapRangeVar = NULL;
+	Relation heapRelation = NULL;
+	HeapScanDesc scanDesc = NULL;
+	HeapTuple heapTuple = NULL;
+	const int scanKeyCount = 1;
+	ScanKeyData scanKey[scanKeyCount];
+
+	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);
+	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
+
+	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ,
+				Int64GetDatum(relationId));
+
+	scanDesc = heap_beginscan(heapRelation, SnapshotSelf, scanKeyCount, scanKey);
+
+	heapTuple = heap_getnext(scanDesc, ForwardScanDirection);
+	if (HeapTupleIsValid(heapTuple))
+	{
+		simple_heap_delete(heapRelation, &heapTuple->t_self);
+	}
+	else
+	{
+		ereport(ERROR, (errmsg("could not find entry for relation  " INT64_FORMAT,
+							   relationId)));
+	}
+
+	heap_endscan(scanDesc);
+	relation_close(heapRelation, AccessShareLock);
+}
+
+
+/*
+ * DeleteShardRow removes the row corresponding to the provided shard
+ * identifier, erroring out if it cannot find such a row.
+ */
+void
+DeleteShardRow(uint64 shardId)
+{
+	RangeVar *heapRangeVar = NULL;
+	RangeVar *indexRangeVar = NULL;
+	Relation heapRelation = NULL;
+	Relation indexRelation = NULL;
+	IndexScanDesc indexScanDesc = NULL;
+	const int scanKeyCount = 1;
+	ScanKeyData scanKey[scanKeyCount];
+	HeapTuple heapTuple = NULL;
+
+	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_TABLE_NAME, -1);
+	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
+								 SHARD_PKEY_INDEX_NAME, -1);
+
+	heapRelation = relation_openrv(heapRangeVar, RowExclusiveLock);
+	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
+
+	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ,
+				Int64GetDatum(shardId));
+
+	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotSelf,
+									scanKeyCount, 0);
+	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
+
+	heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
+	if (HeapTupleIsValid(heapTuple))
+	{
+		simple_heap_delete(heapRelation, &heapTuple->t_self);
+	}
+	else
+	{
+		ereport(ERROR, (errmsg("could not find entry for shard  " INT64_FORMAT,
+						shardId)));
+	}
+
+	index_endscan(indexScanDesc);
+	index_close(indexRelation, AccessShareLock);
+	relation_close(heapRelation, RowExclusiveLock);
+
+	return;
 }
 
 

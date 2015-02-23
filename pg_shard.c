@@ -2019,23 +2019,56 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 	}
 	else if (statementType == T_DropStmt)
 	{
-		DropStmt   *dropStatement = (DropStmt *) parsetree;
+		DropStmt *dropStatement = (DropStmt *) parsetree;
+		bool dropBehavior = dropStatement->behavior;
+		bool extensionInstalled = false;
+		Oid extensionOid = InvalidOid;
+		bool missingOK = true;
 
-		/* only apply for tables and extension */
+		extensionOid = get_extension_oid(PG_SHARD_EXTENSION_NAME, missingOK);
+		if (extensionOid != InvalidOid)
+		{
+			extensionInstalled = true;
+		}
+
+		/* handle T_DropStmt for tables and extensions only */
 		if (dropStatement->removeType == OBJECT_TABLE)
 		{
 			ListCell *dropObjectCell = NULL;
+
 			foreach(dropObjectCell, dropStatement->objects)
 			{
 				List *tableNameList = (List *) lfirst(dropObjectCell);
 				RangeVar *rangeVar = makeRangeVarFromNameList(tableNameList);
-
 				Oid relationId = RangeVarGetRelid(rangeVar, AccessShareLock, true);
-				if (IsDistributedTable(relationId))
+
+				/*
+				 * If a distributed table is dropped with CASCADE modifier, first inform,
+				 * then delete all the dependent metadata information.
+				 */
+				if (extensionInstalled == true && IsDistributedTable(relationId))
 				{
-					/*
-					 * Not implemented yet.
-					 */
+					if (dropBehavior == DROP_CASCADE)
+					{
+						ereport(NOTICE, (errmsg("removing only metadata for the "
+										    	"distributed table"),
+										 errdetail("Shards for this table are not "
+											       "removed.")));
+
+						DeleteDistributedTableMetadata(relationId);
+					}
+					else
+					{
+						char *tableName = get_rel_name(relationId);
+
+						ereport(ERROR, (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+										errmsg("cannot drop table %s because other "
+											   "objects depend on it", tableName),
+										errdetail("Table is distributed and metadata "
+												  "information is dependent on it."),
+										errhint("Use DROP ... CASCADE to drop the "
+												"dependent objects too.")));
+					}
 				}
 			}
 		}
@@ -2046,9 +2079,9 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 			foreach(dropStatementObject, dropStatement->objects)
 			{
 				List *objectNameList = lfirst(dropStatementObject);
-				char *objectName = NameListToString(objectNameList);;
+				char *objectNameStr = NameListToString(objectNameList);
 
-				if (strcmp(PG_SHARD_EXTENSION_NAME, objectName) == 0)
+				if (strcmp(PG_SHARD_EXTENSION_NAME, objectNameStr) == 0)
 				{
 					/*
 					 * If pg_shard is dropped with CASCADE modifier, let it to be dropped.
@@ -2057,25 +2090,29 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 					 *
 					 * If CASCADE modifier is not used, check for existence of any
 					 * distributed tables. If there exists any distributed table, do not
-					 * let pg_shard to be dropped. Otherwise, let pg_shard to be dropped.
+					 * let pg_shard to be dropped.
 					 */
-					if (dropStatement->behavior == DROP_CASCADE)
+					if (extensionInstalled == true && dropBehavior == DROP_CASCADE)
 					{
-						ereport(INFO, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-										errmsg("shards on the worker nodes will not be "
-											   "dropped")));
+						ereport(NOTICE, (errmsg("dropping all the metadata tables"),
+										 errdetail("Shards created by the extension are"
+												   " not removed.")));
+
 					}
 					else
 					{
 						bool distributedTableExists = DistributedTablesExist();
 						if (distributedTableExists == true)
 						{
-							ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-											errmsg("cannot drop %s because distributed "
-												   "table(s) exists",
+							ereport(ERROR, (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+											errmsg("cannot drop extension %s because "
+												   "other objects depend on it",
 												   PG_SHARD_EXTENSION_NAME),
-											errhint("Try dropping the extension with"
-												    " CASCADE modifier.")));
+											errdetail("Metadata information of "
+													  "distributed tables is dependent "
+													  "on it."),
+											errhint("Use DROP ... CASCADE to drop the "
+													"dependent objects too.")));
 						}
 					}
 				}
