@@ -66,7 +66,6 @@ static void DeletePartitionRow(Oid relationId);
 static void DeleteShardRow(uint64 shardId);
 
 
-
 /*
  * LookupShardIntervalList is wrapper around LoadShardIntervalList that uses a
  * cache to avoid multiple lookups of a distributed table's shards within a
@@ -809,8 +808,7 @@ DeletePartitionRow(Oid relationId)
 	}
 	else
 	{
-		ereport(ERROR, (errmsg("could not find entry for relation  " INT64_FORMAT,
-							   relationId)));
+		ereport(ERROR, (errmsg("could not find entry for relation  %d", relationId)));
 	}
 
 	heap_endscan(scanDesc);

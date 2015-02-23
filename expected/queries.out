@@ -222,8 +222,8 @@ SELECT author_id, sum(word_count) AS corpus_size FROM articles
 SET pg_shard.log_distributed_statements = on;
 SET client_min_messages = log;
 SELECT count(*) FROM articles WHERE word_count > 10000;
-LOG:  distributed statement: SELECT NULL::unknown FROM ONLY articles_10037 WHERE (word_count > 10000)
-LOG:  distributed statement: SELECT NULL::unknown FROM ONLY articles_10036 WHERE (word_count > 10000)
+LOG:  distributed statement: SELECT NULL::unknown FROM ONLY articles_10041 WHERE (word_count > 10000)
+LOG:  distributed statement: SELECT NULL::unknown FROM ONLY articles_10040 WHERE (word_count > 10000)
  count 
 -------
     23

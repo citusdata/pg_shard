@@ -2051,7 +2051,7 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 					if (dropBehavior == DROP_CASCADE)
 					{
 						ereport(NOTICE, (errmsg("removing only metadata for the "
-										    	"distributed table"),
+										        "distributed table"),
 										 errdetail("Shards for this table are not "
 											       "removed.")));
 

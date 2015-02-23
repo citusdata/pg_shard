@@ -244,6 +244,46 @@ SELECT COUNT(*) FROM pg_locks WHERE locktype = 'advisory' AND objid = 5;
      0
 (1 row)
 
--- clean up after ourselves
-DROP TABLE events;
-DROP TABLE customers;
+-- ===================================================================
+-- test distribution metadata dependency
+-- ===================================================================
+-- cannot drop extension 
+DROP EXTENSION pg_shard;
+ERROR:  cannot drop extension pg_shard because other objects depend on it
+DETAIL:  Metadata information of distributed tables is dependent on it.
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+-- set up a table and "distribute" it with UDFs
+CREATE TABLE maps
+(
+    id integer NOT NULL,
+    name TEXT
+);
+-- distribute table
+SELECT master_create_distributed_table('maps', 'id');
+ master_create_distributed_table 
+---------------------------------
+ 
+(1 row)
+
+-- create shards for the distributed table
+SELECT master_create_worker_shards('maps', 4, 1);
+WARNING:  Connection failed to adeadhost:5432
+DETAIL:  Remote message: could not translate host name "adeadhost" to address: Name or service not known
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+DETAIL:  Remote message: could not translate host name "adeadhost" to address: Name or service not known
+WARNING:  could not create shard on "adeadhost:5432"
+ master_create_worker_shards 
+-----------------------------
+ 
+(1 row)
+
+-- cannot drop without CASCADE
+DROP TABLE maps;
+ERROR:  cannot drop table maps because other objects depend on it
+DETAIL:  Table is distributed and metadata information is dependent on it.
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+-- can drop with CASCADE
+DROP TABLE maps CASCADE;
+NOTICE:  removing only metadata for the distributed table
+DETAIL:  Shards for this table are not removed.
