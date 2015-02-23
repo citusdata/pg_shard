@@ -2097,7 +2097,6 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 						ereport(NOTICE, (errmsg("dropping all the metadata tables"),
 										 errdetail("Shards created by the extension are"
 												   " not removed.")));
-
 					}
 					else
 					{
@@ -2131,4 +2130,3 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 								params, dest, completionTag);
 	}
 }
-

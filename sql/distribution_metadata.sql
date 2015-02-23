@@ -195,5 +195,3 @@ DROP TABLE maps;
 
 -- can drop with CASCADE
 DROP TABLE maps CASCADE;
-
-
