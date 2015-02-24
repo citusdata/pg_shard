@@ -31,7 +31,7 @@ CREATE OPERATOR = (
     PROCEDURE = dummy_type_function);
 CREATE OPERATOR FAMILY dummy_op_family USING hash;
 
--- create operator class with no support routine
+-- create operator class with no support function
 CREATE OPERATOR CLASS dummy_op_family_class
 DEFAULT FOR TYPE dummy_type USING hash FAMILY dummy_op_family AS
 OPERATOR 1 =;
@@ -59,7 +59,7 @@ SELECT master_create_distributed_table('table_to_distribute', 'name', 'r');
 -- use unsupported partition column which does not have any default op class
 SELECT master_create_distributed_table('table_to_distribute', 'json_data');
 
--- use unsupported partition column which does not have required support routines
+-- use unsupported partition column which does not have required support functions
 SELECT master_create_distributed_table('table_to_distribute', 'test_type_data');
 
 -- distribute table and inspect side effects

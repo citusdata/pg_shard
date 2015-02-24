@@ -25,7 +25,7 @@ CREATE OPERATOR = (
     RIGHTARG = dummy_type,
     PROCEDURE = dummy_type_function);
 CREATE OPERATOR FAMILY dummy_op_family USING hash;
--- create operator class with no support routine
+-- create operator class with no support function
 CREATE OPERATOR CLASS dummy_op_family_class
 DEFAULT FOR TYPE dummy_type USING hash FAMILY dummy_op_family AS
 OPERATOR 1 =;
@@ -53,7 +53,7 @@ SELECT master_create_distributed_table('table_to_distribute', 'json_data');
 ERROR:  cannot distribute relation: "table_to_distribute"
 DETAIL:  Column "json_data" does not have a default operator class with the provided partition method.
 HINT:  Try another column as the distribution column.
--- use unsupported partition column which does not have required support routines
+-- use unsupported partition column which does not have required support functions
 SELECT master_create_distributed_table('table_to_distribute', 'test_type_data');
 ERROR:  cannot distribute relation: "table_to_distribute"
 DETAIL:  Hash operator is not defined for the data type of column "test_type_data".

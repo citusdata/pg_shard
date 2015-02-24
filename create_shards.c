@@ -56,7 +56,7 @@ static List * ParseWorkerNodeFile(char *workerNodeFilename);
 static int CompareWorkerNodes(const void *leftElement, const void *rightElement);
 static bool ExecuteRemoteCommand(PGconn *connection, const char *sqlCommand);
 static text * IntegerToText(int32 value);
-static Oid GetSupportRoutine(Oid columnOid, Oid accessMethodId, int16 supportFunctionNumber);
+static Oid GetSupportFunction(Oid columnOid, Oid accessMethodId, int16 supportFunctionNumber);
 
 
 /* declarations for dynamic loading */
@@ -83,8 +83,8 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 	Var* partitionColumnVar = NULL;
 	Oid partitionColumnTypeId = InvalidOid;
 	Oid partitionColumnOpClassId = InvalidOid;
-	Oid btreeSupportRoutine = InvalidOid;
-	Oid hashSupportRoutine = InvalidOid;
+	Oid btreeSupportFunction = InvalidOid;
+	Oid hashSupportFunction = InvalidOid;
 
 	/* verify target relation is either regular or foreign table */
 	relationKind = get_rel_relkind(distributedTableId);
@@ -134,9 +134,9 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 	/* depending on the partition type, check for the existence of support procedure */
 	if (partitionMethod == HASH_PARTITION_TYPE)
 	{
-		hashSupportRoutine = GetSupportRoutine(partitionColumnTypeId, HASH_AM_OID,
-											   HASHPROC);
-		if (hashSupportRoutine == InvalidOid)
+		hashSupportFunction = GetSupportFunction(partitionColumnTypeId, HASH_AM_OID,
+											     HASHPROC);
+		if (hashSupportFunction == InvalidOid)
 		{
 			ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
 							errmsg("cannot distribute relation: \"%s\"", tableName),
@@ -153,9 +153,9 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 		 * TODO: Add regression tests for this check when RANGE_PARTITION_TYPE is
 		 * supported.
 		 */
-		btreeSupportRoutine = GetSupportRoutine(partitionColumnTypeId, BTREE_AM_OID,
-												BTORDER_PROC);
-		if (btreeSupportRoutine == InvalidOid)
+		btreeSupportFunction = GetSupportFunction(partitionColumnTypeId, BTREE_AM_OID,
+												  BTORDER_PROC);
+		if (btreeSupportFunction == InvalidOid)
 		{
 			ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
 							errmsg("cannot distribute relation: \"%s\"", tableName),
@@ -606,16 +606,16 @@ IntegerToText(int32 value)
 
 
 /*
- *	GetSupportRoutine helps to find the support routine given a column, an access method
+ *	GetSupportFunction helps to find the support function given a column, an access method
  *	and id of a support function. This function returns InvalidOid if there is no support
- *	routine associated with the data type of the column or there is no default operator
+ *	function associated with the data type of the column or there is no default operator
  *	class for the data type of the column.
  */
 Oid
-GetSupportRoutine(Oid columnOid, Oid accessMethodId, int16 supportFunctionNumber)
+GetSupportFunction(Oid columnOid, Oid accessMethodId, int16 supportFunctionNumber)
 {
 	Oid operatorFamilyId = InvalidOid;
-	Oid supportRoutineOid = InvalidOid;
+	Oid supportFunctionOid = InvalidOid;
 	Oid operatorClassId = GetDefaultOpClass(columnOid, accessMethodId);
 
 	if (operatorClassId == InvalidOid)
@@ -625,8 +625,8 @@ GetSupportRoutine(Oid columnOid, Oid accessMethodId, int16 supportFunctionNumber
 	}
 
 	operatorFamilyId = get_opclass_family(operatorClassId);
-	supportRoutineOid = get_opfamily_proc(operatorFamilyId, columnOid, columnOid,
-										  supportFunctionNumber);
+	supportFunctionOid = get_opfamily_proc(operatorFamilyId, columnOid, columnOid,
+										   supportFunctionNumber);
 
-	return supportRoutineOid;
+	return supportFunctionOid;
 }
