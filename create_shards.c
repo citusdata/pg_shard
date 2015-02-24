@@ -80,7 +80,7 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 	char relationKind = '\0';
 	char *partitionColumnName = text_to_cstring(partitionColumnText);
 	char *tableName = text_to_cstring(tableNameText);
-	Var* partitionColumnVar = NULL;
+	Var *partitionColumnVar = NULL;
 
 	/* verify target relation is either regular or foreign table */
 	relationKind = get_rel_relkind(distributedTableId);
@@ -112,7 +112,7 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 			Oid partitionColumnTypeId = partitionColumnVar->vartype;
 
 			ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION),
-			          	    errmsg("could not identify a hash function for type %s",
+			                errmsg("could not identify a hash function for type %s",
 			                format_type_be(partitionColumnTypeId)),
 							errdetail("Partition column types must have a hash function "
 									  "defined to use hash partitioning.")));
@@ -137,7 +137,7 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 			         errmsg("could not identify a comparison function for type %s",
 			                format_type_be(partitionColumnTypeId)),
 			         errdetail("Partition column types must have a comparison function "
-			        		   "defined to use range partitioning.")));
+                               "defined to use range partitioning.")));
 		}
 	}
 
@@ -587,7 +587,7 @@ IntegerToText(int32 value)
  *	errors-out if there is no default operator class for the data type of the column.
  */
 Oid
-SupportFunctionForColumn(Var* partitionColumn, Oid accessMethodId,
+SupportFunctionForColumn(Var *partitionColumn, Oid accessMethodId,
 		                 int16 supportFunctionNumber)
 {
 	Oid operatorFamilyId = InvalidOid;
