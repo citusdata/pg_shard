@@ -16,14 +16,15 @@ CREATE TYPE dummy_type AS (
     i integer
 );
 CREATE FUNCTION dummy_type_function(dummy_type, dummy_type) RETURNS boolean
-AS ' SELECT TRUE;'
+AS 'SELECT TRUE;'
 LANGUAGE SQL
 IMMUTABLE
 RETURNS NULL ON NULL INPUT;
 CREATE OPERATOR = (
     LEFTARG = dummy_type,
     RIGHTARG = dummy_type,
-    PROCEDURE = dummy_type_function);
+    PROCEDURE = dummy_type_function
+);
 CREATE OPERATOR FAMILY dummy_op_family USING hash;
 -- create operator class with no support function
 CREATE OPERATOR CLASS dummy_op_family_class
@@ -44,20 +45,18 @@ ERROR:  cannot distribute relation: "table_to_distribute_pkey"
 DETAIL:  Distributed relations must be regular or foreign tables.
 -- use a bad column name
 SELECT master_create_distributed_table('table_to_distribute', 'bad_column');
-ERROR:  could not find column: bad_column
+ERROR:  partition column "bad_column" not found
 -- use unsupported partition type
 SELECT master_create_distributed_table('table_to_distribute', 'name', 'r');
-ERROR:  unsupported partition method: r
+ERROR:  pg_shard only supports hash partitioning
 -- use unsupported partition column which does not have any default op class
 SELECT master_create_distributed_table('table_to_distribute', 'json_data');
-ERROR:  cannot distribute relation: "table_to_distribute"
-DETAIL:  Column "json_data" does not have a default operator class with the provided partition method.
-HINT:  Try another column as the distribution column.
+ERROR:  data type json has no default operator class for specified partition method
+DETAIL:  Partition column types must have a default operator class defined.
 -- use unsupported partition column which does not have required support functions
 SELECT master_create_distributed_table('table_to_distribute', 'test_type_data');
-ERROR:  cannot distribute relation: "table_to_distribute"
-DETAIL:  Hash operator is not defined for the data type of column "test_type_data".
-HINT:  Try another column as the distribution column.
+ERROR:  could not identify a hash function for type dummy_type
+DETAIL:  Partition column types must have a hash function defined to use hash partitioning.
 -- distribute table and inspect side effects
 SELECT master_create_distributed_table('table_to_distribute', 'name');
  master_create_distributed_table 

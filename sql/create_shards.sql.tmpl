@@ -20,7 +20,7 @@ CREATE TYPE dummy_type AS (
 );
 
 CREATE FUNCTION dummy_type_function(dummy_type, dummy_type) RETURNS boolean
-AS ' SELECT TRUE;'
+AS 'SELECT TRUE;'
 LANGUAGE SQL
 IMMUTABLE
 RETURNS NULL ON NULL INPUT;
@@ -28,7 +28,8 @@ RETURNS NULL ON NULL INPUT;
 CREATE OPERATOR = (
     LEFTARG = dummy_type,
     RIGHTARG = dummy_type,
-    PROCEDURE = dummy_type_function);
+    PROCEDURE = dummy_type_function
+);
 CREATE OPERATOR FAMILY dummy_op_family USING hash;
 
 -- create operator class with no support function
