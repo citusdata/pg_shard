@@ -80,7 +80,7 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 	char relationKind = '\0';
 	char *partitionColumnName = text_to_cstring(partitionColumnText);
 	char *tableName = text_to_cstring(tableNameText);
-	Var *partitionColumnVar = NULL;
+	Var *partitionColumn = NULL;
 
 	/* verify target relation is either regular or foreign table */
 	relationKind = get_rel_relkind(distributedTableId);
@@ -92,50 +92,44 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 								  "foreign tables.")));
 	}
 
-	/* ColumnNameToColumn verifies column exists in given table */
-	partitionColumnVar = ColumnNameToColumn(distributedTableId, partitionColumnName);
+	/* this will error out if no column exists with the specified name */
+	partitionColumn = ColumnNameToColumn(distributedTableId, partitionColumnName);
 
-	if  (partitionMethod != HASH_PARTITION_TYPE)
-	{
-		/* we only support hash partitioning right now */
-		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				        errmsg("pg_shard only supports hash partitioning")));
-	}
-
-	/* depending on the partition type, check for the existence of support function */
+	/* check for support function needed by specified partition method */
 	if (partitionMethod == HASH_PARTITION_TYPE)
 	{
-		Oid hashSupportFunction = SupportFunctionForColumn(partitionColumnVar,
-														   HASH_AM_OID, HASHPROC);
+		Oid hashSupportFunction = SupportFunctionForColumn(partitionColumn, HASH_AM_OID,
+		                                                   HASHPROC);
 		if (hashSupportFunction == InvalidOid)
 		{
-			Oid partitionColumnTypeId = partitionColumnVar->vartype;
-
 			ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION),
 			                errmsg("could not identify a hash function for type %s",
-			                format_type_be(partitionColumnTypeId)),
+			                       format_type_be(partitionColumn->vartype)),
 							errdetail("Partition column types must have a hash function "
 									  "defined to use hash partitioning.")));
 		}
 	}
 	else if (partitionMethod == RANGE_PARTITION_TYPE)
 	{
+		Oid btreeSupportFunction = InvalidOid;
+
 		/*
-		 * Currently we do not support RANGE_PARTITION_TYPE. However, for the
-		 * completeness of the code, we also check operators for range partitioning.
-		 * TODO: Add regression tests for this check when RANGE_PARTITION_TYPE is
-		 * supported.
+		 * Error out immediately since we don't yet support range partitioning,
+		 * but the checks below are ready for when we do.
+		 *
+		 * TODO: Remove when range partitioning is supported.
 		 */
-		Oid btreeSupportFunction = SupportFunctionForColumn(partitionColumnVar,
-															BTREE_AM_OID, BTORDER_PROC);
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				        errmsg("pg_shard only supports hash partitioning")));
+
+		btreeSupportFunction = SupportFunctionForColumn(partitionColumn, BTREE_AM_OID,
+		                                                BTORDER_PROC);
 		if (btreeSupportFunction == InvalidOid)
 		{
-			Oid partitionColumnTypeId = partitionColumnVar->vartype;
-
 			ereport(ERROR,
 			        (errcode(ERRCODE_UNDEFINED_FUNCTION),
 			         errmsg("could not identify a comparison function for type %s",
-			                format_type_be(partitionColumnTypeId)),
+			                format_type_be(partitionColumn->vartype)),
 			         errdetail("Partition column types must have a comparison function "
                                "defined to use range partitioning.")));
 		}
@@ -581,10 +575,10 @@ IntegerToText(int32 value)
 
 
 /*
- *	SupportFunctionForColumn helps to find the support function given a column, an access
- *	method and id of a support function. This function returns InvalidOid if there is no
- *	support function associated with the data type of the column. Also, this function
- *	errors-out if there is no default operator class for the data type of the column.
+ *	SupportFunctionForColumn locates a support function given a column, an access method,
+ *	and and id of a support function. This function returns InvalidOid if there is no
+ *	support function associated with the data type of the column, but if the data type of
+ *	the column has no default operator class whatsoever, this function errors out.
  */
 Oid
 SupportFunctionForColumn(Var *partitionColumn, Oid accessMethodId,
@@ -595,16 +589,12 @@ SupportFunctionForColumn(Var *partitionColumn, Oid accessMethodId,
 	Oid columnOid = partitionColumn->vartype;
 	Oid operatorClassId = GetDefaultOpClass(columnOid, accessMethodId);
 
-	/*
-	 * If data type of the partition column does not have a default operator class,
-	 * we should not continue to get support function. A type with no default op
-	 * class cannot have any support functions.
-	 */
+	/* currently only support using the default operator class */
 	if (operatorClassId == InvalidOid)
 	{
 		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
 						errmsg("data type %s has no default operator class for specified"
-								" partition method", format_type_be(columnOid)),
+							   " partition method", format_type_be(columnOid)),
 						errdetail("Partition column types must have a default operator"
 								  " class defined.")));
 	}
