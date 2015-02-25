@@ -59,6 +59,7 @@
 
 /* denotes partition type of the distributed table */
 #define HASH_PARTITION_TYPE 'h'
+#define RANGE_PARTITION_TYPE 'r'
 
 /* human-readable names for addressing columns of partition table */
 #define PARTITION_TABLE_ATTRIBUTE_COUNT 3
@@ -139,6 +140,7 @@ extern List * LoadShardPlacementList(int64 shardId);
 extern Var * PartitionColumn(Oid distributedTableId);
 extern char PartitionType(Oid distributedTableId);
 extern bool IsDistributedTable(Oid tableId);
+extern Var * ColumnNameToColumn(Oid relationId, char *columnName);
 extern void InsertPartitionRow(Oid distributedTableId, char partitionType,
 							   text *partitionKeyText);
 extern void InsertShardRow(Oid distributedTableId, uint64 shardId, char shardStorage,
