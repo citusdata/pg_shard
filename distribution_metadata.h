@@ -149,7 +149,6 @@ extern void InsertShardRow(Oid distributedTableId, uint64 shardId, char shardSto
 extern void InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
 									ShardState shardState, char *nodeName,
 									uint32 nodePort);
-extern void DeleteDistributedTableMetadata(Oid distributedTableId);
 extern void DeleteShardPlacementRow(uint64 shardPlacementId);
 extern uint64 NextSequenceId(char *sequenceName);
 extern void LockShard(int64 shardId, LOCKMODE lockMode);

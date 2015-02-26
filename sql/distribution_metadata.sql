@@ -176,22 +176,3 @@ SELECT COUNT(*) FROM pg_locks WHERE locktype = 'advisory' AND objid = 5;
 
 -- cannot drop extension 
 DROP EXTENSION pg_shard;
-
--- set up a table and "distribute" it with UDFs
-CREATE TABLE maps
-(
-    id integer NOT NULL,
-    name TEXT
-);
-
--- distribute table
-SELECT master_create_distributed_table('maps', 'id');
-
--- create shards for the distributed table
-SELECT master_create_worker_shards('maps', 4, 1);
-
--- cannot drop without CASCADE
-DROP TABLE maps;
-
--- can drop with CASCADE
-DROP TABLE maps CASCADE;
