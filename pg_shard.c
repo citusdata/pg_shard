@@ -2060,12 +2060,12 @@ PgShardProcessUtilityDropCommands(Node *parsetree)
 		 * If extension is not created, let standard_ProcessUtility
 		 * (or PreviousProcessUtilityHook) to continue its execution. This check is
 		 * necessary since it's possible the extension is loaded (i.e. the hooks are
-		 * loaded via shared_preload_libraries configuration) but not created yet.
+		 * loaded via shared_preload_libraries) but the extension not created yet.
 		 */
 		return;
 	}
 
-	/* handle T_DropStmt for tables and extensions only */
+	/* handle T_DropStmt for extensions only */
 	if (dropStatement->removeType == OBJECT_EXTENSION)
 	{
 		ListCell *dropStatementObject = NULL;
@@ -2098,8 +2098,7 @@ PgShardProcessUtilityDropCommands(Node *parsetree)
 					if (distributedTablesExist)
 					{
 						ereport(ERROR, (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
-										errmsg("cannot drop extension %s because "
-											   "other objects depend on it",
+										errmsg("cannot drop extension %s",
 											   PG_SHARD_EXTENSION_NAME),
 										errdetail("Metadata information of "
 												  "distributed tables is dependent "
