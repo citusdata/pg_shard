@@ -219,6 +219,7 @@ CopyDataFromFinalizedPlacement(ShardPlacement *placementToRepair,
 							   Oid distributedTableId, int64 shardId)
 {
 	char *relationName = get_rel_name(distributedTableId);
+	char relationKind = get_rel_relkind(distributedTableId);
 	const char *shardName = NULL;
 	char *nodeName = placementToRepair->nodeName;
 	int32 nodePort = placementToRepair->nodePort;
@@ -227,8 +228,15 @@ CopyDataFromFinalizedPlacement(ShardPlacement *placementToRepair,
 	PGconn *connection = NULL;
 	PGresult *result = NULL;
 	char *copySuccessfulString = NULL;
-	bool copySuccessful = false;
 	bool responseParsedSuccessfully = false;
+
+	if (relationKind == RELKIND_FOREIGN_TABLE)
+	{
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("cannot repair shard"),
+						errdetail("Repairing shards backed by foreign tables is "
+								  "currently unsupported.")));
+	}
 
 	AppendShardIdToName(&relationName, shardId);
 	shardName = quote_identifier(relationName);
@@ -255,14 +263,6 @@ CopyDataFromFinalizedPlacement(ShardPlacement *placementToRepair,
 
 		return false;
 	}
-
-	Assert(PQntuples(result) == 1);
-	Assert(PQnfields(result) == 1);
-
-	copySuccessfulString = PQgetvalue(result, 0, 0);
-	responseParsedSuccessfully = parse_bool(copySuccessfulString, &copySuccessful);
-
-	Assert(responseParsedSuccessfully);
 
 	PQclear(result);
 

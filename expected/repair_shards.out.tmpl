@@ -20,7 +20,11 @@ SELECT 'customer_engagements_20'::regclass::oid AS shardoid;
 \gset
 \o
 SELECT master_copy_shard_placement(20, 'localhost', $PGPORT, '127.0.0.1', $PGPORT);
-ERROR:  shard placement repair not fully implemented
+ master_copy_shard_placement 
+-----------------------------
+ 
+(1 row)
+
 \o /dev/null
 SELECT 'customer_engagements_20'::regclass::oid AS repairedoid;
 \gset
@@ -53,21 +57,19 @@ CREATE FOREIGN TABLE remote_engagements_30 (
 	created_at date,
 	event_data text
 ) SERVER fake_fdw_server;
-\o /dev/null
-SELECT 'remote_engagements_30'::regclass::oid AS shardoid;
-\gset
-\o
 SELECT master_copy_shard_placement(30, 'localhost', $PGPORT, '127.0.0.1', $PGPORT);
-ERROR:  shard placement repair not fully implemented
-\o /dev/null
-SELECT 'remote_engagements_30'::regclass::oid AS repairedoid;
-\gset
-\o
-SELECT :shardoid != :repairedoid AS shard_recreated; 
- shard_recreated 
------------------
- t
+ERROR:  cannot repair shard
+DETAIL:  Repairing shards backed by foreign tables is currently unsupported.
+INSERT INTO customer_engagements_20 DEFAULT VALUES;
+SELECT worker_copy_shard_placement('customer_engagements_20', 'localhost', $PGPORT);
+ worker_copy_shard_placement 
+-----------------------------
+ 
 (1 row)
 
-SELECT worker_copy_shard_placement('customer_engagements', 'localhost', $PGPORT);
-ERROR:  worker_copy_shard_placement not implemented
+SELECT COUNT(*) FROM customer_engagements_20;
+ count 
+-------
+     2
+(1 row)
+

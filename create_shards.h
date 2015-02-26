@@ -38,9 +38,10 @@ typedef struct WorkerNode
 } WorkerNode;
 
 
-/* utility function declaration shared within this module */
+/* utility functions declaration shared within this module */
 extern List * SortList(List *pointerList,
 					   int (*ComparisonFunction)(const void *, const void *));
+extern Oid ResolveRelationId(text *relationName);
 
 /* function declarations for initializing a distributed table */
 extern Datum master_create_distributed_table(PG_FUNCTION_ARGS);

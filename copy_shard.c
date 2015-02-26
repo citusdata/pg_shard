@@ -1,12 +1,11 @@
 /*-------------------------------------------------------------------------
  *
- * repair_shards.c
- *		  Repair functionality for pg_shard.
+ * copy_shard.c
  *
- * Portions Copyright (c) 2014, Citus Data, Inc.
+ * This file contains functions to copy a shard's data from a healthy
+ * placement.
  *
- * IDENTIFICATION
- *		  repair_shards.c
+ * Copyright (c) 2014, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */
@@ -55,22 +54,26 @@ PG_FUNCTION_INFO_V1(worker_copy_shard_placement);
 Datum
 worker_copy_shard_placement(PG_FUNCTION_ARGS)
 {
-	Oid distributedTableId = PG_GETARG_OID(0);
-	char *nodeName = PG_GETARG_CSTRING(1);
+	text *shardRelationNameText = PG_GETARG_TEXT_P(0);
+	text *nodeNameText = PG_GETARG_TEXT_P(1);
 	int32 nodePort = PG_GETARG_INT32(2);
+	Oid shardRelationId = ResolveRelationId(shardRelationNameText);
+	char *shardRelationName = text_to_cstring(shardRelationNameText);
+	char *nodeName = text_to_cstring(nodeNameText);
 
-	Relation distributedTable = heap_open(distributedTableId, RowExclusiveLock);
-	char *relationName = RelationGetRelationName(distributedTable);
+
+	Relation shardTable = heap_open(shardRelationId, RowExclusiveLock);
 	ShardPlacement *placement = (ShardPlacement *) palloc0(sizeof(ShardPlacement));
 	Task *task = (Task *) palloc0(sizeof(Task));
 	StringInfo selectAllQuery = makeStringInfo();
 
-	TupleDesc tupleDescriptor = RelationGetDescr(distributedTable);
+	TupleDesc tupleDescriptor = RelationGetDescr(shardTable);
 	Tuplestorestate *tupleStore = tuplestore_begin_heap(false, false, work_mem);
 	bool fetchSuccessful = false;
 	bool loadSuccessful = false;
 
-	appendStringInfo(selectAllQuery, SELECT_ALL_QUERY, quote_identifier(relationName));
+	appendStringInfo(selectAllQuery, SELECT_ALL_QUERY,
+	                 quote_identifier(shardRelationName));
 
 	placement->nodeName = nodeName;
 	placement->nodePort = nodePort;
@@ -81,20 +84,18 @@ worker_copy_shard_placement(PG_FUNCTION_ARGS)
 	fetchSuccessful = ExecuteTaskAndStoreResults(task, tupleDescriptor, tupleStore);
 	if (!fetchSuccessful)
 	{
-		ereport(WARNING, (errmsg("could not receive query results")));
-		PG_RETURN_VOID();
+		ereport(ERROR, (errmsg("could not receive query results")));
 	}
 
-	loadSuccessful = CopyDataFromTupleStoreToRelation(tupleStore, distributedTable);
+	loadSuccessful = CopyDataFromTupleStoreToRelation(tupleStore, shardTable);
 	if (!loadSuccessful)
 	{
-		ereport(WARNING, (errmsg("could not load query results")));
-		PG_RETURN_VOID();
+		ereport(ERROR, (errmsg("could not load query results")));
 	}
 
 	tuplestore_end(tupleStore);
 
-	heap_close(distributedTable, RowExclusiveLock);
+	heap_close(shardTable, RowExclusiveLock);
 
 	PG_RETURN_VOID();
 }
@@ -127,11 +128,7 @@ CopyDataFromTupleStoreToRelation(Tuplestorestate *tupleStore, Relation relation)
 		tupleToInsert = ExecMaterializeSlot(tupleTableSlot);
 
 		insertedOid = simple_heap_insert(relation, tupleToInsert);
-		if (insertedOid == InvalidOid)
-		{
-			copySuccessful = false;
-			break;
-		}
+		CommandCounterIncrement();
 
 		ExecClearTuple(tupleTableSlot);
 	}

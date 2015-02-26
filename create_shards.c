@@ -50,7 +50,6 @@
 
 
 /* local function forward declarations */
-static Oid ResolveRelationId(text *relationName);
 static void CheckHashPartitionedTable(Oid distributedTableId);
 static List * ParseWorkerNodeFile(char *workerNodeFilename);
 static int CompareWorkerNodes(const void *leftElement, const void *rightElement);
@@ -315,7 +314,7 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 
 
 /* Finds the relationId from a potentially qualified relation name. */
-static Oid
+Oid
 ResolveRelationId(text *relationName)
 {
 	List *relationNameList = NIL;
