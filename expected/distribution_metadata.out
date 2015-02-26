@@ -249,6 +249,6 @@ SELECT COUNT(*) FROM pg_locks WHERE locktype = 'advisory' AND objid = 5;
 -- ===================================================================
 -- cannot drop extension 
 DROP EXTENSION pg_shard;
-ERROR:  cannot drop extension pg_shard because other objects depend on it
+ERROR:  cannot drop extension pg_shard
 DETAIL:  Metadata information of distributed tables is dependent on it.
 HINT:  Use DROP ... CASCADE to drop the dependent objects too.
