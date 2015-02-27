@@ -170,6 +170,9 @@ COMMIT;
 -- lock should be gone now
 SELECT COUNT(*) FROM pg_locks WHERE locktype = 'advisory' AND objid = 5;
 
--- clean up after ourselves
-DROP TABLE events;
-DROP TABLE customers;
+-- ===================================================================
+-- test distribution metadata dependency
+-- ===================================================================
+
+-- cannot drop extension 
+DROP EXTENSION pg_shard;
