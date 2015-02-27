@@ -113,6 +113,7 @@ static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalL
 /* executor functions forward declarations */
 static void PgShardExecutorStart(QueryDesc *queryDesc, int eflags);
 static bool IsPgShardPlan(PlannedStmt *plannedStmt);
+static void NextExecutorStartHook(QueryDesc *queryDesc, int eflags);
 static LOCKMODE CommutativityRuleToLockMode(CmdType commandType);
 static void AcquireExecutorShardLocks(List *taskList, LOCKMODE lockMode);
 static int CompareTasksByShardId(const void *leftElement, const void *rightElement);
@@ -610,9 +611,10 @@ ExtractRangeTableEntryWalker(Node *node, List **rangeTableList)
 
 /*
  * DistributedQueryShardList prunes the shards for the table in the query based
- * on the query's restriction qualifiers, and returns this list. If the function
- * cannot find any shards for the distributed table, it errors out. In other sense,
- * the function errors out or returns a non-empty list.
+ * on the query's restriction qualifiers, and returns this list. It is possible
+ * that all shards will be pruned if a query's restrictions are unsatisfiable.
+ * In that case, this function can return an empty list; however, if the table
+ * being queried has no shards created whatsoever, this function errors out.
  */
 static List *
 DistributedQueryShardList(Query *query)
@@ -639,9 +641,6 @@ DistributedQueryShardList(Query *query)
 	restrictClauseList = QueryRestrictList(query);
 	prunedShardList = PruneShardList(distributedTableId, restrictClauseList,
 									 shardIntervalList);
-
-	/* shouldn't be an empty list, but assert in case something's very wrong */
-	Assert(prunedShardList != NIL);
 
 	return prunedShardList;
 }
@@ -1106,9 +1105,18 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 	if (pgShardExecution)
 	{
 		DistributedPlan *distributedPlan = (DistributedPlan *) plannedStatement->planTree;
-
 		bool selectFromMultipleShards = distributedPlan->selectFromMultipleShards;
-		if (!selectFromMultipleShards)
+		bool zeroShardQuery = (list_length(distributedPlan->taskList) == 0);
+
+		if (zeroShardQuery)
+		{
+			/* if zero shards are involved, let query hit local table */
+			Plan *originalPlan = distributedPlan->originalPlan;
+			plannedStatement->planTree = originalPlan;
+
+			NextExecutorStartHook(queryDesc, eflags);
+		}
+		else if (!selectFromMultipleShards)
 		{
 			bool topLevel = true;
 			LOCKMODE lockMode = NoLock;
@@ -1173,28 +1181,12 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 			originalPlan = distributedPlan->originalPlan;
 			plannedStatement->planTree = originalPlan;
 
-			/* call into the standard executor start, or hook if set */
-			if (PreviousExecutorStartHook != NULL)
-			{
-				PreviousExecutorStartHook(queryDesc, eflags);
-			}
-			else
-			{
-				standard_ExecutorStart(queryDesc, eflags);
-			}
+			NextExecutorStartHook(queryDesc, eflags);
 		}
 	}
 	else
 	{
-		/* call the next hook in the chain or the standard one, if no other hook was set */
-		if (PreviousExecutorStartHook != NULL)
-		{
-			PreviousExecutorStartHook(queryDesc, eflags);
-		}
-		else
-		{
-			standard_ExecutorStart(queryDesc, eflags);
-		}
+		NextExecutorStartHook(queryDesc, eflags);
 	}
 }
 
@@ -1211,6 +1203,26 @@ IsPgShardPlan(PlannedStmt *plannedStmt)
 	bool isPgShardPlan = ((DistributedNodeTag) nodeTag == T_DistributedPlan);
 
 	return isPgShardPlan;
+}
+
+
+/*
+ * NextExecutorStartHook simply encapsulates the common logic of calling the
+ * next executor start hook in the chain or the standard executor start hook
+ * if no other hooks are present.
+ */
+static void
+NextExecutorStartHook(QueryDesc *queryDesc, int eflags)
+{
+	/* call into the standard executor start, or hook if set */
+	if (PreviousExecutorStartHook != NULL)
+	{
+		PreviousExecutorStartHook(queryDesc, eflags);
+	}
+	else
+	{
+		standard_ExecutorStart(queryDesc, eflags);
+	}
 }
 
 
@@ -1778,10 +1790,7 @@ ExecuteSingleShardSelect(DistributedPlan *distributedPlan, EState *executorState
 	TupleTableSlot *tupleTableSlot = NULL;
 
 	List *taskList = distributedPlan->taskList;
-	if (list_length(taskList) != 1)
-	{
-		ereport(ERROR, (errmsg("cannot execute select over multiple shards")));
-	}
+	Assert(list_length(taskList) == 1);
 
 	task = (Task *) linitial(taskList);
 	tupleStore = tuplestore_begin_heap(false, false, work_mem);
