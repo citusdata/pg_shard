@@ -69,8 +69,12 @@ INSERT INTO articles VALUES (48,  8, 'alkylic', 18610);
 INSERT INTO articles VALUES (49,  9, 'anyone', 2681);
 INSERT INTO articles VALUES (50, 10, 'anjanette', 19519);
 
--- first, test zero-shard query
+-- first, test zero-shard SELECT, which should return zero rows
 SELECT COUNT(*) FROM articles WHERE author_id = 1 AND author_id = 2;
+
+-- zero-shard modifications should be no-ops but not fail
+UPDATE articles SET title = '' WHERE author_id = 1 AND author_id = 2;
+DELETE FROM articles WHERE author_id = 1 AND author_id = 2;
 
 -- single-shard tests
 
