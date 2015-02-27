@@ -440,8 +440,8 @@ IsDistributedTable(Oid tableId)
 
 
 /*
- *  DistributedTablesExist returns true if there exists at least one distributed
- *  table on metadata tables. Else, returns false.
+ *  DistributedTablesExist returns true if pg_shard has a record of any
+ *  distributed tables; otherwise this function returns false.
  */
 bool
 DistributedTablesExist(void)
@@ -460,8 +460,8 @@ DistributedTablesExist(void)
 	heapTuple = heap_getnext(scanDesc, ForwardScanDirection);
 
 	/*
-	 * Check if there exists any tuples in the partition table. If there are any tables,
-	 * we can conclude that there is at least one distributed table and return true.
+	 * Check whether the partition metadata table contains any tuples. If so,
+	 * at least one distributed table exists.
 	 */
 	distributedTablesExist = HeapTupleIsValid(heapTuple);
 
