@@ -1,5 +1,5 @@
 # pg_shard extension
 comment = 'extension for sharding across remote PostgreSQL servers'
-default_version = '1.0'
+default_version = '1.1'
 module_pathname = '$libdir/pg_shard'
 relocatable = true
