@@ -68,7 +68,7 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 	Oid distributedTableId = shardInterval->relationId;
 
 	List *shardPlacementList = NIL;
-	ShardPlacement *sourcePlacement PG_USED_FOR_ASSERTS_ONLY = NULL;
+	ShardPlacement *sourcePlacement = NULL;
 	ShardPlacement *targetPlacement = NULL;
 	List *ddlCommandList = NIL;
 	bool recreated = false;
@@ -102,6 +102,7 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 	}
 
 	HOLD_INTERRUPTS();
+
 	dataCopied = CopyDataFromFinalizedPlacement(sourcePlacement, targetPlacement,
 												distributedTableId, shardId);
 	if (!dataCopied)
@@ -179,13 +180,11 @@ RecreateTableDDLCommandList(Oid relationId, int64 shardId)
 	/* build appropriate DROP command based on relation kind */
 	if (relationKind == RELKIND_RELATION)
 	{
-		appendStringInfo(extendedDropCommand, DROP_REGULAR_TABLE_COMMAND,
-						 quote_identifier(shardName));
+		appendStringInfo(extendedDropCommand, DROP_REGULAR_TABLE_COMMAND, shardName);
 	}
 	else if (relationKind == RELKIND_FOREIGN_TABLE)
 	{
-		appendStringInfo(extendedDropCommand, DROP_FOREIGN_TABLE_COMMAND,
-						 quote_identifier(shardName));
+		appendStringInfo(extendedDropCommand, DROP_FOREIGN_TABLE_COMMAND, shardName);
 	}
 	else
 	{
@@ -227,8 +226,6 @@ CopyDataFromFinalizedPlacement(ShardPlacement *placementToRepair,
 
 	PGconn *connection = NULL;
 	PGresult *result = NULL;
-	char *copySuccessfulString = NULL;
-	bool responseParsedSuccessfully = false;
 
 	if (relationKind == RELKIND_FOREIGN_TABLE)
 	{
@@ -249,11 +246,10 @@ CopyDataFromFinalizedPlacement(ShardPlacement *placementToRepair,
 		return false;
 	}
 
-	appendStringInfo(copyRelationQuery, COPY_RELATION_QUERY,
+	appendStringInfo(copyRelationQuery, COPY_SHARD_PLACEMENT_COMMAND,
 					 quote_literal_cstr(shardName),
 					 quote_literal_cstr(healthyPlacement->nodeName),
 					 healthyPlacement->nodePort);
-
 
 	result = PQexec(connection, copyRelationQuery->data);
 	if (PQresultStatus(result) != PGRES_TUPLES_OK)

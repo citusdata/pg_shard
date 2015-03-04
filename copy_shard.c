@@ -38,7 +38,7 @@
 
 
 /* local function forward declarations */
-static bool CopyDataFromTupleStoreToRelation(Tuplestorestate *tupleStore,
+static void CopyDataFromTupleStoreToRelation(Tuplestorestate *tupleStore,
 											 Relation relation);
 
 
@@ -57,27 +57,28 @@ worker_copy_shard_placement(PG_FUNCTION_ARGS)
 	text *shardRelationNameText = PG_GETARG_TEXT_P(0);
 	text *nodeNameText = PG_GETARG_TEXT_P(1);
 	int32 nodePort = PG_GETARG_INT32(2);
-	Oid shardRelationId = ResolveRelationId(shardRelationNameText);
 	char *shardRelationName = text_to_cstring(shardRelationNameText);
 	char *nodeName = text_to_cstring(nodeNameText);
+	bool fetchSuccessful = false;
 
-
+	Oid shardRelationId = ResolveRelationId(shardRelationNameText);
 	Relation shardTable = heap_open(shardRelationId, RowExclusiveLock);
-	ShardPlacement *placement = (ShardPlacement *) palloc0(sizeof(ShardPlacement));
-	Task *task = (Task *) palloc0(sizeof(Task));
-	StringInfo selectAllQuery = makeStringInfo();
-
 	TupleDesc tupleDescriptor = RelationGetDescr(shardTable);
 	Tuplestorestate *tupleStore = tuplestore_begin_heap(false, false, work_mem);
-	bool fetchSuccessful = false;
-	bool loadSuccessful = false;
 
+	StringInfo selectAllQuery = NULL;
+	ShardPlacement *placement = NULL;
+	Task *task = NULL;
+
+	selectAllQuery = makeStringInfo();
 	appendStringInfo(selectAllQuery, SELECT_ALL_QUERY,
 	                 quote_identifier(shardRelationName));
 
+	placement = (ShardPlacement *) palloc0(sizeof(ShardPlacement));
 	placement->nodeName = nodeName;
 	placement->nodePort = nodePort;
 
+	task = (Task *) palloc0(sizeof(Task));
 	task->queryString = selectAllQuery;
 	task->taskPlacementList = list_make1(placement);
 
@@ -87,11 +88,7 @@ worker_copy_shard_placement(PG_FUNCTION_ARGS)
 		ereport(ERROR, (errmsg("could not receive query results")));
 	}
 
-	loadSuccessful = CopyDataFromTupleStoreToRelation(tupleStore, shardTable);
-	if (!loadSuccessful)
-	{
-		ereport(ERROR, (errmsg("could not load query results")));
-	}
+	CopyDataFromTupleStoreToRelation(tupleStore, shardTable);
 
 	tuplestore_end(tupleStore);
 
@@ -105,29 +102,26 @@ worker_copy_shard_placement(PG_FUNCTION_ARGS)
  * CopyDataFromTupleStoreToRelation loads a specified relation with all tuples
  * stored in the provided tuplestore. This function assumes the relation's
  * layout (TupleDesc) exactly matches that of the provided tuplestore. This
- * function returns a boolean indicating success or failure.
+ * function raises an error if the copy cannot be completed.
  */
-static bool
+static void
 CopyDataFromTupleStoreToRelation(Tuplestorestate *tupleStore, Relation relation)
 {
 	TupleDesc tupleDescriptor = RelationGetDescr(relation);
 	TupleTableSlot *tupleTableSlot = MakeSingleTupleTableSlot(tupleDescriptor);
-	bool copySuccessful = false;
 
 	for (;;)
 	{
 		HeapTuple tupleToInsert = NULL;
-		Oid insertedOid = InvalidOid;
 		bool nextTuple = tuplestore_gettupleslot(tupleStore, true, false, tupleTableSlot);
 		if (!nextTuple)
 		{
-			copySuccessful = true;
 			break;
 		}
 
 		tupleToInsert = ExecMaterializeSlot(tupleTableSlot);
 
-		insertedOid = simple_heap_insert(relation, tupleToInsert);
+		simple_heap_insert(relation, tupleToInsert);
 		CommandCounterIncrement();
 
 		ExecClearTuple(tupleTableSlot);
@@ -135,5 +129,5 @@ CopyDataFromTupleStoreToRelation(Tuplestorestate *tupleStore, Relation relation)
 
 	ExecDropSingleTupleTableSlot(tupleTableSlot);
 
-	return copySuccessful;
+	return;
 }
