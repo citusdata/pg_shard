@@ -39,9 +39,9 @@
 static ShardPlacement * SearchShardPlacementInList(List *shardPlacementList,
 												   text *nodeName, int32 nodePort);
 static List * RecreateTableDDLCommandList(Oid relationId, int64 shardId);
-static bool CopyDataFromFinalizedPlacement(ShardPlacement *placementToRepair,
-										   ShardPlacement *healthyPlacement,
-										   Oid distributedTableId, int64 shardId);
+static bool CopyDataFromFinalizedPlacement(Oid distributedTableId, int64 shardId,
+                                           ShardPlacement *healthyPlacement,
+                                           ShardPlacement *placementToRepair);
 
 /* declarations for dynamic loading */
 PG_FUNCTION_INFO_V1(master_copy_shard_placement);
@@ -103,8 +103,8 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 
 	HOLD_INTERRUPTS();
 
-	dataCopied = CopyDataFromFinalizedPlacement(sourcePlacement, targetPlacement,
-												distributedTableId, shardId);
+	dataCopied = CopyDataFromFinalizedPlacement(distributedTableId, shardId,
+	                                            sourcePlacement, targetPlacement);
 	if (!dataCopied)
 	{
 		ereport(ERROR, (errmsg("failed to copy placement data")));
@@ -206,16 +206,16 @@ RecreateTableDDLCommandList(Oid relationId, int64 shardId)
 
 
 /*
- * CopyDataFromFinalizedPlacement connects to an unhealthy placement and
- * directs it to copy the specified shard from a certain healthy placement.
- * This function assumes that the unhealthy placement already has a schema
- * in place to receive rows from the healthy placement. This function returns
- * a boolean indicating success or failure.
+ * CopyDataFromFinalizedPlacement copies a the data for a shard (identified by
+ * a relation and shard identifier) from a healthy placement to one needing
+ * repair. The unhealthy placement must already have an empty relation in place
+ * to receive rows from the healthy placement. This function returns a boolean
+ * indicating success or failure.
  */
 static bool
-CopyDataFromFinalizedPlacement(ShardPlacement *placementToRepair,
-							   ShardPlacement *healthyPlacement,
-							   Oid distributedTableId, int64 shardId)
+CopyDataFromFinalizedPlacement(Oid distributedTableId, int64 shardId,
+                               ShardPlacement *healthyPlacement,
+                               ShardPlacement *placementToRepair)
 {
 	char *relationName = get_rel_name(distributedTableId);
 	char relationKind = get_rel_relkind(distributedTableId);
