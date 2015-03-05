@@ -21,10 +21,12 @@
 #define DROP_REGULAR_TABLE_COMMAND "DROP TABLE IF EXISTS %s"
 #define DROP_FOREIGN_TABLE_COMMAND "DROP FOREIGN TABLE IF EXISTS %s"
 #define COPY_SHARD_PLACEMENT_COMMAND "SELECT worker_copy_shard_placement(%s, %s, %d)"
+#define SELECT_ALL_QUERY "SELECT * FROM %s"
 
 
 /* function declarations for shard repair functionality */
 extern Datum master_copy_shard_placement(PG_FUNCTION_ARGS);
+extern Datum worker_copy_shard_placement(PG_FUNCTION_ARGS);
 
 
 #endif /* PG_SHARD_REPAIR_SHARDS_H */
