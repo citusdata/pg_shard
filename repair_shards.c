@@ -18,17 +18,18 @@
 #include "postgres_ext.h"
 
 #include "connection.h"
+#include "create_shards.h"
 #include "repair_shards.h"
 #include "ddl_commands.h"
 #include "distribution_metadata.h"
 #include "pg_shard.h"
-#include "ruleutils.h"
 
 #include <string.h>
 
 #include "access/heapam.h"
 #include "access/htup.h"
 #include "access/tupdesc.h"
+#include "access/xact.h"
 #include "catalog/pg_class.h"
 #include "executor/tuptable.h"
 #include "lib/stringinfo.h"

@@ -21,7 +21,6 @@
 #include "create_shards.h"
 #include "ddl_commands.h"
 #include "distribution_metadata.h"
-#include "prune_shard_list.h"
 
 #include <ctype.h>
 #include <limits.h>
@@ -29,10 +28,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "access/attnum.h"
 #include "access/hash.h"
 #include "access/nbtree.h"
-#include "access/skey.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_am.h"
