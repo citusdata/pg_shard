@@ -112,7 +112,9 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 										 ddlCommandList);
 	if (!recreated)
 	{
-		ereport(ERROR, (errmsg("could not recreate table to receive placement data")));
+		ereport(ERROR, (errmsg("could not recreate shard table"),
+						errhint("Consult recent messages in the server logs for "
+								"details.")));
 	}
 
 	HOLD_INTERRUPTS();
@@ -121,7 +123,9 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 	                                            sourcePlacement, targetPlacement);
 	if (!dataCopied)
 	{
-		ereport(ERROR, (errmsg("failed to copy placement data")));
+		ereport(ERROR, (errmsg("could not copy shard data"),
+						errhint("Consult recent messages in the server logs for "
+								"details.")));
 	}
 
 	/* the placement is repaired, so return to finalized state */
@@ -175,7 +179,9 @@ worker_copy_shard_placement(PG_FUNCTION_ARGS)
 	fetchSuccessful = ExecuteTaskAndStoreResults(task, tupleDescriptor, tupleStore);
 	if (!fetchSuccessful)
 	{
-		ereport(ERROR, (errmsg("could not receive query results")));
+		ereport(ERROR, (errmsg("could not store shard rows from healthy placement"),
+						errhint("Consult recent messages in the server logs for "
+								"details.")));
 	}
 
 	CopyDataFromTupleStoreToRelation(tupleStore, shardTable);
@@ -215,7 +221,8 @@ SearchShardPlacementInList(List *shardPlacementList, text *nodeNameText, int32 n
 	if (matchingPlacement == NULL)
 	{
 		ereport(ERROR, (errmsg("could not find placement matching %s:%d", nodeName,
-							   nodePort)));
+							   nodePort),
+						errhint("Confirm the placement still exists and try again.")));
 	}
 
 	return matchingPlacement;
