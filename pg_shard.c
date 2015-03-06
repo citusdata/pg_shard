@@ -1510,10 +1510,9 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 			}
 
 			/*
-			 * We need to switch to a temporary MemoryContext because of the potential
-			 * memory leak of BuildTupleFromCStrings function call. Though we free any
-			 * reference we can reach, it is safer to call BuildTupleFromCStrings in a
-			 * separate context and reset it afterwards.
+			 * Switch to a temporary memory context that we reset after each tuple. This
+			 * protects us from any memory leaks that might be present in I/O functions
+			 * called by BuildTupleFromCStrings.
 			 */
 			oldContext = MemoryContextSwitchTo(ioContext);
 
@@ -1522,7 +1521,6 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 			MemoryContextSwitchTo(oldContext);
 
 			tuplestore_puttuple(tupleStore, heapTuple);
-			heap_freetuple(heapTuple);
 			MemoryContextReset(ioContext);
 		}
 
