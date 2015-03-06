@@ -75,6 +75,7 @@
 #include "utils/relcache.h"
 #include "utils/snapmgr.h"
 #include "utils/tuplestore.h"
+#include "utils/memutils.h"
 
 
 /* controls use of locks to enforce safe commutativity */
@@ -1455,6 +1456,13 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 	AttInMetadata *attributeInputMetadata = TupleDescGetAttInMetadata(tupleDescriptor);
 	uint32 expectedColumnCount = tupleDescriptor->natts;
 	char **columnArray = (char **) palloc0(expectedColumnCount * sizeof(char *));
+	uint32 fetchedRowCountInIOContext = 0;
+	MemoryContext oldContext = NULL;
+	MemoryContext ioContext =  AllocSetContextCreate(CurrentMemoryContext,
+													 "StoreQueryResult",
+													 ALLOCSET_DEFAULT_MINSIZE,
+													 ALLOCSET_DEFAULT_INITSIZE,
+													 ALLOCSET_DEFAULT_MAXSIZE);
 
 	Assert(tupleStore != NULL);
 
@@ -1465,6 +1473,7 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 		uint32 rowCount = 0;
 		uint32 columnCount = 0;
 		ExecStatusType resultStatus = 0;
+
 
 		PGresult *result = PQgetResult(connection);
 		if (result == NULL)
@@ -1482,6 +1491,7 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 		}
 
 		rowCount = PQntuples(result);
+		fetchedRowCountInIOContext += rowCount;
 		columnCount = PQnfields(result);
 		Assert(columnCount == expectedColumnCount);
 
@@ -1502,8 +1512,24 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 				}
 			}
 
+			if (fetchedRowCountInIOContext > 100)
+			{
+				fetchedRowCountInIOContext = 0;
+				MemoryContextReset(ioContext);
+				ioContext = AllocSetContextCreate(CurrentMemoryContext,
+																"StoreQueryResult Conversion",
+																ALLOCSET_DEFAULT_MINSIZE,
+																ALLOCSET_DEFAULT_INITSIZE,
+																ALLOCSET_DEFAULT_MAXSIZE);
+			}
+
+			oldContext = MemoryContextSwitchTo(ioContext);
+
 			heapTuple = BuildTupleFromCStrings(attributeInputMetadata, columnArray);
 			tuplestore_puttuple(tupleStore, heapTuple);
+			heap_freetuple(heapTuple);
+
+			MemoryContextSwitchTo(oldContext);
 		}
 
 		PQclear(result);
@@ -1595,6 +1621,7 @@ TupleStoreToTable(RangeVar *tableRangeVar, List *storeToTableColumnList,
 		CommandCounterIncrement();
 
 		ExecClearTuple(storeTableSlot);
+		heap_freetuple(tableTuple);
 	}
 
 	ExecDropSingleTupleTableSlot(storeTableSlot);
