@@ -1472,11 +1472,9 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 		uint32 columnCount = 0;
 		ExecStatusType resultStatus = 0;
 
-
 		PGresult *result = PQgetResult(connection);
 		if (result == NULL)
 		{
-
 			break;
 		}
 
