@@ -1456,8 +1456,6 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 	AttInMetadata *attributeInputMetadata = TupleDescGetAttInMetadata(tupleDescriptor);
 	uint32 expectedColumnCount = tupleDescriptor->natts;
 	char **columnArray = (char **) palloc0(expectedColumnCount * sizeof(char *));
-	uint32 fetchedRowCountInIOContext = 0;
-	MemoryContext oldContext = NULL;
 	MemoryContext ioContext =  AllocSetContextCreate(CurrentMemoryContext,
 													 "StoreQueryResult",
 													 ALLOCSET_DEFAULT_MINSIZE,
@@ -1478,6 +1476,7 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 		PGresult *result = PQgetResult(connection);
 		if (result == NULL)
 		{
+
 			break;
 		}
 
@@ -1491,13 +1490,13 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 		}
 
 		rowCount = PQntuples(result);
-		fetchedRowCountInIOContext += rowCount;
 		columnCount = PQnfields(result);
 		Assert(columnCount == expectedColumnCount);
 
 		for (rowIndex = 0; rowIndex < rowCount; rowIndex++)
 		{
 			HeapTuple heapTuple = NULL;
+			MemoryContext oldContext = NULL;
 			memset(columnArray, 0, columnCount * sizeof(char *));
 
 			for (columnIndex = 0; columnIndex < columnCount; columnIndex++)
@@ -1512,24 +1511,21 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 				}
 			}
 
-			if (fetchedRowCountInIOContext > 100)
-			{
-				fetchedRowCountInIOContext = 0;
-				MemoryContextReset(ioContext);
-				ioContext = AllocSetContextCreate(CurrentMemoryContext,
-																"StoreQueryResult Conversion",
-																ALLOCSET_DEFAULT_MINSIZE,
-																ALLOCSET_DEFAULT_INITSIZE,
-																ALLOCSET_DEFAULT_MAXSIZE);
-			}
-
+			/*
+			 * We need to switch to a temporary MemoryContext because of the potential
+			 * memory leak of BuildTupleFromCStrings function call. Though we free any
+			 * reference we can reach, it is safer to call BuildTupleFromCStrings in a
+			 * separate context and reset it afterwards.
+			 */
 			oldContext = MemoryContextSwitchTo(ioContext);
 
 			heapTuple = BuildTupleFromCStrings(attributeInputMetadata, columnArray);
-			tuplestore_puttuple(tupleStore, heapTuple);
-			heap_freetuple(heapTuple);
 
 			MemoryContextSwitchTo(oldContext);
+
+			tuplestore_puttuple(tupleStore, heapTuple);
+			heap_freetuple(heapTuple);
+			MemoryContextReset(ioContext);
 		}
 
 		PQclear(result);
