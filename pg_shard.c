@@ -75,6 +75,7 @@
 #include "utils/relcache.h"
 #include "utils/snapmgr.h"
 #include "utils/tuplestore.h"
+#include "utils/memutils.h"
 
 
 /* controls use of locks to enforce safe commutativity */
@@ -1455,6 +1456,11 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 	AttInMetadata *attributeInputMetadata = TupleDescGetAttInMetadata(tupleDescriptor);
 	uint32 expectedColumnCount = tupleDescriptor->natts;
 	char **columnArray = (char **) palloc0(expectedColumnCount * sizeof(char *));
+	MemoryContext ioContext =  AllocSetContextCreate(CurrentMemoryContext,
+													 "StoreQueryResult",
+													 ALLOCSET_DEFAULT_MINSIZE,
+													 ALLOCSET_DEFAULT_INITSIZE,
+													 ALLOCSET_DEFAULT_MAXSIZE);
 
 	Assert(tupleStore != NULL);
 
@@ -1488,6 +1494,7 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 		for (rowIndex = 0; rowIndex < rowCount; rowIndex++)
 		{
 			HeapTuple heapTuple = NULL;
+			MemoryContext oldContext = NULL;
 			memset(columnArray, 0, columnCount * sizeof(char *));
 
 			for (columnIndex = 0; columnIndex < columnCount; columnIndex++)
@@ -1502,8 +1509,19 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 				}
 			}
 
+			/*
+			 * Switch to a temporary memory context that we reset after each tuple. This
+			 * protects us from any memory leaks that might be present in I/O functions
+			 * called by BuildTupleFromCStrings.
+			 */
+			oldContext = MemoryContextSwitchTo(ioContext);
+
 			heapTuple = BuildTupleFromCStrings(attributeInputMetadata, columnArray);
+
+			MemoryContextSwitchTo(oldContext);
+
 			tuplestore_puttuple(tupleStore, heapTuple);
+			MemoryContextReset(ioContext);
 		}
 
 		PQclear(result);
@@ -1595,6 +1613,7 @@ TupleStoreToTable(RangeVar *tableRangeVar, List *storeToTableColumnList,
 		CommandCounterIncrement();
 
 		ExecClearTuple(storeTableSlot);
+		heap_freetuple(tableTuple);
 	}
 
 	ExecDropSingleTupleTableSlot(storeTableSlot);
