@@ -291,15 +291,11 @@ CopyDataFromFinalizedPlacement(Oid distributedTableId, int64 shardId,
                                ShardPlacement *placementToRepair)
 {
 	char *relationName = get_rel_name(distributedTableId);
-	char relationKind = get_rel_relkind(distributedTableId);
 	const char *shardName = NULL;
-	char *nodeName = placementToRepair->nodeName;
-	int32 nodePort = placementToRepair->nodePort;
 	StringInfo copyRelationQuery = makeStringInfo();
+	bool copySuccessful = false;
 
-	PGconn *connection = NULL;
-	PGresult *result = NULL;
-
+	char relationKind = get_rel_relkind(distributedTableId);
 	if (relationKind == RELKIND_FOREIGN_TABLE)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -311,31 +307,16 @@ CopyDataFromFinalizedPlacement(Oid distributedTableId, int64 shardId,
 	AppendShardIdToName(&relationName, shardId);
 	shardName = quote_identifier(relationName);
 
-	connection = GetConnection(nodeName, nodePort);
-	if (connection == NULL)
-	{
-		ereport(WARNING, (errmsg("could not connect to %s:%d", nodeName, nodePort)));
-
-		return false;
-	}
-
 	appendStringInfo(copyRelationQuery, COPY_SHARD_PLACEMENT_COMMAND,
 					 quote_literal_cstr(shardName),
 					 quote_literal_cstr(healthyPlacement->nodeName),
 					 healthyPlacement->nodePort);
 
-	result = PQexec(connection, copyRelationQuery->data);
-	if (PQresultStatus(result) != PGRES_TUPLES_OK)
-	{
-		ReportRemoteError(connection, result);
-		PQclear(result);
+	copySuccessful = ExecuteRemoteCommandList(placementToRepair->nodeName,
+	                                          placementToRepair->nodePort,
+	                                          list_make1(copyRelationQuery->data));
 
-		return false;
-	}
-
-	PQclear(result);
-
-	return true;
+	return copySuccessful;
 }
 
 
