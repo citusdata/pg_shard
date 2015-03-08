@@ -536,8 +536,9 @@ ExecuteRemoteCommandList(char *nodeName, uint32 nodePort, List *sqlCommandList)
 
 /*
  * ExecuteRemoteCommand executes the given sql command on the remote node, and
- * returns true if the command executed successfully. Note that the function
- * assumes the command does not return tuples.
+ * returns true if the command executed successfully. The command is allowed to
+ * return tuples, but they are not inspected: this function simply reflects
+ * whether the command succeeded or failed.
  */
 static bool
 ExecuteRemoteCommand(PGconn *connection, const char *sqlCommand)
@@ -545,7 +546,8 @@ ExecuteRemoteCommand(PGconn *connection, const char *sqlCommand)
 	PGresult *result = PQexec(connection, sqlCommand);
 	bool commandSuccessful = true;
 
-	if (PQresultStatus(result) != PGRES_COMMAND_OK)
+	if (PQresultStatus(result) != PGRES_COMMAND_OK &&
+		PQresultStatus(result) != PGRES_TUPLES_OK)
 	{
 		ReportRemoteError(connection, result);
 		commandSuccessful = false;
