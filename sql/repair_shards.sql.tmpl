@@ -62,18 +62,10 @@ CREATE FOREIGN TABLE remote_engagements_30 (
 	event_data text
 ) SERVER fake_fdw_server;
 
-\o /dev/null
-SELECT 'remote_engagements_30'::regclass::oid AS shardoid;
-\gset
-\o
-
 SELECT master_copy_shard_placement(30, 'localhost', $PGPORT, '127.0.0.1', $PGPORT);
 
-\o /dev/null
-SELECT 'remote_engagements_30'::regclass::oid AS repairedoid;
-\gset
-\o
+INSERT INTO customer_engagements_20 DEFAULT VALUES;
 
-SELECT :shardoid != :repairedoid AS shard_recreated; 
+SELECT worker_copy_shard_placement('customer_engagements_20', 'localhost', $PGPORT);
 
-SELECT worker_copy_shard_placement('customer_engagements', 'localhost', $PGPORT);
+SELECT COUNT(*) FROM customer_engagements_20;

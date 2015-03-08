@@ -27,6 +27,7 @@
 #include "catalog/pg_type.h"
 #include "commands/defrem.h"
 #include "nodes/makefuncs.h"
+#include "nodes/memnodes.h" /* IWYU pragma: keep */
 #include "nodes/nodeFuncs.h"
 #include "nodes/nodes.h"
 #include "nodes/primnodes.h"
@@ -40,6 +41,7 @@
 #include "utils/lsyscache.h"
 #include "utils/typcache.h"
 #include "utils/memutils.h"
+#include "utils/palloc.h"
 
 
 /*

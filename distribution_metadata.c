@@ -34,7 +34,7 @@
 #include "catalog/pg_type.h"
 #include "commands/sequence.h"
 #include "nodes/makefuncs.h"
-#include "nodes/memnodes.h"
+#include "nodes/memnodes.h" /* IWYU pragma: keep */
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
 #include "storage/lock.h"
