@@ -140,3 +140,51 @@ $sync_table_metadata_to_citus$ LANGUAGE 'plpgsql';
 
 COMMENT ON FUNCTION sync_table_metadata_to_citus(text)
 		IS 'synchronize a distributed table''s pg_shard metadata to CitusDB';
+
+-- Prepares a specified distributed table to work with COPY operations by
+-- creating a temporary table and trigger to handle rows coming from a COPY.
+-- After each INSERT, a provided sequence is incremented to track the total -- number of copied rows.
+CREATE FUNCTION prepare_distributed_table_for_copy(relation regclass, sequence regclass) RETURNS void
+AS $pdtfc$
+	DECLARE
+		table_name text;
+		temp_table_name text;
+		attr_names text[];
+		attr_list text;
+		param_list text;
+		using_list text;
+		insert_command text;
+		func_tmpl CONSTANT text  := $$  CREATE FUNCTION pg_temp.copy_to_insert() RETURNS trigger
+										AS $cti$
+											BEGIN
+												EXECUTE %L USING %s;
+												PERFORM nextval(%L);
+												RETURN NULL;
+											END;
+										$cti$ LANGUAGE plpgsql VOLATILE;
+									$$;
+		table_tmpl CONSTANT text := 'CREATE TEMPORARY TABLE %I (LIKE %s)';
+		trg_tmpl CONSTANT text := $$CREATE TRIGGER copy_to_insert
+									BEFORE INSERT ON %s
+									FOR EACH ROW EXECUTE PROCEDURE pg_temp.copy_to_insert()$$;
+	BEGIN
+		SELECT relname INTO STRICT table_name FROM pg_class WHERE oid = relation;
+		temp_table_name = format('%s_copy_facade', table_name);
+
+		SELECT array_agg(attname) INTO STRICT attr_names FROM pg_attribute WHERE attrelid = relation AND
+									attnum > 0 AND NOT attisdropped;
+		SELECT string_agg(quote_ident(attr_name), ','),
+			   string_agg(format('NEW.%I', attr_name), ',')
+			   INTO STRICT attr_list, using_list FROM unnest(attr_names) AS attr_name;
+		SELECT string_agg('$' || param_num, ',') INTO param_list
+			FROM generate_series(1, array_length(attr_names, 1)) AS param_num;
+
+		insert_command = format('INSERT INTO %s (%s) VALUES (%s)', relation, attr_list, param_list);
+
+		EXECUTE format(func_tmpl, insert_command, using_list, sequence);
+
+		EXECUTE format(table_tmpl, temp_table_name, relation);
+
+		EXECUTE format(trg_tmpl, temp_table_name::regclass);
+	END;
+$pdtfc$ LANGUAGE plpgsql SET search_path = 'pg_catalog';
