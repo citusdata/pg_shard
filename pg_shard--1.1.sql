@@ -143,48 +143,76 @@ COMMENT ON FUNCTION sync_table_metadata_to_citus(text)
 
 -- Prepares a specified distributed table to work with COPY operations by
 -- creating a temporary table and trigger to handle rows coming from a COPY.
--- After each INSERT, a provided sequence is incremented to track the total -- number of copied rows.
-CREATE FUNCTION prepare_distributed_table_for_copy(relation regclass, sequence regclass) RETURNS void
-AS $pdtfc$
+-- In essence, rows added by a COPY are turned into a series of INSERTS, which
+-- are routed to the distributed table. Since pg_shard does not currently allow
+-- COPY directly to the distributed table, this workaround permits COPY-based
+-- workflows until full COPY support is added.
+CREATE FUNCTION prepare_distributed_table_for_copy(relation regclass, sequence regclass)
+RETURNS VOID
+AS $prepare_distributed_table_for_copy$
 	DECLARE
-		table_name text;
 		temp_table_name text;
 		attr_names text[];
 		attr_list text;
 		param_list text;
 		using_list text;
 		insert_command text;
-		func_tmpl CONSTANT text  := $$  CREATE FUNCTION pg_temp.copy_to_insert() RETURNS trigger
-										AS $cti$
-											BEGIN
-												EXECUTE %L USING %s;
-												PERFORM nextval(%L);
-												RETURN NULL;
-											END;
-										$cti$ LANGUAGE plpgsql VOLATILE;
-									$$;
+		-- templates to create dynamic functions, tables, and triggers
+		func_tmpl CONSTANT text :=    $$CREATE FUNCTION pg_temp.copy_to_insert()
+										RETURNS trigger
+										AS $copy_to_insert$
+										BEGIN
+											EXECUTE %L USING %s;
+											PERFORM nextval(%L);
+											RETURN NULL;
+										END;
+										$copy_to_insert$ LANGUAGE plpgsql;$$;
 		table_tmpl CONSTANT text := 'CREATE TEMPORARY TABLE %I (LIKE %s)';
 		trg_tmpl CONSTANT text := $$CREATE TRIGGER copy_to_insert
-									BEFORE INSERT ON %s
-									FOR EACH ROW EXECUTE PROCEDURE pg_temp.copy_to_insert()$$;
+									BEFORE INSERT ON %s FOR EACH ROW
+									EXECUTE PROCEDURE pg_temp.copy_to_insert()$$;
 	BEGIN
-		SELECT relname INTO STRICT table_name FROM pg_class WHERE oid = relation;
-		temp_table_name = format('%s_copy_facade', table_name);
+		-- create name of temporary table using unqualified input table name
+		SELECT format('%s_copy_facade', relname)
+		INTO   STRICT temp_table_name
+		FROM   pg_class
+		WHERE  oid = relation;
 
-		SELECT array_agg(attname) INTO STRICT attr_names FROM pg_attribute WHERE attrelid = relation AND
-									attnum > 0 AND NOT attisdropped;
+		-- get list of all attributes in table, we'll need shortly
+		SELECT array_agg(attname)
+		INTO   STRICT attr_names
+		FROM   pg_attribute
+		WHERE  attrelid = relation AND
+			   attnum > 0          AND
+			   NOT attisdropped;
+
+		-- build fully specified column list and USING clause from attr. names
 		SELECT string_agg(quote_ident(attr_name), ','),
 			   string_agg(format('NEW.%I', attr_name), ',')
-			   INTO STRICT attr_list, using_list FROM unnest(attr_names) AS attr_name;
-		SELECT string_agg('$' || param_num, ',') INTO param_list
-			FROM generate_series(1, array_length(attr_names, 1)) AS param_num;
+		INTO   STRICT attr_list,
+					  using_list
+		FROM   unnest(attr_names) AS attr_name;
 
-		insert_command = format('INSERT INTO %s (%s) VALUES (%s)', relation, attr_list, param_list);
+		-- build ($1, $2, $3)-style VALUE list to bind parameters
+		SELECT string_agg('$' || param_num, ',')
+		INTO   STRICT param_list
+		FROM   generate_series(1, array_length(attr_names, 1)) AS param_num;
 
+		-- finally, use the above lists to generate appropriate INSERT command
+		insert_command = format('INSERT INTO %s (%s) VALUES (%s)', relation, attr_list,
+								param_list);
+
+		-- use the command to make one-off trigger targeting specified relation
 		EXECUTE format(func_tmpl, insert_command, using_list, sequence);
 
+		-- create a temporary table exactly like the target relation...
 		EXECUTE format(table_tmpl, temp_table_name, relation);
 
+		-- ... and install the trigger on that temporary table
 		EXECUTE format(trg_tmpl, temp_table_name::regclass);
 	END;
-$pdtfc$ LANGUAGE plpgsql SET search_path = 'pg_catalog';
+$prepare_distributed_table_for_copy$ LANGUAGE plpgsql SET search_path = 'pg_catalog';
+
+COMMENT ON FUNCTION prepare_distributed_table_for_copy(relation regclass,
+													   sequence regclass)
+		IS 'set up session to allow distributed table to ingest rows from COPY commands';
