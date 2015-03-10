@@ -167,10 +167,10 @@ AS $prepare_distributed_table_for_copy$
 											RETURN NULL;
 										END;
 										$copy_to_insert$ LANGUAGE plpgsql;$$;
-		table_tmpl CONSTANT text := 'CREATE TEMPORARY TABLE %I (LIKE %s)';
-		trg_tmpl CONSTANT text := $$CREATE TRIGGER copy_to_insert
-									BEFORE INSERT ON %s FOR EACH ROW
-									EXECUTE PROCEDURE pg_temp.copy_to_insert()$$;
+		table_tmpl CONSTANT text := $$CREATE TEMPORARY TABLE %I (LIKE %s)$$;
+		trigger_tmpl CONSTANT text := $$CREATE TRIGGER copy_to_insert
+										BEFORE INSERT ON %s FOR EACH ROW
+										EXECUTE PROCEDURE pg_temp.copy_to_insert()$$;
 	BEGIN
 		-- create name of temporary table using unqualified input table name
 		SELECT format('%s_copy_facade', relname)
@@ -209,7 +209,7 @@ AS $prepare_distributed_table_for_copy$
 		EXECUTE format(table_tmpl, temp_table_name, relation);
 
 		-- ... and install the trigger on that temporary table
-		EXECUTE format(trg_tmpl, temp_table_name::regclass);
+		EXECUTE format(trigger_tmpl, temp_table_name::regclass);
 	END;
 $prepare_distributed_table_for_copy$ LANGUAGE plpgsql SET search_path = 'pg_catalog';
 
