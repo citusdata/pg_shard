@@ -141,15 +141,15 @@ $sync_table_metadata_to_citus$ LANGUAGE 'plpgsql';
 COMMENT ON FUNCTION sync_table_metadata_to_citus(text)
 		IS 'synchronize a distributed table''s pg_shard metadata to CitusDB';
 
--- Prepares a specified distributed table to work with COPY operations by
--- creating a temporary table and trigger to handle rows coming from a COPY.
--- In essence, rows added by a COPY are turned into a series of INSERTS, which
--- are routed to the distributed table. Since pg_shard does not currently allow
--- COPY directly to the distributed table, this workaround permits COPY-based
--- workflows until full COPY support is added.
-CREATE FUNCTION prepare_distributed_table_for_copy(relation regclass, sequence regclass)
-RETURNS VOID
-AS $prepare_distributed_table_for_copy$
+-- Creates a table exactly like the specified target table along with a trigger
+-- to redirect any INSERTed rows from the proxy to the underlying table. The
+-- default behavior is to prevent the rows from being written to the proxy
+-- table at all, though this behavior can be changed by providing true as the
+-- second argument. Returns the name of the proxy table that was created.
+CREATE FUNCTION create_insert_proxy_for_table(target_table regclass,
+											  writethrough boolean DEFAULT false)
+RETURNS text
+AS $create_insert_proxy_for_table$
 	DECLARE
 		temp_table_name text;
 		attr_names text[];
@@ -157,14 +157,14 @@ AS $prepare_distributed_table_for_copy$
 		param_list text;
 		using_list text;
 		insert_command text;
+		return_statement text;
 		-- templates to create dynamic functions, tables, and triggers
 		func_tmpl CONSTANT text :=    $$CREATE FUNCTION pg_temp.copy_to_insert()
 										RETURNS trigger
 										AS $copy_to_insert$
 										BEGIN
 											EXECUTE %L USING %s;
-											PERFORM nextval(%L);
-											RETURN NULL;
+											%s;
 										END;
 										$copy_to_insert$ LANGUAGE plpgsql;$$;
 		table_tmpl CONSTANT text := $$CREATE TEMPORARY TABLE %I (LIKE %s)$$;
@@ -173,16 +173,16 @@ AS $prepare_distributed_table_for_copy$
 										EXECUTE PROCEDURE pg_temp.copy_to_insert()$$;
 	BEGIN
 		-- create name of temporary table using unqualified input table name
-		SELECT format('%s_copy_facade', relname)
+		SELECT format('%s_insert_proxy', relname)
 		INTO   STRICT temp_table_name
 		FROM   pg_class
-		WHERE  oid = relation;
+		WHERE  oid = target_table;
 
 		-- get list of all attributes in table, we'll need shortly
 		SELECT array_agg(attname)
 		INTO   STRICT attr_names
 		FROM   pg_attribute
-		WHERE  attrelid = relation AND
+		WHERE  attrelid = target_table AND
 			   attnum > 0          AND
 			   NOT attisdropped;
 
@@ -198,21 +198,29 @@ AS $prepare_distributed_table_for_copy$
 		INTO   STRICT param_list
 		FROM   generate_series(1, array_length(attr_names, 1)) AS param_num;
 
-		-- finally, use the above lists to generate appropriate INSERT command
-		insert_command = format('INSERT INTO %s (%s) VALUES (%s)', relation, attr_list,
-								param_list);
+		-- use the above lists to generate appropriate INSERT command
+		insert_command = format('INSERT INTO %s (%s) VALUES (%s)', target_table,
+								attr_list, param_list);
 
-		-- use the command to make one-off trigger targeting specified relation
-		EXECUTE format(func_tmpl, insert_command, using_list, sequence);
+		-- only return original row if writethrough is on
+		IF writethrough THEN
+			return_statement := 'RETURN NEW';
+		ELSE
+			return_statement := 'RETURN NULL';
+		END IF;
 
-		-- create a temporary table exactly like the target relation...
-		EXECUTE format(table_tmpl, temp_table_name, relation);
+		-- use the command to make one-off trigger targeting specified table
+		EXECUTE format(func_tmpl, insert_command, using_list, return_statement);
+
+		-- create a temporary table exactly like the target table...
+		EXECUTE format(table_tmpl, temp_table_name, target_table);
 
 		-- ... and install the trigger on that temporary table
 		EXECUTE format(trigger_tmpl, temp_table_name::regclass);
-	END;
-$prepare_distributed_table_for_copy$ LANGUAGE plpgsql SET search_path = 'pg_catalog';
 
-COMMENT ON FUNCTION prepare_distributed_table_for_copy(relation regclass,
-													   sequence regclass)
-		IS 'set up session to allow distributed table to ingest rows from COPY commands';
+		RETURN temp_table_name;
+	END;
+$create_insert_proxy_for_table$ LANGUAGE plpgsql SET search_path = 'pg_catalog';
+
+COMMENT ON FUNCTION create_insert_proxy_for_table(regclass, boolean)
+		IS 'create a proxy table that redirects INSERTed rows to a target table';
