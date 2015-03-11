@@ -1,5 +1,8 @@
 #!/bin/sh
 
+set -euo pipefail
+IFS=$'\n\t'
+
 # default values for certain options
 format='text'
 schema='public'
@@ -26,7 +29,7 @@ usage: copy_to_distributed_table [-BCTHh] [-c encoding] [-d delimiter]
   e : specifies the character used to escape quotes
       Default: the same as the `quote` value (quotes within data are doubled)
   n : specifies the string that represents a null value
-      Default: \\N in text format, an unquoted empty string in CSV format
+      Default: \N in text format, an unquoted empty string in CSV format
   q : specifies the quoting character to be used when a data value is quoted
       Default: double-quote
   s : specifies the schema in which the target table resides
