@@ -101,7 +101,7 @@ tablename=$2
 if [ -d "${filename}" ]; then
 	echo "$0: ${filename}: Is a directory" >&2
 	exit 66 # EX_NOINPUT
-elif [ ! -f "${filename}" ]; then
+elif [ ! -e "${filename}" ]; then
 	echo "$0: ${filename}: No such file" >&2
 	exit 66 # EX_NOINPUT
 elif [ ! -r "${filename}" ]; then
