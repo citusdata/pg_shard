@@ -26,6 +26,7 @@ endif
 
 EXTENSION = pg_shard
 DATA = pg_shard--1.1.sql pg_shard--1.0--1.1.sql
+SCRIPTS = bin/copy_to_distributed_table
 
 # Default to 5432 if PGPORT is undefined. Replace placeholders in our tests
 # with actual port number in order to anticipate correct output during tests.
