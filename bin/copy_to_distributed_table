@@ -88,18 +88,26 @@ while getopts ':BCc:d:e:Hhn:q:T' o; do
 done
 shift $((OPTIND-1))
 
+if [ "$#" -ne 2 ]; then
+	usage 64 2 # EX_USAGE, STDERR
+fi
+
 # append format to options and extract file/table names
 options="${options}, FORMAT ${format}"
 filename=$1
 tablename=$2
 
-# exit if filename or tablename are missing
-if [ -z "${filename}" ] || [ -z "${tablename}" ]; then
-	echo "$0: filename and tablename are required" >&2
-	usage 64 2 # EX_USAGE, STDERR
+# validate inputs
+if [ -d "${filename}" ]; then
+	echo "$0: ${filename}: Is a directory" >&2
+	exit 66 # EX_NOINPUT
+elif [ ! -f "${filename}" ]; then
+	echo "$0: ${filename}: No such file" >&2
+	exit 66 # EX_NOINPUT
+elif [ ! -r "${filename}" ]; then
+	echo "$0: ${filename}: Permission denied" >&2
+	exit 66 # EX_NOINPUT
 fi
-
-# TODO: check whether filename exists
 
 # escape single quotes in file/table name and build proxy name
 filename=`echo ${filename} | sed s/\'/\'\'/g`
