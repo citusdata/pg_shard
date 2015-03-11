@@ -125,14 +125,25 @@ CREATE TEMPORARY SEQUENCE rows_inserted MINVALUE 0 CACHE 100000;
 -- initialize counter to zero
 SELECT nextval('rows_inserted');
 
--- prepare the distributed table for copy
-SELECT prepare_distributed_table_for_copy('${schema}.${tablename}', 'rows_inserted');
+-- simple trigger function to tally rows inserted and discard them
+CREATE FUNCTION pg_temp.tally_insert() RETURNS trigger AS \$\$
+BEGIN
+	PERFORM nextval('rows_inserted');
+	RETURN NULL;
+END; \$\$ LANGUAGE plpgsql;
+
+-- create insert proxy and save name. Use writethrough to enable trigger chain
+SELECT create_insert_proxy_for_table('${schema}.${tablename}', true) AS proxy_tablename
+\gset
+
+-- install tally trigger; needs to sort alphabetically last
+CREATE TRIGGER zzzzz_tally_insert BEFORE INSERT ON pg_temp.:"proxy_tablename"
+FOR EACH ROW EXECUTE PROCEDURE pg_temp.tally_insert();
 
 -- don't stop if copy errors out: continue to print file name and row count
 \set ON_ERROR_STOP off
 
-\copy pg_temp.${facadename} from stdin with ($options)
-
+\copy pg_temp.${facadename} from ${filename} with ($options)
 
 -- reconnect STDOUT to display row count
 \o
