@@ -167,7 +167,8 @@ AS $create_insert_proxy_for_table$
 											%s;
 										END;
 										$copy_to_insert$ LANGUAGE plpgsql;$$;
-		table_tmpl CONSTANT text := $$CREATE TEMPORARY TABLE %I (LIKE %s)$$;
+		table_tmpl CONSTANT text :=   $$CREATE TEMPORARY TABLE %I
+										(LIKE %s INCLUDING DEFAULTS)$$;
 		trigger_tmpl CONSTANT text := $$CREATE TRIGGER copy_to_insert
 										BEFORE INSERT ON %s FOR EACH ROW
 										EXECUTE PROCEDURE pg_temp.copy_to_insert()$$;
