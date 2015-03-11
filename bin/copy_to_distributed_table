@@ -101,9 +101,9 @@ fi
 
 # TODO: check whether filename exists
 
-# escape single quotes in file/table name and build facade name
+# escape single quotes in file/table name and build proxy name
 filename=`echo ${filename} | sed s/\'/\'\'/g`
-facadename=`echo "${tablename}_copy_facade" | sed s/\"/\"\"/g`
+proxyname=`echo "${tablename}_insert_proxy" | sed s/\"/\"\"/g`
 tablename=`echo ${tablename} | sed s/\'/\'\'/g`
 
 # invoke psql, ignoring .psqlrc and passing the following heredoc
@@ -146,7 +146,7 @@ FOR EACH ROW EXECUTE PROCEDURE pg_temp.tally_insert();
 -- don't stop if copy errors out: continue to print file name and row count
 \set ON_ERROR_STOP off
 
-\copy pg_temp.${facadename} from ${filename} with ($options)
+\copy pg_temp.${proxyname} from ${filename} with (${options})
 
 -- reconnect STDOUT to display row count
 \o
