@@ -8,6 +8,7 @@ CREATE TABLE insert_target (
 	data text NOT NULL DEFAULT 'lorem ipsum'
 );
 
+-- use transaction to permit multiple calls to proxy function in one session
 BEGIN;
 
 -- create proxy and save proxy table name
@@ -36,8 +37,9 @@ ROLLBACK;
 
 BEGIN;
 
--- create proxy with writethrough this time
-SELECT create_insert_proxy_for_table('insert_target', true) AS proxy_tablename
+-- create proxy, passing sequence this time
+CREATE TEMPORARY SEQUENCE rows_inserted;
+SELECT create_insert_proxy_for_table('insert_target', 'rows_inserted') AS proxy_tablename
 \gset
 
 -- do insert and COPY again
@@ -50,11 +52,7 @@ COPY pg_temp.:"proxy_tablename" FROM stdin;
 6	labore et dolore
 \.
 
--- verify proxy and target have same number of rows
-SELECT count(*) FROM insert_target;
-SELECT count(*) FROM pg_temp.:"proxy_tablename";
-
--- verify tables are identical (set difference is empty)
-SELECT * FROM insert_target EXCEPT SELECT * FROM pg_temp.:"proxy_tablename";
+-- verify counter matches row count
+SELECT (SELECT count(*) FROM insert_target) = currval('rows_inserted') AS count_correct;
 
 ROLLBACK;

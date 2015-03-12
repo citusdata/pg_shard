@@ -141,13 +141,13 @@ $sync_table_metadata_to_citus$ LANGUAGE 'plpgsql';
 COMMENT ON FUNCTION sync_table_metadata_to_citus(text)
 		IS 'synchronize a distributed table''s pg_shard metadata to CitusDB';
 
--- Creates a table exactly like the specified target table along with a trigger
--- to redirect any INSERTed rows from the proxy to the underlying table. The
--- default behavior is to prevent the rows from being written to the proxy
--- table at all, though this behavior can be changed by providing true as the
--- second argument. Returns the name of the proxy table that was created.
+-- Creates a temporary table exactly like the specified target table along with
+-- a trigger to redirect any INSERTed rows from the proxy to the underlying
+-- table. Users may optionally provide a sequence which will be incremented
+-- after each row that has been successfully proxied (useful for counting rows
+-- processed). Returns the name of the proxy table that was created.
 CREATE FUNCTION create_insert_proxy_for_table(target_table regclass,
-											  writethrough boolean DEFAULT false)
+											  sequence regclass DEFAULT NULL)
 RETURNS text
 AS $create_insert_proxy_for_table$
 	DECLARE
@@ -157,14 +157,14 @@ AS $create_insert_proxy_for_table$
 		param_list text;
 		using_list text;
 		insert_command text;
-		return_statement text;
 		-- templates to create dynamic functions, tables, and triggers
 		func_tmpl CONSTANT text :=    $$CREATE FUNCTION pg_temp.copy_to_insert()
 										RETURNS trigger
 										AS $copy_to_insert$
 										BEGIN
 											EXECUTE %L USING %s;
-											%s;
+											PERFORM nextval(%L);
+											RETURN NULL;
 										END;
 										$copy_to_insert$ LANGUAGE plpgsql;$$;
 		table_tmpl CONSTANT text :=   $$CREATE TEMPORARY TABLE %I
@@ -203,15 +203,8 @@ AS $create_insert_proxy_for_table$
 		insert_command = format('INSERT INTO %s (%s) VALUES (%s)', target_table,
 								attr_list, param_list);
 
-		-- only return original row if writethrough is on
-		IF writethrough THEN
-			return_statement := 'RETURN NEW';
-		ELSE
-			return_statement := 'RETURN NULL';
-		END IF;
-
 		-- use the command to make one-off trigger targeting specified table
-		EXECUTE format(func_tmpl, insert_command, using_list, return_statement);
+		EXECUTE format(func_tmpl, insert_command, using_list, sequence);
 
 		-- create a temporary table exactly like the target table...
 		EXECUTE format(table_tmpl, temp_table_name, target_table);
@@ -223,5 +216,5 @@ AS $create_insert_proxy_for_table$
 	END;
 $create_insert_proxy_for_table$ LANGUAGE plpgsql SET search_path = 'pg_catalog';
 
-COMMENT ON FUNCTION create_insert_proxy_for_table(regclass, boolean)
+COMMENT ON FUNCTION create_insert_proxy_for_table(regclass, regclass)
 		IS 'create a proxy table that redirects INSERTed rows to a target table';
