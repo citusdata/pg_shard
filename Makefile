@@ -66,14 +66,22 @@ PG_CONFIG = pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
 
-# Build the 9.3- or 9.4-derived ruleutils, depending upon active version
+# Earlier versions may not define MAJORVERSION
+ifndef MAJORVERSION
+    MAJORVERSION := $(basename $(VERSION))
+endif
+
+# Determine whether to use 9.3- or 9.4-derived ruleutils
 ifneq (,$(findstring $(MAJORVERSION), 9.3))
 	RULEUTILS_IMPL := ruleutils_93.c
-else ifneq (,$(findstring $(MAJORVERSION), 9.4))
+endif
+ifneq (,$(findstring $(MAJORVERSION), 9.4))
 	RULEUTILS_IMPL := ruleutils_94.c
-else
-	# Error out if too old altogether
-	$(error PostgreSQL 9.3 or 9.4 is required to compile this extension)
+endif
+
+# If neither 9.3 nor 9.4 was detected, abort
+ifeq (,$(RULEUTILS_IMPL))
+    $(error PostgreSQL 9.3 or 9.4 is required to compile this extension)
 endif
 
 # Same as implicit %.o rule, except building ruleutils.o from -93/94
