@@ -76,7 +76,8 @@ while getopts ':BCc:d:e:Hhn:q:s:T' o; do
 			options="${options}, QUOTE '${quote}'"
 			;;
 		s)
-			schema=`echo ${OPTARG} | sed s/\'/\'\'/g`
+			# we'll escape schema in psql itself
+			schema=${OPTARG}
 			;;
 		T)
 			format='text'
@@ -110,14 +111,9 @@ elif [ ! -r "${filename}" ]; then
 	exit 66 # EX_NOINPUT
 fi
 
-# escape single quotes in file/table name and build proxy name
-filename=`echo ${filename} | sed s/\'/\'\'/g`
-proxyname=`echo "${tablename}_insert_proxy" | sed s/\"/\"\"/g`
-tablename=`echo ${tablename} | sed s/\'/\'\'/g`
-
 # invoke psql, ignoring .psqlrc and passing the following heredoc
-psql -X << E_O_SQL
-
+psql -X -vtable="${tablename}" -vfile="${filename}" \
+		-vschema="${schema}" -voptions="${options}" << 'E_O_SQL'
 -- only print values, left-align them, and don't rollback or stop on error
 \set QUIET on
 \set ON_ERROR_ROLLBACK off
@@ -137,14 +133,24 @@ CREATE TEMPORARY SEQUENCE rows_inserted MINVALUE 0 CACHE 100000;
 -- initialize counter to zero
 SELECT nextval('rows_inserted');
 
+-- get qualified table name
+SELECT format('%I.%I', :'schema', :'table') AS target
+\gset
+
 -- create insert proxy and save name; pass in sequence
-SELECT create_insert_proxy_for_table('${schema}.${tablename}', 'rows_inserted') AS proxy_tablename
+SELECT create_insert_proxy_for_table(:'target', 'rows_inserted') AS proxy
 \gset
 
 -- don't stop if copy errors out: continue to print file name and row count
 \set ON_ERROR_STOP off
 
-\copy pg_temp.${proxyname} from ${filename} with (${options})
+-- \copy doesn't allow variable substitution, so do it ourselves...
+SELECT format('\copy pg_temp.%I from %L with (%s)',
+			  :'proxy', :'file', :'options') AS copy_cmd
+\gset
+
+-- ... then execute the result
+:copy_cmd
 
 -- reconnect STDOUT to display row count
 \o
