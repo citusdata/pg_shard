@@ -4,6 +4,13 @@
 set -euo pipefail
 IFS=$'\n\t'
 
+# constants
+stdout=1
+stderr=2
+success=0
+badusage=64
+noinput=66
+
 # default values for certain options
 format='text'
 schema='public'
@@ -13,7 +20,7 @@ options='OIDS false, FREEZE false'
 
 # outputs usage message on specified device before exiting with provided status
 usage() {
-	cat << 'E_O_USAGE' >&"$2"
+	cat << 'E_O_USAGE' >&"$1"
 usage: copy_to_distributed_table [-BCTHh] [-c encoding] [-d delimiter]
 	[-e escape] [-n null] [-q quote] [-s schema] filename tablename
 
@@ -37,7 +44,7 @@ usage: copy_to_distributed_table [-BCTHh] [-c encoding] [-d delimiter]
       Default: 'public'
 E_O_USAGE
 
-	exit $1;
+	exit $2;
 }
 
 # process flags
@@ -65,7 +72,7 @@ while getopts ':BCc:d:e:Hhn:q:s:T' o; do
 			options="${options}, HEADER true"
 			;;
 		h)
-			usage 0 1 # normal status, STDOUT
+			usage $stdout $success
 			;;
 		n)
 			null=`echo ${OPTARG} | sed s/\'/\'\'/g`
@@ -84,14 +91,14 @@ while getopts ':BCc:d:e:Hhn:q:s:T' o; do
 			;;
 		*)
 			echo "$0: illegal option -- ${OPTARG}" >&2
-			usage 64 2 # EX_USAGE, STDERR
+			usage $stderr $badusage
 			;;
 	esac
 done
 shift $((OPTIND-1))
 
 if [ "$#" -ne 2 ]; then
-	usage 64 2 # EX_USAGE, STDERR
+	usage $stderr $badusage
 fi
 
 # append format to options and extract file/table names
@@ -102,13 +109,13 @@ tablename=$2
 # validate inputs
 if [ -d "${filename}" ]; then
 	echo "$0: ${filename}: Is a directory" >&2
-	exit 66 # EX_NOINPUT
+	exit $noinput
 elif [ ! -e "${filename}" ]; then
 	echo "$0: ${filename}: No such file" >&2
-	exit 66 # EX_NOINPUT
+	exit $noinput
 elif [ ! -r "${filename}" ]; then
 	echo "$0: ${filename}: Permission denied" >&2
-	exit 66 # EX_NOINPUT
+	exit $noinput
 fi
 
 # invoke psql, ignoring .psqlrc and passing the following heredoc
