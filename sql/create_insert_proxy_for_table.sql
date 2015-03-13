@@ -2,17 +2,20 @@
 -- test INSERT proxy creation functionality
 -- ===================================================================
 
--- create the target table
-CREATE TABLE insert_target (
-	id bigint PRIMARY KEY,
-	data text NOT NULL DEFAULT 'lorem ipsum'
-);
-
 -- use transaction to permit multiple calls to proxy function in one session
 BEGIN;
 
+-- use "unorthodox" object names to test quoting
+CREATE SCHEMA "A$AP Mob"
+	CREATE TABLE "Dr. Bronner's ""Magic"" Soaps" (
+		id bigint PRIMARY KEY,
+		data text NOT NULL DEFAULT 'lorem ipsum'
+	);
+
+\set insert_target '"A$AP Mob"."Dr. Bronner''s ""Magic"" Soaps"'
+
 -- create proxy and save proxy table name
-SELECT create_insert_proxy_for_table('insert_target') AS proxy_tablename
+SELECT create_insert_proxy_for_table(:'insert_target') AS proxy_tablename
 \gset
 
 -- insert to proxy, relying on default value
@@ -28,7 +31,7 @@ COPY pg_temp.:"proxy_tablename" FROM stdin;
 \.
 
 -- verify rows were copied to target
-SELECT * FROM insert_target ORDER BY id ASC;
+SELECT * FROM :insert_target ORDER BY id ASC;
 
 -- and not to proxy
 SELECT count(*) FROM pg_temp.:"proxy_tablename";
@@ -36,7 +39,10 @@ SELECT count(*) FROM pg_temp.:"proxy_tablename";
 ROLLBACK;
 
 -- test behavior with distributed table, (so no transaction)
-TRUNCATE insert_target;
+CREATE TABLE insert_target (
+	id bigint PRIMARY KEY,
+	data text NOT NULL DEFAULT 'lorem ipsum'
+);
 
 -- squelch WARNINGs that contain PGPORT to avoid needing tmpl file
 SET client_min_messages TO ERROR;

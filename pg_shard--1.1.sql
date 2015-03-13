@@ -210,7 +210,7 @@ AS $create_insert_proxy_for_table$
 		EXECUTE format(table_tmpl, temp_table_name, target_table);
 
 		-- ... and install the trigger on that temporary table
-		EXECUTE format(trigger_tmpl, temp_table_name::regclass);
+		EXECUTE format(trigger_tmpl, quote_ident(temp_table_name)::regclass);
 
 		RETURN temp_table_name;
 	END;
