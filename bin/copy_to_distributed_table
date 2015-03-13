@@ -41,7 +41,7 @@ E_O_USAGE
 }
 
 # process flags
-while getopts ':BCc:d:e:Hhn:q:T' o; do
+while getopts ':BCc:d:e:Hhn:q:s:T' o; do
 	case "${o}" in
 		B)
 			format='binary'
