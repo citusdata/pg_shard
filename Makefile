@@ -26,6 +26,7 @@ endif
 
 EXTENSION = pg_shard
 DATA = pg_shard--1.1.sql pg_shard--1.0--1.1.sql
+SCRIPTS = bin/copy_to_distributed_table
 
 # Default to 5432 if PGPORT is undefined. Replace placeholders in our tests
 # with actual port number in order to anticipate correct output during tests.
@@ -43,7 +44,8 @@ REGRESS_PREP = sql/connection.sql expected/connection.out sql/create_shards.sql 
 			   expected/repair_shards.out  expected/modifications.out
 REGRESS = init connection distribution_metadata extend_ddl_commands \
 		  generate_ddl_commands create_shards prune_shard_list repair_shards \
-		  modifications queries utilities citus_metadata_sync
+		  modifications queries utilities citus_metadata_sync \
+		  create_insert_proxy_for_table
 
 # The launcher regression flag lets us specify a special wrapper to handle
 # testing rather than psql directly. Our wrapper swaps in a known worker list.
