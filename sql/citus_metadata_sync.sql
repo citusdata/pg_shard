@@ -2,6 +2,10 @@
 -- test metadata sync functionality
 -- ===================================================================
 
+-- declare some variables for clarity
+\set finalized 1
+\set inactive 3
+
 -- set up a table and "distribute" it manually
 CREATE TABLE set_of_ids ( id bigint );
 
@@ -14,8 +18,8 @@ VALUES
 INSERT INTO pgs_distribution_metadata.shard_placement
 	(id, node_name, node_port, shard_id, shard_state)
 VALUES
-	(101, 'cluster-worker-01', 5432, 1, 0),
-	(102, 'cluster-worker-02', 5433, 2, 0);
+	(101, 'cluster-worker-01', 5432, 1, :finalized),
+	(102, 'cluster-worker-02', 5433, 2, :finalized);
 
 INSERT INTO pgs_distribution_metadata.partition (relation_id, partition_method, key)
 VALUES
@@ -65,6 +69,44 @@ FROM   pg_dist_shard
 WHERE  logicalrelid = 'set_of_ids'::regclass
 ORDER BY shardid;
 
+SELECT * FROM pg_dist_shard_placement
+WHERE  shardid IN (SELECT shardid
+				   FROM   pg_dist_shard
+				   WHERE  logicalrelid = 'set_of_ids'::regclass)
+ORDER BY nodename;
+
+-- subsequent sync should have no effect
+SELECT sync_table_metadata_to_citus('set_of_ids');
+
+SELECT partmethod, partkey
+FROM   pg_dist_partition
+WHERE  logicalrelid = 'set_of_ids'::regclass;
+
+SELECT shardid, shardstorage, shardalias, shardminvalue, shardmaxvalue
+FROM   pg_dist_shard
+WHERE  logicalrelid = 'set_of_ids'::regclass
+ORDER BY shardid;
+
+SELECT * FROM pg_dist_shard_placement
+WHERE  shardid IN (SELECT shardid
+				   FROM   pg_dist_shard
+				   WHERE  logicalrelid = 'set_of_ids'::regclass)
+ORDER BY nodename;
+
+-- mark a placement as unhealthy and add a new one
+UPDATE pgs_distribution_metadata.shard_placement
+SET    shard_state = :inactive
+WHERE  id = 102;
+
+INSERT INTO pgs_distribution_metadata.shard_placement
+	(id, node_name, node_port, shard_id, shard_state)
+VALUES
+	(103, 'cluster-worker-03', 5434, 1, :finalized);
+
+-- write latest changes to Citus tables
+SELECT sync_table_metadata_to_citus('set_of_ids');
+
+-- should see updated state and new placement
 SELECT * FROM pg_dist_shard_placement
 WHERE  shardid IN (SELECT shardid
 				   FROM   pg_dist_shard

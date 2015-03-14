@@ -92,7 +92,16 @@ AS $sync_table_metadata_to_citus$
 		table_relation_id CONSTANT oid NOT NULL := table_name::regclass::oid;
 		dummy_shard_length CONSTANT bigint := 0;
 	BEGIN
-		-- copy shard placement metadata
+		-- grab lock for upsert
+		LOCK TABLE pg_dist_shard_placement IN EXCLUSIVE MODE;
+
+		-- perform update of shard health
+		UPDATE pg_dist_shard_placement
+		SET    shardstate = shard_placement.shard_state
+		FROM   pgs_distribution_metadata.shard_placement
+		WHERE  shardid = shard_placement.shard_id;
+
+		-- copy new shard placement metadata
 		INSERT INTO pg_dist_shard_placement
 					(shardid,
 					 shardstate,
@@ -105,11 +114,15 @@ AS $sync_table_metadata_to_citus$
 			   node_name,
 			   node_port
 		FROM   pgs_distribution_metadata.shard_placement
-		WHERE  shard_id IN (SELECT id
-							FROM   pgs_distribution_metadata.shard
-							WHERE  relation_id = table_relation_id);
-
-		-- copy shard metadata
+			   LEFT OUTER JOIN pg_dist_shard_placement
+							ON ( shardid = shard_placement.shard_id
+								 AND nodename = shard_placement.node_name
+								 AND nodeport = shard_placement.node_port )
+		WHERE  shardid IS NULL
+			   AND shard_id IN (SELECT id
+								FROM   pgs_distribution_metadata.shard
+								WHERE  relation_id = table_relation_id);
+		-- copy new shard metadata
 		INSERT INTO pg_dist_shard
 					(shardid,
 					 logicalrelid,
@@ -122,9 +135,12 @@ AS $sync_table_metadata_to_citus$
 			   min_value,
 			   max_value
 		FROM   pgs_distribution_metadata.shard
-		WHERE  relation_id = table_relation_id;
+			   LEFT OUTER JOIN pg_dist_shard
+							ON ( shardid = shard.id )
+		WHERE  shardid IS NULL
+			   AND relation_id = table_relation_id;
 
-		-- copy partition metadata, which also converts the partition column to
+		-- copy new partition metadata, which also converts the partition column to
 		-- a node string representation as expected by CitusDB
 		INSERT INTO pg_dist_partition
 					(logicalrelid,
@@ -134,7 +150,10 @@ AS $sync_table_metadata_to_citus$
 			   partition_method,
 			   partition_column_to_node_string(table_relation_id)
 		FROM   pgs_distribution_metadata.partition
-		WHERE  relation_id = table_relation_id;
+			   LEFT OUTER JOIN pg_dist_partition
+							ON ( logicalrelid = partition.relation_id )
+		WHERE  logicalrelid IS NULL
+			   AND relation_id = table_relation_id;
 	END;
 $sync_table_metadata_to_citus$ LANGUAGE 'plpgsql';
 
