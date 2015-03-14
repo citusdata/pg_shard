@@ -287,7 +287,7 @@ AppendShardIdToConstraintName(AlterTableCmd *command, uint64 shardId)
 void
 AppendShardIdToName(char **name, uint64 shardId)
 {
-	char   extendedName[NAMEDATALEN];
+	char extendedName[NAMEDATALEN];
 	uint32 extendedNameLength = 0;
 
 	snprintf(extendedName, NAMEDATALEN, "%s%c" UINT64_FORMAT,
@@ -346,7 +346,8 @@ DeparseDDLCommand(Node *ddlCommandNode, Oid masterRelationId)
 
 		default:
 		{
-			ereport(ERROR, (errmsg("unsupported node type during deparse: %d", nodeType)));
+			ereport(ERROR, (errmsg("unsupported node type during deparse: %d",
+								   nodeType)));
 			break;
 		}
 	}
@@ -442,7 +443,8 @@ DeparseAlterTableStmt(AlterTableStmt *alterTableStmt)
 
 			default:
 			{
-				ereport(ERROR, (errmsg("unsupported alter table type: %d", alterTableType)));
+				ereport(ERROR, (errmsg("unsupported alter table type: %d",
+									   alterTableType)));
 			}
 		}
 	}
@@ -467,7 +469,7 @@ DeparseAlterTableStmt(AlterTableStmt *alterTableStmt)
 /*
  * DeparseConstraint converts the parsed constraint into a SQL string. Currently
  * the function only handles PRIMARY KEY and UNIQUE constraints.
-*/
+ */
 static char *
 DeparseIndexConstraint(Constraint *constraint)
 {
@@ -856,7 +858,7 @@ DeparseIndexStmt(IndexStmt *indexStmt, Oid masterRelationId)
 		appendStringInfo(deparsedIndexStmt, " WITH(");
 		foreach(optionCell, optionList)
 		{
-			DefElem *option = (DefElem*) lfirst(optionCell);
+			DefElem *option = (DefElem *) lfirst(optionCell);
 			char *optionName = option->defname;
 			char *optionValue = defGetString(option);
 

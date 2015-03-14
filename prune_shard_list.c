@@ -189,7 +189,7 @@ UpdateConstraint(Node *baseConstraint, ShardInterval *shardInterval)
 	Node *greaterThanExpr = (Node *) lsecond(andExpr->args);
 
 	Node *minNode = get_rightop((Expr *) greaterThanExpr); /* right op */
-	Node *maxNode = get_rightop((Expr *) lessThanExpr);	   /* right op */
+	Node *maxNode = get_rightop((Expr *) lessThanExpr);    /* right op */
 	Const *minConstant = NULL;
 	Const *maxConstant = NULL;
 
@@ -225,7 +225,7 @@ MakeOpExpression(Var *variable, int16 strategyNumber)
 
 	Oid accessMethodId = BTREE_AM_OID;
 	Oid operatorId = InvalidOid;
-	Const  *constantValue = NULL;
+	Const *constantValue = NULL;
 	OpExpr *expression = NULL;
 
 	/* Load the operator from system catalogs */
@@ -236,7 +236,7 @@ MakeOpExpression(Var *variable, int16 strategyNumber)
 	/* Now make the expression with the given variable and a null constant */
 	expression = (OpExpr *) make_opclause(operatorId,
 										  InvalidOid, /* no result type yet */
-										  false,	  /* no return set */
+										  false,      /* no return set */
 										  (Expr *) variable,
 										  (Expr *) constantValue,
 										  InvalidOid, collationId);
@@ -430,7 +430,7 @@ HashableClauseMutator(Node *originalNode, Var *partitionColumn)
 	 * If this node is not hashable, continue walking down the expression tree
 	 * to find and hash clauses which are eligible.
 	 */
-	if(newNode == NULL)
+	if (newNode == NULL)
 	{
 		newNode = expression_tree_mutator(originalNode, HashableClauseMutator,
 										  (void *) partitionColumn);
@@ -523,7 +523,7 @@ MakeHashedOperatorExpression(OpExpr *operatorExpression)
 	/* Now create the expression with modified partition column and hashed constant */
 	hashedExpression = (OpExpr *) make_opclause(operatorId,
 												InvalidOid, /* no result type yet */
-												false,	  /* no return set */
+												false,    /* no return set */
 												(Expr *) hashedColumn,
 												(Expr *) hashedConstant,
 												InvalidOid, InvalidOid);
@@ -570,7 +570,7 @@ MakeInt4Constant(Datum constantValue)
 	bool constantIsNull = false;
 	bool constantByValue = true;
 
-	Const *int4Constant = makeConst(constantType, constantTypeMode,	constantCollationId,
+	Const *int4Constant = makeConst(constantType, constantTypeMode, constantCollationId,
 									constantLength, constantValue, constantIsNull,
 									constantByValue);
 	return int4Constant;

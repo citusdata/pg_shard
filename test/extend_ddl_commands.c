@@ -38,6 +38,7 @@ extend_ddl_command(PG_FUNCTION_ARGS)
 {
 	Oid distributedTableId = PG_GETARG_OID(0);
 	int64 shardId = PG_GETARG_INT64(1);
+
 	/* using text instead of cstring to allow SQL use of || without casting */
 	text *ddlCommandText = PG_GETARG_TEXT_P(2);
 	char *ddlCommand = text_to_cstring(ddlCommandText);

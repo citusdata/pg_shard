@@ -50,8 +50,8 @@ static ShardPlacement * SearchShardPlacementInList(List *shardPlacementList,
 												   text *nodeName, int32 nodePort);
 static List * RecreateTableDDLCommandList(Oid relationId, int64 shardId);
 static bool CopyDataFromFinalizedPlacement(Oid distributedTableId, int64 shardId,
-                                           ShardPlacement *healthyPlacement,
-                                           ShardPlacement *placementToRepair);
+										   ShardPlacement *healthyPlacement,
+										   ShardPlacement *placementToRepair);
 static void CopyDataFromTupleStoreToRelation(Tuplestorestate *tupleStore,
 											 Relation relation);
 
@@ -120,7 +120,7 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 	HOLD_INTERRUPTS();
 
 	dataCopied = CopyDataFromFinalizedPlacement(distributedTableId, shardId,
-	                                            sourcePlacement, targetPlacement);
+												sourcePlacement, targetPlacement);
 	if (!dataCopied)
 	{
 		ereport(ERROR, (errmsg("could not copy shard data"),
@@ -166,7 +166,7 @@ worker_copy_shard_placement(PG_FUNCTION_ARGS)
 
 	selectAllQuery = makeStringInfo();
 	appendStringInfo(selectAllQuery, SELECT_ALL_QUERY,
-	                 quote_identifier(shardRelationName));
+					 quote_identifier(shardRelationName));
 
 	placement = (ShardPlacement *) palloc0(sizeof(ShardPlacement));
 	placement->nodeName = nodeName;
@@ -287,8 +287,8 @@ RecreateTableDDLCommandList(Oid relationId, int64 shardId)
  */
 static bool
 CopyDataFromFinalizedPlacement(Oid distributedTableId, int64 shardId,
-                               ShardPlacement *healthyPlacement,
-                               ShardPlacement *placementToRepair)
+							   ShardPlacement *healthyPlacement,
+							   ShardPlacement *placementToRepair)
 {
 	char *relationName = get_rel_name(distributedTableId);
 	const char *shardName = NULL;
@@ -313,8 +313,8 @@ CopyDataFromFinalizedPlacement(Oid distributedTableId, int64 shardId,
 					 healthyPlacement->nodePort);
 
 	copySuccessful = ExecuteRemoteCommandList(placementToRepair->nodeName,
-	                                          placementToRepair->nodePort,
-	                                          list_make1(copyRelationQuery->data));
+											  placementToRepair->nodePort,
+											  list_make1(copyRelationQuery->data));
 
 	return copySuccessful;
 }
@@ -350,6 +350,4 @@ CopyDataFromTupleStoreToRelation(Tuplestorestate *tupleStore, Relation relation)
 	}
 
 	ExecDropSingleTupleTableSlot(tupleTableSlot);
-
-	return;
 }

@@ -6193,7 +6193,9 @@ generate_shard_name(Oid relid, int64 shardid)
 	char *relname = get_relation_name(relid);
 
 	if (shardid <= 0)
+	{
 		return relname;
+	}
 
 	AppendShardIdToName(&relname, shardid);
 

@@ -36,7 +36,7 @@
 typedef enum DistributedNodeTag
 {
 	/* Tags for distributed planning begin a safe distance after all other tags. */
-	T_DistributedPlan = 2100,		/* plan to be built and passed to executor */
+	T_DistributedPlan = 2100,       /* plan to be built and passed to executor */
 } DistributedNodeTag;
 
 
@@ -59,9 +59,9 @@ typedef enum PlannerType
  */
 typedef struct DistributedPlan
 {
-	Plan plan;			/* this is a "subclass" of Plan */
-	Plan *originalPlan;	/* we save a copy of standard_planner's output */
-	List *taskList;		/* list of tasks to run as part of this plan */
+	Plan plan;          /* this is a "subclass" of Plan */
+	Plan *originalPlan; /* we save a copy of standard_planner's output */
+	List *taskList;     /* list of tasks to run as part of this plan */
 	List *targetList;   /* copy of the target list for remote SELECT queries only */
 
 	bool selectFromMultipleShards; /* does the select run across multiple shards? */
@@ -78,9 +78,9 @@ typedef struct DistributedPlan
  */
 typedef struct Task
 {
-	StringInfo queryString;		/* SQL string suitable for immediate remote execution */
-	List *taskPlacementList;	/* ShardPlacements on which the task can be executed */
-	int64 shardId;				/* Denormalized shardId of tasks for convenience */
+	StringInfo queryString;     /* SQL string suitable for immediate remote execution */
+	List *taskPlacementList;    /* ShardPlacements on which the task can be executed */
+	int64 shardId;              /* Denormalized shardId of tasks for convenience */
 } Task;
 
 

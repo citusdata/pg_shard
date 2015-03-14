@@ -903,7 +903,7 @@ ExtractPartitionValue(Query *query, Var *partitionColumn)
 		{
 			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							errmsg("cannot plan INSERT to a distributed table "
-									"using a non-constant partition column value")));
+								   "using a non-constant partition column value")));
 		}
 
 		partitionValue = (Const *) targetEntry->expr;
@@ -1019,7 +1019,7 @@ CreateTemporaryTableLikeStmt(Oid sourceRelationId)
 	/* create a unique name for the cloned table */
 	clonedTableName = makeStringInfo();
 	appendStringInfo(clonedTableName, "%s_%d_%lu", TEMPORARY_TABLE_PREFIX, MyProcPid,
-	                 temporaryTableId);
+					 temporaryTableId);
 	temporaryTableId++;
 
 	clonedRelation = makeRangeVar(NULL, clonedTableName->data, -1);
@@ -1349,7 +1349,8 @@ ExecuteMultipleShardSelect(DistributedPlan *distributedPlan,
 		 * the tupleStore into the table.
 		 */
 		Assert(tupleStore != NULL);
-		TupleStoreToTable(intermediateTable, targetList, tupleStoreDescriptor, tupleStore);
+		TupleStoreToTable(intermediateTable, targetList, tupleStoreDescriptor,
+						  tupleStore);
 
 		tuplestore_end(tupleStore);
 	}
@@ -1454,11 +1455,11 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 	AttInMetadata *attributeInputMetadata = TupleDescGetAttInMetadata(tupleDescriptor);
 	uint32 expectedColumnCount = tupleDescriptor->natts;
 	char **columnArray = (char **) palloc0(expectedColumnCount * sizeof(char *));
-	MemoryContext ioContext =  AllocSetContextCreate(CurrentMemoryContext,
-													 "StoreQueryResult",
-													 ALLOCSET_DEFAULT_MINSIZE,
-													 ALLOCSET_DEFAULT_INITSIZE,
-													 ALLOCSET_DEFAULT_MAXSIZE);
+	MemoryContext ioContext = AllocSetContextCreate(CurrentMemoryContext,
+													"StoreQueryResult",
+													ALLOCSET_DEFAULT_MINSIZE,
+													ALLOCSET_DEFAULT_INITSIZE,
+													ALLOCSET_DEFAULT_MAXSIZE);
 
 	Assert(tupleStore != NULL);
 
@@ -1578,7 +1579,8 @@ TupleStoreToTable(RangeVar *tableRangeVar, List *storeToTableColumnList,
 		 * location based on the attribute number in the column from the remote
 		 * query's target list.
 		 */
-		for (storeColumnIndex = 0; storeColumnIndex < storeColumnCount; storeColumnIndex++)
+		for (storeColumnIndex = 0; storeColumnIndex < storeColumnCount;
+			 storeColumnIndex++)
 		{
 			TargetEntry *tableEntry = (TargetEntry *) list_nth(storeToTableColumnList,
 															   storeColumnIndex);
@@ -1823,7 +1825,7 @@ ExecuteSingleShardSelect(DistributedPlan *distributedPlan, EState *executorState
 	tupleTableSlot = MakeSingleTupleTableSlot(tupleDescriptor);
 
 	/* startup the tuple receiver */
-	(*destination->rStartup) (destination, CMD_SELECT, tupleDescriptor);
+	(*destination->rStartup)(destination, CMD_SELECT, tupleDescriptor);
 
 	/* iterate over tuples in tuple store, and send them to destination */
 	for (;;)
@@ -1834,14 +1836,14 @@ ExecuteSingleShardSelect(DistributedPlan *distributedPlan, EState *executorState
 			break;
 		}
 
-		(*destination->receiveSlot) (tupleTableSlot, destination);
+		(*destination->receiveSlot)(tupleTableSlot, destination);
 		executorState->es_processed++;
 
 		ExecClearTuple(tupleTableSlot);
 	}
 
 	/* shutdown the tuple receiver */
-	(*destination->rShutdown) (destination);
+	(*destination->rShutdown)(destination);
 
 	ExecDropSingleTupleTableSlot(tupleTableSlot);
 
@@ -1967,7 +1969,7 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 			foreach(argumentTypeCell, argumentTypeList)
 			{
 				TypeName *typeName = lfirst(argumentTypeCell);
-				Oid	typeId = typenameTypeId(parseState, typeName);
+				Oid typeId = typenameTypeId(parseState, typeName);
 
 				argumentTypeArray[argumentTypeIndex] = typeId;
 				argumentTypeIndex++;
@@ -2115,7 +2117,7 @@ ErrorOnDropIfDistributedTablesExist(DropStmt *dropStatement)
 			/* without CASCADE, error if distributed tables present */
 			ereport(ERROR, (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
 							errmsg("cannot drop extension " PG_SHARD_EXTENSION_NAME
-							       " because other objects depend on it"),
+								   " because other objects depend on it"),
 							errdetail("Existing distributed tables depend on extension "
 									  PG_SHARD_EXTENSION_NAME),
 							errhint("Use DROP ... CASCADE to drop the dependent "
