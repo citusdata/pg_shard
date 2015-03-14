@@ -44,7 +44,7 @@ sort_names(PG_FUNCTION_ARGS)
 	char *second = PG_GETARG_CSTRING(1);
 	char *third = PG_GETARG_CSTRING(2);
 	List *nameList = SortList(list_make3(first, second, third),
-							  (int (*)(const void *, const void *)) &CompareStrings);
+							  (int (*)(const void *, const void *))(&CompareStrings));
 	StringInfo sortedNames = makeStringInfo();
 
 	ListCell *nameCell = NULL;
@@ -76,6 +76,7 @@ create_table_then_fail(PG_FUNCTION_ARGS)
 
 	PG_RETURN_BOOL(commandsExecuted);
 }
+
 
 /*
  * A simple wrapper around strcmp suitable for use with SortList or qsort.

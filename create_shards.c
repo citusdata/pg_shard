@@ -52,8 +52,8 @@ static List * ParseWorkerNodeFile(char *workerNodeFilename);
 static int CompareWorkerNodes(const void *leftElement, const void *rightElement);
 static bool ExecuteRemoteCommand(PGconn *connection, const char *sqlCommand);
 static text * IntegerToText(int32 value);
-static Oid SupportFunctionForColumn(Var* partitionColumn, Oid accessMethodId,
-		                            int16 supportFunctionNumber);
+static Oid SupportFunctionForColumn(Var *partitionColumn, Oid accessMethodId,
+									int16 supportFunctionNumber);
 
 
 /* declarations for dynamic loading */
@@ -95,12 +95,12 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 	if (partitionMethod == HASH_PARTITION_TYPE)
 	{
 		Oid hashSupportFunction = SupportFunctionForColumn(partitionColumn, HASH_AM_OID,
-		                                                   HASHPROC);
+														   HASHPROC);
 		if (hashSupportFunction == InvalidOid)
 		{
 			ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION),
-			                errmsg("could not identify a hash function for type %s",
-			                       format_type_be(partitionColumn->vartype)),
+							errmsg("could not identify a hash function for type %s",
+								   format_type_be(partitionColumn->vartype)),
 							errdetail("Partition column types must have a hash function "
 									  "defined to use hash partitioning.")));
 		}
@@ -116,18 +116,18 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 		 * TODO: Remove when range partitioning is supported.
 		 */
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				        errmsg("pg_shard only supports hash partitioning")));
+						errmsg("pg_shard only supports hash partitioning")));
 
 		btreeSupportFunction = SupportFunctionForColumn(partitionColumn, BTREE_AM_OID,
-		                                                BTORDER_PROC);
+														BTORDER_PROC);
 		if (btreeSupportFunction == InvalidOid)
 		{
 			ereport(ERROR,
-			        (errcode(ERRCODE_UNDEFINED_FUNCTION),
-			         errmsg("could not identify a comparison function for type %s",
-			                format_type_be(partitionColumn->vartype)),
-			         errdetail("Partition column types must have a comparison function "
-                               "defined to use range partitioning.")));
+					(errcode(ERRCODE_UNDEFINED_FUNCTION),
+					 errmsg("could not identify a comparison function for type %s",
+							format_type_be(partitionColumn->vartype)),
+					 errdetail("Partition column types must have a comparison function "
+							   "defined to use range partitioning.")));
 		}
 	}
 
@@ -265,9 +265,11 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 													extendedDDLCommands);
 			if (created)
 			{
-				uint64 shardPlacementId = NextSequenceId(SHARD_PLACEMENT_ID_SEQUENCE_NAME);
+				uint64 shardPlacementId = 0;
 				ShardState shardState = STATE_FINALIZED;
 
+
+				shardPlacementId = NextSequenceId(SHARD_PLACEMENT_ID_SEQUENCE_NAME);
 				InsertShardPlacementRow(shardPlacementId, shardId, shardState,
 										nodeName, nodePort);
 				placementCount++;
@@ -287,8 +289,8 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 		/* check if we created enough shard replicas */
 		if (placementCount < replicationFactor)
 		{
-			ereport(ERROR, (errmsg("could only create %u of %u of required shard replicas",
-								   placementCount, replicationFactor)));
+			ereport(ERROR, (errmsg("could only create %u of %u of required shard "
+								   "replicas", placementCount, replicationFactor)));
 		}
 
 		/* insert the shard metadata row along with its min/max values */
@@ -316,8 +318,8 @@ ResolveRelationId(text *relationName)
 {
 	List *relationNameList = NIL;
 	RangeVar *relation = NULL;
-	Oid  relationId = InvalidOid;
-	bool failOK = false;		/* error if relation cannot be found */
+	Oid relationId = InvalidOid;
+	bool failOK = false;        /* error if relation cannot be found */
 
 	/* resolve relationId from passed in schema and relation name */
 	relationNameList = textToQualifiedNameList(relationName);
@@ -580,7 +582,7 @@ IntegerToText(int32 value)
  */
 Oid
 SupportFunctionForColumn(Var *partitionColumn, Oid accessMethodId,
-		                 int16 supportFunctionNumber)
+						 int16 supportFunctionNumber)
 {
 	Oid operatorFamilyId = InvalidOid;
 	Oid supportFunctionOid = InvalidOid;

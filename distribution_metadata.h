@@ -80,7 +80,6 @@ typedef enum
 	STATE_CACHED = 2,
 	STATE_INACTIVE = 3,
 	STATE_TO_DELETE = 4
-
 } ShardState;
 
 
@@ -94,11 +93,11 @@ typedef enum
  */
 typedef struct ShardInterval
 {
-	int64 id;			/* unique identifier for the shard */
-	Oid relationId;		/* id of the shard's distributed table */
-	Datum minValue;		/* a shard's typed min value datum */
-	Datum maxValue;		/* a shard's typed max value datum */
-	Oid valueTypeId;	/* typeId for minValue and maxValue Datums */
+	int64 id;           /* unique identifier for the shard */
+	Oid relationId;     /* id of the shard's distributed table */
+	Datum minValue;     /* a shard's typed min value datum */
+	Datum maxValue;     /* a shard's typed max value datum */
+	Oid valueTypeId;    /* typeId for minValue and maxValue Datums */
 } ShardInterval;
 
 
@@ -112,11 +111,11 @@ typedef struct ShardInterval
  */
 typedef struct ShardPlacement
 {
-	int64 id;				/* unique identifier for the shard placement */
-	int64 shardId;			/* identifies shard for this shard placement */
-	ShardState shardState;	/* represents last known state of this placement */
-	char *nodeName;			/* hostname of machine hosting this shard */
-	int32 nodePort;			/* port number for connecting to host */
+	int64 id;               /* unique identifier for the shard placement */
+	int64 shardId;          /* identifies shard for this shard placement */
+	ShardState shardState;  /* represents last known state of this placement */
+	char *nodeName;         /* hostname of machine hosting this shard */
+	int32 nodePort;         /* port number for connecting to host */
 } ShardPlacement;
 
 
@@ -126,7 +125,7 @@ typedef struct ShardPlacement
  */
 typedef struct ShardIntervalListCacheEntry
 {
-	Oid distributedTableId;	/* cache key */
+	Oid distributedTableId; /* cache key */
 	List *shardIntervalList;
 } ShardIntervalListCacheEntry;
 

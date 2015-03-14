@@ -31,7 +31,7 @@
 #define RESERVED_HASHED_COLUMN_ID MaxAttrNumber
 
 
- /* OperatorIdCacheEntry contains information for each element in OperatorIdCache */
+/* OperatorIdCacheEntry contains information for each element in OperatorIdCache */
 typedef struct OperatorIdCacheEntry
 {
 	/* cache key consists of typeId, accessMethodId and strategyNumber */

@@ -119,7 +119,8 @@ GetConnection(char *nodeName, int32 nodePort)
  * closes it using PQfinish. If our hash does not contain the given connection,
  * this method simply prints a warning and exits.
  */
-void PurgeConnection(PGconn *connection)
+void
+PurgeConnection(PGconn *connection)
 {
 	NodeConnectionKey nodeConnectionKey;
 	NodeConnectionEntry *nodeConnectionEntry = NULL;
@@ -264,10 +265,14 @@ ConnectToNode(char *nodeName, char *nodePort)
 	const char *clientEncoding = GetDatabaseEncodingName();
 	const char *dbname = get_database_name(MyDatabaseId);
 
-	const char *keywordArray[] = { "host", "port", "fallback_application_name",
-			"client_encoding", "connect_timeout", "dbname", NULL };
-	const char *valueArray[] = { nodeName, nodePort, "pg_shard",
-			clientEncoding, CLIENT_CONNECT_TIMEOUT_SECONDS, dbname, NULL };
+	const char *keywordArray[] = {
+		"host", "port", "fallback_application_name",
+		"client_encoding", "connect_timeout", "dbname", NULL
+	};
+	const char *valueArray[] = {
+		nodeName, nodePort, "pg_shard", clientEncoding,
+		CLIENT_CONNECT_TIMEOUT_SECONDS, dbname, NULL
+	};
 
 	Assert(sizeof(keywordArray) == sizeof(valueArray));
 

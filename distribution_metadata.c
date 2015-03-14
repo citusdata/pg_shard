@@ -557,19 +557,16 @@ LoadShardIntervalRow(int64 shardId, Oid *relationId, char **minValue,
 		(*relationId) = DatumGetObjectId(relationIdDatum);
 		(*minValue) = TextDatumGetCString(minValueDatum);
 		(*maxValue) = TextDatumGetCString(maxValueDatum);
-
 	}
 	else
 	{
 		ereport(ERROR, (errmsg("could not find entry for shard " INT64_FORMAT,
-						shardId)));
+							   shardId)));
 	}
 
 	index_endscan(indexScanDesc);
 	index_close(indexRelation, AccessShareLock);
 	relation_close(heapRelation, AccessShareLock);
-
-	return;
 }
 
 
@@ -782,8 +779,6 @@ DeleteShardPlacementRow(uint64 shardPlacementId)
 	index_endscan(indexScanDesc);
 	index_close(indexRelation, AccessShareLock);
 	relation_close(heapRelation, RowExclusiveLock);
-
-	return;
 }
 
 
@@ -828,8 +823,8 @@ LockShard(int64 shardId, LOCKMODE lockMode)
 
 	if (lockMode == ExclusiveLock || lockMode == ShareLock)
 	{
-		bool sessionLock = false;	/* we want a transaction lock */
-		bool dontWait = false;		/* block indefinitely until acquired */
+		bool sessionLock = false;   /* we want a transaction lock */
+		bool dontWait = false;      /* block indefinitely until acquired */
 
 		(void) LockAcquire(&lockTag, lockMode, sessionLock, dontWait);
 	}

@@ -143,7 +143,7 @@ TableDDLCommandList(Oid relationId)
 		if (indexForm->indisclustered)
 		{
 			char *clusteredDef = pg_shard_get_indexclusterdef_string(indexId);
-			Assert (clusteredDef != NULL);
+			Assert(clusteredDef != NULL);
 
 			tableDDLCommandList = lappend(tableDDLCommandList, clusteredDef);
 		}
@@ -173,7 +173,7 @@ pg_shard_get_tableschemadef_string(Oid tableRelationId)
 	char relationKind = 0;
 	TupleDesc tupleDescriptor = NULL;
 	TupleConstr *tupleConstraints = NULL;
-	int  attributeIndex = 0;
+	int attributeIndex = 0;
 	bool firstAttributePrinted = false;
 	AttrNumber defaultValueIndex = 0;
 	AttrNumber constraintIndex = 0;
@@ -347,15 +347,18 @@ pg_shard_get_tableschemadef_string(Oid tableRelationId)
 static char *
 generate_relation_name(Oid relationId)
 {
-	HeapTuple	tp;
+	HeapTuple tp;
 	Form_pg_class reltup;
-	char	   *relname;
-	char	   *nspname;
-	char	   *result;
+	char *relname;
+	char *nspname;
+	char *result;
 
 	tp = SearchSysCache1(RELOID, ObjectIdGetDatum(relationId));
 	if (!HeapTupleIsValid(tp))
+	{
 		elog(ERROR, "cache lookup failed for relation %u", relationId);
+	}
+
 	reltup = (Form_pg_class) GETSTRUCT(tp);
 	relname = NameStr(reltup->relname);
 
@@ -385,7 +388,7 @@ AppendOptionListToString(StringInfo stringBuffer, List *optionList)
 
 		foreach(optionCell, optionList)
 		{
-			DefElem *option = (DefElem*) lfirst(optionCell);
+			DefElem *option = (DefElem *) lfirst(optionCell);
 			char *optionName = option->defname;
 			char *optionValue = defGetString(option);
 
@@ -466,21 +469,35 @@ pg_shard_get_tablecolumnoptionsdef_string(Oid tableRelationId)
 				switch (attributeForm->attstorage)
 				{
 					case 'p':
+					{
 						storageName = "PLAIN";
 						break;
+					}
+
 					case 'e':
+					{
 						storageName = "EXTERNAL";
 						break;
+					}
+
 					case 'm':
+					{
 						storageName = "MAIN";
 						break;
+					}
+
 					case 'x':
+					{
 						storageName = "EXTENDED";
 						break;
+					}
+
 					default:
+					{
 						ereport(ERROR, (errmsg("unrecognized storage type: %c",
 											   attributeForm->attstorage)));
 						break;
+					}
 				}
 
 				appendStringInfo(&statement, "ALTER COLUMN %s ",
