@@ -117,13 +117,14 @@ AS $sync_table_metadata_to_citus$
 			   node_port
 		FROM   pgs_distribution_metadata.shard_placement
 			   LEFT OUTER JOIN pg_dist_shard_placement
-							ON ( shardid = shard_placement.shard_id
-								 AND nodename = shard_placement.node_name
-								 AND nodeport = shard_placement.node_port )
-		WHERE  shardid IS NULL
-			   AND shard_id IN (SELECT id
-								FROM   pgs_distribution_metadata.shard
-								WHERE  relation_id = table_relation_id);
+							ON ( shardid = shard_placement.shard_id AND
+								 nodename = shard_placement.node_name AND
+								 nodeport = shard_placement.node_port )
+		WHERE  shardid IS NULL AND
+			   shard_id IN (SELECT id
+							FROM   pgs_distribution_metadata.shard
+							WHERE  relation_id = table_relation_id);
+
 		-- copy new shard metadata
 		INSERT INTO pg_dist_shard
 					(shardid,
@@ -139,8 +140,8 @@ AS $sync_table_metadata_to_citus$
 		FROM   pgs_distribution_metadata.shard
 			   LEFT OUTER JOIN pg_dist_shard
 							ON ( shardid = shard.id )
-		WHERE  shardid IS NULL
-			   AND relation_id = table_relation_id;
+		WHERE  shardid IS NULL AND
+			   relation_id = table_relation_id;
 
 		-- copy new partition metadata, which also converts the partition column to
 		-- a node string representation as expected by CitusDB
@@ -154,8 +155,8 @@ AS $sync_table_metadata_to_citus$
 		FROM   pgs_distribution_metadata.partition
 			   LEFT OUTER JOIN pg_dist_partition
 							ON ( logicalrelid = partition.relation_id )
-		WHERE  logicalrelid IS NULL
-			   AND relation_id = table_relation_id;
+		WHERE  logicalrelid IS NULL AND
+			   relation_id = table_relation_id;
 	END;
 $sync_table_metadata_to_citus$ LANGUAGE 'plpgsql';
 
@@ -205,7 +206,7 @@ AS $create_insert_proxy_for_table$
 		INTO   STRICT attr_names
 		FROM   pg_attribute
 		WHERE  attrelid = target_table AND
-			   attnum > 0          AND
+			   attnum > 0 AND
 			   NOT attisdropped;
 
 		-- build fully specified column list and USING clause from attr. names
