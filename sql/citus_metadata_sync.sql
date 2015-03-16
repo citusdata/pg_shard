@@ -19,7 +19,9 @@ INSERT INTO pgs_distribution_metadata.shard_placement
 	(id, node_name, node_port, shard_id, shard_state)
 VALUES
 	(101, 'cluster-worker-01', 5432, 1, :finalized),
-	(102, 'cluster-worker-02', 5433, 2, :finalized);
+	(102, 'cluster-worker-02', 5433, 2, :finalized),
+	(103, 'cluster-worker-03', 5434, 1, :finalized),
+	(104, 'cluster-worker-04', 5435, 2, :finalized);
 
 INSERT INTO pgs_distribution_metadata.partition (relation_id, partition_method, key)
 VALUES
@@ -101,7 +103,7 @@ WHERE  id = 102;
 INSERT INTO pgs_distribution_metadata.shard_placement
 	(id, node_name, node_port, shard_id, shard_state)
 VALUES
-	(103, 'cluster-worker-03', 5434, 1, :finalized);
+	(105, 'cluster-worker-05', 5436, 1, :finalized);
 
 -- write latest changes to Citus tables
 SELECT sync_table_metadata_to_citus('set_of_ids');
