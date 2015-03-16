@@ -99,7 +99,9 @@ AS $sync_table_metadata_to_citus$
 		UPDATE pg_dist_shard_placement
 		SET    shardstate = shard_placement.shard_state
 		FROM   pgs_distribution_metadata.shard_placement
-		WHERE  shardid = shard_placement.shard_id;
+		WHERE  shardid = shard_placement.shard_id AND
+			   nodename = shard_placement.node_name AND
+			   nodeport = shard_placement.node_port;
 
 		-- copy new shard placement metadata
 		INSERT INTO pg_dist_shard_placement
