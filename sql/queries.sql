@@ -9,15 +9,20 @@ CREATE TABLE articles (
 	word_count integer NOT NULL CHECK (word_count > 0)
 );
 
+-- this table is used in a CTE test
+CREATE TABLE authors ( name text, id bigint );
+
 SELECT master_create_distributed_table('articles', 'author_id');
 
 -- test when a table is distributed but no shards created yet
 SELECT count(*) from articles;
 
+-- squelch noisy warnings when creating shards
 \set VERBOSITY terse
 SELECT master_create_worker_shards('articles', 2, 1);
 \set VERBOSITY default
 
+-- create a bunch of test data
 INSERT INTO articles VALUES ( 1,  1, 'arsenous', 9572);
 INSERT INTO articles VALUES ( 2,  2, 'abducing', 13642);
 INSERT INTO articles VALUES ( 3,  3, 'asternal', 10480);
@@ -112,22 +117,22 @@ SELECT * FROM articles WHERE author_id = 10 UNION
 SELECT * FROM articles WHERE author_id = 1; 
 
 -- queries using CTEs are unsupported
-CREATE TABLE authors ( name text, id bigint );
-
 WITH long_names AS ( SELECT id FROM authors WHERE char_length(name) > 15 )
 SELECT title FROM articles;
 
---  queries which involve functions in FROM clause are unsupported.
+-- queries which involve functions in FROM clause are unsupported.
 SELECT * FROM articles, position('om' in 'Thomas');
 
 -- subqueries are not supported in WHERE clause
 SELECT * FROM articles WHERE author_id IN (SELECT id FROM authors WHERE name LIKE '%a');
 
 -- subqueries are not supported in FROM clause
-SELECT articles.id,test.word_count FROM articles, (SELECT id, word_count FROM articles) AS test where test.id = articles.id;
+SELECT articles.id,test.word_count
+FROM articles, (SELECT id, word_count FROM articles) AS test WHERE test.id = articles.id;
 
 -- subqueries are not supported in SELECT clause
-SELECT  a.title AS  name,(SELECT a2.id FROM authors a2 WHERE a.id = a2.id  LIMIT 1) AS special_price FROM articles a;
+SELECT a.title AS name, (SELECT a2.id FROM authors a2 WHERE a.id = a2.id  LIMIT 1)
+						 AS special_price FROM articles a;
 
 -- joins are not supported in WHERE clause
 SELECT title, authors.name FROM authors, articles WHERE authors.id = articles.author_id;
@@ -145,7 +150,7 @@ SELECT author_id, sum(word_count) AS corpus_size FROM articles
 	ORDER BY sum(word_count) DESC
 	LIMIT 5;
 
--- verify pg_shard produces correct remote SQL
+-- verify pg_shard produces correct remote SQL using logging flag
 SET pg_shard.log_distributed_statements = on;
 SET client_min_messages = log;
 
@@ -163,4 +168,3 @@ SELECT author_id FROM articles
 -- verify temp tables used by cross-shard queries do not persist
 SELECT COUNT(*) FROM pg_class WHERE relname LIKE 'pg_shard_temp_table%' AND
 									relkind = 'r';
-
