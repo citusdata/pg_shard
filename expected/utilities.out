@@ -21,3 +21,6 @@ ERROR:  unsupported utility statement
 -- EXPLAIN support isn't implemented
 EXPLAIN SELECT * FROM sharded_table;
 ERROR:  EXPLAIN statements on distributed tables are unsupported
+-- PREPARE support isn't implemented
+PREPARE sharded_query (bigint) AS SELECT * FROM sharded_table WHERE id = $1;
+ERROR:  PREPARE statements on distributed tables are unsupported
