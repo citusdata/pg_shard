@@ -17,7 +17,7 @@
 #include "fmgr.h"
 
 
-/* function declarations for syncing metadata with Citus */
+/* function declarations for syncing metadata with CitusDB */
 extern Datum partition_column_to_node_string(PG_FUNCTION_ARGS);
 
 

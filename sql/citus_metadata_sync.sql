@@ -15,6 +15,7 @@ VALUES
 	(1, 'set_of_ids'::regclass, 't', '0', '10'),
 	(2, 'set_of_ids'::regclass, 't', '10', '20');
 
+-- two shards, replication factor two
 INSERT INTO pgs_distribution_metadata.shard_placement
 	(id, node_name, node_port, shard_id, shard_state)
 VALUES
@@ -35,7 +36,7 @@ SELECT partition_column_to_node_string('pg_class'::regclass);
 -- should get node representation for distributed table
 SELECT partition_column_to_node_string('set_of_ids'::regclass);
 
--- create subset of Citus metadata schema
+-- create subset of CitusDB metadata schema
 CREATE TABLE pg_dist_partition (
 	logicalrelid oid NOT NULL,
 	partmethod "char" NOT NULL,
@@ -105,7 +106,7 @@ INSERT INTO pgs_distribution_metadata.shard_placement
 VALUES
 	(105, 'cluster-worker-05', 5436, 1, :finalized);
 
--- write latest changes to Citus tables
+-- write latest changes to CitusDB tables
 SELECT sync_table_metadata_to_citus('set_of_ids');
 
 -- should see updated state and new placement

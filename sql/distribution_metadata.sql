@@ -56,15 +56,16 @@ CREATE FUNCTION next_shard_id()
 -- test distribution metadata functionality
 -- ===================================================================
 
--- set up a table and "distribute" it manually
+-- create table to be distributed
 CREATE TABLE events (
 	id bigint,
 	name text
 );
 
--- verify that this returns an empty list but doesn't cache it
+-- before distribution, should return, but not cache, an empty list
 SELECT load_shard_id_array('events', true);
 
+-- for this table we'll "distribute" manually but verify using function calls
 INSERT INTO pgs_distribution_metadata.shard
 	(id, relation_id, storage, min_value, max_value)
 VALUES
@@ -131,11 +132,13 @@ SELECT load_shard_id_array('events', false);
 -- but they live on in the cache
 SELECT load_shard_id_array('events', true);
 
--- set up a table, "distribute" with functions, read manually
+-- create second table to distribute
 CREATE TABLE customers (
 	id bigint,
 	name text
 );
+
+-- now we'll distribute using function calls but verify metadata manually...
 
 -- partition on id and manually inspect partition row
 SELECT insert_hash_partition_row('customers', 'id');
@@ -157,7 +160,9 @@ SELECT COUNT(*) FROM pgs_distribution_metadata.shard_placement WHERE id = 109;
 -- ask for next shard id
 SELECT next_shard_id();
 
--- start a transaction to hold lock for duration
+-- now we'll even test our lock methods...
+
+-- use transaction to bound how long we hold the lock
 BEGIN;
 
 -- pick up a shard lock and look for it in pg_locks
@@ -170,9 +175,5 @@ COMMIT;
 -- lock should be gone now
 SELECT COUNT(*) FROM pg_locks WHERE locktype = 'advisory' AND objid = 5;
 
--- ===================================================================
--- test distribution metadata dependency
--- ===================================================================
-
--- cannot drop extension 
+-- finally, check that having distributed tables prevent dropping the extension 
 DROP EXTENSION pg_shard;

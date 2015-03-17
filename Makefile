@@ -44,8 +44,7 @@ REGRESS_PREP = sql/connection.sql expected/connection.out sql/create_shards.sql 
 			   expected/repair_shards.out  expected/modifications.out
 REGRESS = init connection distribution_metadata extend_ddl_commands \
 		  generate_ddl_commands create_shards prune_shard_list repair_shards \
-		  modifications queries utilities citus_metadata_sync \
-		  create_insert_proxy_for_table
+		  modifications queries utilities citus_metadata_sync create_insert_proxy
 
 # The launcher regression flag lets us specify a special wrapper to handle
 # testing rather than psql directly. Our wrapper swaps in a known worker list.
@@ -59,7 +58,7 @@ ifeq ($(enable_coverage),yes)
 	EXTRA_CLEAN += *.gcno *.gcda test/*.gcno test/*.gcda
 endif
 
-# Let the test's makefile tell us what objects to build.
+# Let the test makefile tell us what objects to build.
 include test/Makefile
 
 ifndef NO_PGXS
