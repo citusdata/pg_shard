@@ -1,6 +1,9 @@
 -- ===================================================================
 -- test metadata sync functionality
 -- ===================================================================
+-- declare some variables for clarity
+\set finalized 1
+\set inactive 3
 -- set up a table and "distribute" it manually
 CREATE TABLE set_of_ids ( id bigint );
 INSERT INTO pgs_distribution_metadata.shard
@@ -11,8 +14,10 @@ VALUES
 INSERT INTO pgs_distribution_metadata.shard_placement
 	(id, node_name, node_port, shard_id, shard_state)
 VALUES
-	(101, 'cluster-worker-01', 5432, 1, 0),
-	(102, 'cluster-worker-02', 5433, 2, 0);
+	(101, 'cluster-worker-01', 5432, 1, :finalized),
+	(102, 'cluster-worker-02', 5433, 2, :finalized),
+	(103, 'cluster-worker-03', 5434, 1, :finalized),
+	(104, 'cluster-worker-04', 5435, 2, :finalized);
 INSERT INTO pgs_distribution_metadata.partition (relation_id, partition_method, key)
 VALUES
 	('set_of_ids'::regclass, 'h', 'id');
@@ -83,7 +88,77 @@ WHERE  shardid IN (SELECT shardid
 ORDER BY nodename;
  shardid | shardstate | shardlength |     nodename      | nodeport 
 ---------+------------+-------------+-------------------+----------
-       1 |          0 |           0 | cluster-worker-01 |     5432
-       2 |          0 |           0 | cluster-worker-02 |     5433
+       1 |          1 |           0 | cluster-worker-01 |     5432
+       2 |          1 |           0 | cluster-worker-02 |     5433
+       1 |          1 |           0 | cluster-worker-03 |     5434
+       2 |          1 |           0 | cluster-worker-04 |     5435
+(4 rows)
+
+-- subsequent sync should have no effect
+SELECT sync_table_metadata_to_citus('set_of_ids');
+ sync_table_metadata_to_citus 
+------------------------------
+ 
+(1 row)
+
+SELECT partmethod, partkey
+FROM   pg_dist_partition
+WHERE  logicalrelid = 'set_of_ids'::regclass;
+ partmethod |                                                        partkey                                                         
+------------+------------------------------------------------------------------------------------------------------------------------
+ h          | {VAR :varno 1 :varattno 1 :vartype 20 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location -1}
+(1 row)
+
+SELECT shardid, shardstorage, shardalias, shardminvalue, shardmaxvalue
+FROM   pg_dist_shard
+WHERE  logicalrelid = 'set_of_ids'::regclass
+ORDER BY shardid;
+ shardid | shardstorage | shardalias | shardminvalue | shardmaxvalue 
+---------+--------------+------------+---------------+---------------
+       1 | t            |            | 0             | 10
+       2 | t            |            | 10            | 20
 (2 rows)
+
+SELECT * FROM pg_dist_shard_placement
+WHERE  shardid IN (SELECT shardid
+				   FROM   pg_dist_shard
+				   WHERE  logicalrelid = 'set_of_ids'::regclass)
+ORDER BY nodename;
+ shardid | shardstate | shardlength |     nodename      | nodeport 
+---------+------------+-------------+-------------------+----------
+       1 |          1 |           0 | cluster-worker-01 |     5432
+       2 |          1 |           0 | cluster-worker-02 |     5433
+       1 |          1 |           0 | cluster-worker-03 |     5434
+       2 |          1 |           0 | cluster-worker-04 |     5435
+(4 rows)
+
+-- mark a placement as unhealthy and add a new one
+UPDATE pgs_distribution_metadata.shard_placement
+SET    shard_state = :inactive
+WHERE  id = 102;
+INSERT INTO pgs_distribution_metadata.shard_placement
+	(id, node_name, node_port, shard_id, shard_state)
+VALUES
+	(105, 'cluster-worker-05', 5436, 1, :finalized);
+-- write latest changes to Citus tables
+SELECT sync_table_metadata_to_citus('set_of_ids');
+ sync_table_metadata_to_citus 
+------------------------------
+ 
+(1 row)
+
+-- should see updated state and new placement
+SELECT * FROM pg_dist_shard_placement
+WHERE  shardid IN (SELECT shardid
+				   FROM   pg_dist_shard
+				   WHERE  logicalrelid = 'set_of_ids'::regclass)
+ORDER BY nodename;
+ shardid | shardstate | shardlength |     nodename      | nodeport 
+---------+------------+-------------+-------------------+----------
+       1 |          1 |           0 | cluster-worker-01 |     5432
+       2 |          3 |           0 | cluster-worker-02 |     5433
+       1 |          1 |           0 | cluster-worker-03 |     5434
+       2 |          1 |           0 | cluster-worker-04 |     5435
+       1 |          1 |           0 | cluster-worker-05 |     5436
+(5 rows)
 
