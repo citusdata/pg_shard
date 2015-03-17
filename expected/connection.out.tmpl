@@ -16,8 +16,9 @@ CREATE FUNCTION get_and_purge_connection(cstring, integer)
 -- ===================================================================
 -- test connection hash functionality
 -- ===================================================================
+-- reduce verbosity to squelch chatty warnings
 \set VERBOSITY terse
--- connect to non-existant host
+-- connect to non-existent host
 SELECT initialize_remote_temp_table('dummy-host-name', $PGPORT);
 WARNING:  Connection failed to dummy-host-name:$PGPORT
  initialize_remote_temp_table 
