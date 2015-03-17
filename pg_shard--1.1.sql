@@ -86,16 +86,25 @@ LANGUAGE C;
 COMMENT ON FUNCTION partition_column_to_node_string(oid)
 		IS 'return textual form of distributed table''s partition column';
 
-CREATE FUNCTION sync_table_metadata_to_citus(table_name text) RETURNS VOID
+-- Syncs rows from the pg_shard distribution metadata related to the specified
+-- table name into the metadata tables used by CitusDB. After a call to this
+-- function for a particular pg_shard table, that table will become usable for
+-- queries within CitusDB. If placement health has changed for given pg_shard
+-- table, calling this function an additional time will propagate those health
+-- changes to the CitusDB metadata tables.
+CREATE FUNCTION sync_table_metadata_to_citus(table_name text)
+RETURNS void
 AS $sync_table_metadata_to_citus$
 	DECLARE
 		table_relation_id CONSTANT oid NOT NULL := table_name::regclass::oid;
 		dummy_shard_length CONSTANT bigint := 0;
 	BEGIN
-		-- grab lock for upsert
+		-- grab lock to ensure single writer for upsert
 		LOCK TABLE pg_dist_shard_placement IN EXCLUSIVE MODE;
 
-		-- perform update of shard health
+		-- First, update the health of shard placement rows already copied
+		-- from pg_shard to CitusDB. Health is the only mutable attribute,
+		-- so it is presently the only one needing the UPDATE treatment.
 		UPDATE pg_dist_shard_placement
 		SET    shardstate = shard_placement.shard_state
 		FROM   pgs_distribution_metadata.shard_placement
@@ -103,7 +112,7 @@ AS $sync_table_metadata_to_citus$
 			   nodename = shard_placement.node_name AND
 			   nodeport = shard_placement.node_port;
 
-		-- copy new shard placement metadata
+		-- copy pg_shard placement rows not yet in CitusDB's metadata tables
 		INSERT INTO pg_dist_shard_placement
 					(shardid,
 					 shardstate,
@@ -125,7 +134,7 @@ AS $sync_table_metadata_to_citus$
 							FROM   pgs_distribution_metadata.shard
 							WHERE  relation_id = table_relation_id);
 
-		-- copy new shard metadata
+		-- copy pg_shard shard rows not yet in CitusDB's metadata tables
 		INSERT INTO pg_dist_shard
 					(shardid,
 					 logicalrelid,
@@ -143,8 +152,10 @@ AS $sync_table_metadata_to_citus$
 		WHERE  shardid IS NULL AND
 			   relation_id = table_relation_id;
 
-		-- copy new partition metadata, which also converts the partition column to
-		-- a node string representation as expected by CitusDB
+		-- Finally, copy pg_shard partition rows not yet in CitusDB's metadata
+		-- tables. CitusDB uses a textual form of a Var node representing the
+		-- partition column, so we must use a special function to transform the
+		-- representation used by pg_shard (which is just the column name).
 		INSERT INTO pg_dist_partition
 					(logicalrelid,
 					 partmethod,
