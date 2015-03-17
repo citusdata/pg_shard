@@ -59,7 +59,7 @@ ifeq ($(enable_coverage),yes)
 	EXTRA_CLEAN += *.gcno *.gcda test/*.gcno test/*.gcda
 endif
 
-# Let the test's makefile tell us what objects to build.
+# Let the test makefile tell us what objects to build.
 include test/Makefile
 
 ifndef NO_PGXS
