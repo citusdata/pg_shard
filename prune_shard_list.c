@@ -6,7 +6,7 @@
  * required to execute a given query. Functions contained here are borrowed from
  * CitusDB.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */

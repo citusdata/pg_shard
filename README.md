@@ -152,7 +152,7 @@ Besides these limitations, we have a list of features that we're looking to add.
 
 ## License
 
-Copyright © 2012–2014 Citus Data, Inc.
+Copyright © 2012–2015 Citus Data, Inc.
 
 This program is free software: you can redistribute it and/or modify it under
 the terms of the GNU Lesser General Public License as published by the Free

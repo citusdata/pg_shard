@@ -5,7 +5,7 @@
  * Declarations for public functions and types related to syncing metadata with
  * CitusDB.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */

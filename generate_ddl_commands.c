@@ -5,7 +5,7 @@
  * This file contains functions to retrieve ddl commands for a table. Functions
  * contained here are borrowed from CitusDB.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */

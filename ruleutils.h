@@ -7,7 +7,7 @@
  * Depending upon the version of PostgreSQL in use, implementations of
  * this file's functions are found in ruleutils_93.c or ruleutils_94.c.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */

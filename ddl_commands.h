@@ -5,7 +5,7 @@
  * Declarations for public functions related to generating and extending DDL
  * commands.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */

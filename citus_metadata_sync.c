@@ -5,7 +5,7 @@
  * This file contains functions to sync pg_shard metadata to the CitusDB
  * metadata tables.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */

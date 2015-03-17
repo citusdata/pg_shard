@@ -5,7 +5,7 @@
  * This file contains functions to extend ddl commands for a table with a shard
  * ID. Functions contained here are borrowed from CitusDB.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */

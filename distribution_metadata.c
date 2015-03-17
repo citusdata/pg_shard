@@ -5,7 +5,7 @@
  * This file contains functions to access and manage the distributed table
  * metadata.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */

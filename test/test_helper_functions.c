@@ -4,7 +4,7 @@
  *
  * This file contains helper functions used in many pg_shard tests.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */
