@@ -30,7 +30,10 @@ AS $sync_table_metadata_to_citus$
 		FROM   pgs_distribution_metadata.shard_placement
 		WHERE  shardid = shard_placement.shard_id AND
 			   nodename = shard_placement.node_name AND
-			   nodeport = shard_placement.node_port;
+			   nodeport = shard_placement.node_port AND
+			   shardid IN (SELECT shardid
+						   FROM   pg_dist_shard
+						   WHERE  logicalrelid = table_relation_id);
 
 		-- copy pg_shard placement rows not yet in CitusDB's metadata tables
 		INSERT INTO pg_dist_shard_placement
