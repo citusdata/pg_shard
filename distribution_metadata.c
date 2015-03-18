@@ -62,6 +62,7 @@ static void LoadShardIntervalRow(int64 shardId, Oid *relationId,
 								 char **minValue, char **maxValue);
 static ShardPlacement * TupleToShardPlacement(HeapTuple heapTuple,
 											  TupleDesc tupleDescriptor);
+static void DeletePartitionRow(Oid relationId);
 
 
 /*
@@ -732,6 +733,81 @@ InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
 
 	/* close relation */
 	heap_close(shardPlacementRelation, RowExclusiveLock);
+}
+
+#include "tcop/dest.h"
+#include "tcop/tcopprot.h"
+#include "tcop/utility.h"
+/*
+ * DeleteDistributedTableMetadata deletes all the information in the metadata tables
+ * which are dependent to the distributed table with given distributedTableId. The
+ * metadata tables that are searched include partition, shard and shard_placement.
+ */
+void
+DeleteDistributedTableMetadata(Oid distributedTableId)
+{
+
+	DeleteStmt *deleteStatement = NULL;
+
+
+	char *sourceTableName = get_rel_name(distributedTableId);
+	Oid sourceSchemaId = get_rel_namespace(distributedTableId);
+	char *sourceSchemaName = get_namespace_name(sourceSchemaId);
+	RangeVar *sourceRelation = makeRangeVar(sourceSchemaName, sourceTableName, -1);
+
+
+
+
+	deleteStatement = makeNode(DeleteStmt);
+
+	deleteStatement->relation = sourceRelation;
+
+	deleteStatement->whereClause = NIL;
+
+	deleteStatement->returningList = NIL;
+	deleteStatement->withClause = NIL;
+	deleteStatement->usingClause = NIL;
+
+	ProcessUtility((Node *) deleteStatement, "delete from pgs_distribution_metadata.partition",
+				   PROCESS_UTILITY_TOPLEVEL, NULL, None_Receiver, NULL);
+
+}
+
+
+/*
+ * DeleteShardRow removes the row corresponding to the provided shard
+ * identifier, erroring out if it cannot find such a row.
+ */
+void
+DeletePartitionRow(Oid relationId)
+{
+   RangeVar *heapRangeVar = NULL;
+   Relation heapRelation = NULL;
+   HeapScanDesc scanDesc = NULL;
+   HeapTuple heapTuple = NULL;
+   const int scanKeyCount = 1;
+   ScanKeyData scanKey[scanKeyCount];
+
+   heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);
+   heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
+
+   ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ,
+               Int64GetDatum(relationId));
+
+   scanDesc = heap_beginscan(heapRelation, SnapshotSelf, scanKeyCount, scanKey);
+
+   heapTuple = heap_getnext(scanDesc, ForwardScanDirection);
+   if (HeapTupleIsValid(heapTuple))
+   {
+       simple_heap_delete(heapRelation, &heapTuple->t_self);
+   }
+   else
+   {
+       ereport(ERROR, (errmsg("could not find entry for relation  %d", relationId)));
+   }
+
+   heap_endscan(scanDesc);
+   relation_close(heapRelation, AccessShareLock);
 }
 
 
