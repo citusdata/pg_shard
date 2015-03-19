@@ -42,6 +42,9 @@ usage: copy_to_distributed_table [-BCTHh] [-c encoding] [-d delimiter]
       Default: double-quote
   s : specifies the schema in which the target table resides
       Default: 'public'
+
+copy_to_distributed_table outputs the total number of rows successfully copied
+to the distributed table, counted from the beginning of the input file.
 E_O_USAGE
 
 	exit $2;
