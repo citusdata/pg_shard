@@ -4,7 +4,7 @@
  *
  * Declarations for public functions and types related to metadata handling.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */
@@ -59,6 +59,7 @@
 
 /* denotes partition type of the distributed table */
 #define HASH_PARTITION_TYPE 'h'
+#define RANGE_PARTITION_TYPE 'r'
 
 /* human-readable names for addressing columns of partition table */
 #define PARTITION_TABLE_ATTRIBUTE_COUNT 3
@@ -79,7 +80,6 @@ typedef enum
 	STATE_CACHED = 2,
 	STATE_INACTIVE = 3,
 	STATE_TO_DELETE = 4
-
 } ShardState;
 
 
@@ -93,11 +93,11 @@ typedef enum
  */
 typedef struct ShardInterval
 {
-	int64 id;			/* unique identifier for the shard */
-	Oid relationId;		/* id of the shard's distributed table */
-	Datum minValue;		/* a shard's typed min value datum */
-	Datum maxValue;		/* a shard's typed max value datum */
-	Oid valueTypeId;	/* typeId for minValue and maxValue Datums */
+	int64 id;           /* unique identifier for the shard */
+	Oid relationId;     /* id of the shard's distributed table */
+	Datum minValue;     /* a shard's typed min value datum */
+	Datum maxValue;     /* a shard's typed max value datum */
+	Oid valueTypeId;    /* typeId for minValue and maxValue Datums */
 } ShardInterval;
 
 
@@ -111,11 +111,11 @@ typedef struct ShardInterval
  */
 typedef struct ShardPlacement
 {
-	int64 id;				/* unique identifier for the shard placement */
-	int64 shardId;			/* identifies shard for this shard placement */
-	ShardState shardState;	/* represents last known state of this placement */
-	char *nodeName;			/* hostname of machine hosting this shard */
-	int32 nodePort;			/* port number for connecting to host */
+	int64 id;               /* unique identifier for the shard placement */
+	int64 shardId;          /* identifies shard for this shard placement */
+	ShardState shardState;  /* represents last known state of this placement */
+	char *nodeName;         /* hostname of machine hosting this shard */
+	int32 nodePort;         /* port number for connecting to host */
 } ShardPlacement;
 
 
@@ -125,7 +125,7 @@ typedef struct ShardPlacement
  */
 typedef struct ShardIntervalListCacheEntry
 {
-	Oid distributedTableId;	/* cache key */
+	Oid distributedTableId; /* cache key */
 	List *shardIntervalList;
 } ShardIntervalListCacheEntry;
 
@@ -139,6 +139,8 @@ extern List * LoadShardPlacementList(int64 shardId);
 extern Var * PartitionColumn(Oid distributedTableId);
 extern char PartitionType(Oid distributedTableId);
 extern bool IsDistributedTable(Oid tableId);
+extern bool DistributedTablesExist(void);
+extern Var * ColumnNameToColumn(Oid relationId, char *columnName);
 extern void InsertPartitionRow(Oid distributedTableId, char partitionType,
 							   text *partitionKeyText);
 extern void InsertShardRow(Oid distributedTableId, uint64 shardId, char shardStorage,

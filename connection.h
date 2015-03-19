@@ -5,7 +5,7 @@
  * Declarations for public functions and types related to connection hash
  * functionality.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */
@@ -36,16 +36,16 @@
  */
 typedef struct NodeConnectionKey
 {
-	char nodeName[MAX_NODE_LENGTH + 1];	/* hostname of host to connect to */
-	int32 nodePort;						/* port of host to connect to */
+	char nodeName[MAX_NODE_LENGTH + 1]; /* hostname of host to connect to */
+	int32 nodePort;                     /* port of host to connect to */
 } NodeConnectionKey;
 
 
 /* NodeConnectionEntry keeps track of connections themselves. */
 typedef struct NodeConnectionEntry
 {
-	NodeConnectionKey cacheKey;	/* hash entry key */
-	PGconn *connection;			/* connection to remote server, if any */
+	NodeConnectionKey cacheKey; /* hash entry key */
+	PGconn *connection;         /* connection to remote server, if any */
 } NodeConnectionEntry;
 
 

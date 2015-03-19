@@ -6,7 +6,7 @@
  * required to execute a given query. Functions contained here are borrowed from
  * CitusDB.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */
@@ -27,6 +27,7 @@
 #include "catalog/pg_type.h"
 #include "commands/defrem.h"
 #include "nodes/makefuncs.h"
+#include "nodes/memnodes.h" /* IWYU pragma: keep */
 #include "nodes/nodeFuncs.h"
 #include "nodes/nodes.h"
 #include "nodes/primnodes.h"
@@ -39,10 +40,20 @@
 #include "utils/errcodes.h"
 #include "utils/lsyscache.h"
 #include "utils/typcache.h"
+#include "utils/memutils.h"
+#include "utils/palloc.h"
+
+
+/*
+ * OperatorIdCache is used for caching operator identifiers for given typeId,
+ * accessMethodId and strategyNumber. It is initialized to empty list as
+ * there are no items in the cache.
+ */
+static List *OperatorIdCache = NIL;
 
 
 /* local function forward declarations */
-static Oid GetOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber);
+static Oid LookupOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber);
 static bool SimpleOpExpression(Expr *clause);
 static Node * HashableClauseMutator(Node *originalNode, Var *partitionColumn);
 static bool OpExpressionContainsColumn(OpExpr *operatorExpression, Var *partitionColumn);
@@ -107,7 +118,7 @@ PruneShardList(Oid relationId, List *whereClauseList, List *shardIntervalList)
 		shardPruned = predicate_refuted_by(constraintList, restrictInfoList);
 		if (shardPruned)
 		{
-			ereport(DEBUG2, (errmsg("predicate pruning for shardId "
+			ereport(DEBUG2, (errmsg("predicate pruning for shard with ID "
 									UINT64_FORMAT, shardInterval->id)));
 		}
 		else
@@ -178,7 +189,7 @@ UpdateConstraint(Node *baseConstraint, ShardInterval *shardInterval)
 	Node *greaterThanExpr = (Node *) lsecond(andExpr->args);
 
 	Node *minNode = get_rightop((Expr *) greaterThanExpr); /* right op */
-	Node *maxNode = get_rightop((Expr *) lessThanExpr);	   /* right op */
+	Node *maxNode = get_rightop((Expr *) lessThanExpr);    /* right op */
 	Const *minConstant = NULL;
 	Const *maxConstant = NULL;
 
@@ -214,18 +225,18 @@ MakeOpExpression(Var *variable, int16 strategyNumber)
 
 	Oid accessMethodId = BTREE_AM_OID;
 	Oid operatorId = InvalidOid;
-	Const  *constantValue = NULL;
+	Const *constantValue = NULL;
 	OpExpr *expression = NULL;
 
 	/* Load the operator from system catalogs */
-	operatorId = GetOperatorByType(typeId, accessMethodId, strategyNumber);
+	operatorId = LookupOperatorByType(typeId, accessMethodId, strategyNumber);
 
 	constantValue = makeNullConst(typeId, typeModId, collationId);
 
 	/* Now make the expression with the given variable and a null constant */
 	expression = (OpExpr *) make_opclause(operatorId,
 										  InvalidOid, /* no result type yet */
-										  false,	  /* no return set */
+										  false,      /* no return set */
 										  (Expr *) variable,
 										  (Expr *) constantValue,
 										  InvalidOid, collationId);
@@ -239,10 +250,63 @@ MakeOpExpression(Var *variable, int16 strategyNumber)
 
 
 /*
+ * LookupOperatorByType is a wrapper around GetOperatorByType that uses a cache
+ * to avoid multiple lookups of operators within a single session by their types.
+ */
+static Oid
+LookupOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber)
+{
+	OperatorIdCacheEntry *matchingCacheEntry = NULL;
+	ListCell *cacheEntryCell = NULL;
+
+	/* search the cache */
+	foreach(cacheEntryCell, OperatorIdCache)
+	{
+		OperatorIdCacheEntry *cacheEntry = lfirst(cacheEntryCell);
+
+		if ((cacheEntry->typeId == typeId) &&
+			(cacheEntry->accessMethodId == accessMethodId) &&
+			(cacheEntry->strategyNumber == strategyNumber))
+		{
+			matchingCacheEntry = cacheEntry;
+			break;
+		}
+	}
+
+	/* if not found in the cache, call GetOperatorByType and put the result in cache */
+	if (matchingCacheEntry == NULL)
+	{
+		MemoryContext oldContext = NULL;
+		Oid operatorId = GetOperatorByType(typeId, accessMethodId, strategyNumber);
+
+		if (operatorId == InvalidOid)
+		{
+			/* if operatorId is invalid, return and do not cache its value */
+			return operatorId;
+		}
+
+		oldContext = MemoryContextSwitchTo(CacheMemoryContext);
+
+		matchingCacheEntry = palloc0(sizeof(OperatorIdCacheEntry));
+		matchingCacheEntry->typeId = typeId;
+		matchingCacheEntry->accessMethodId = accessMethodId;
+		matchingCacheEntry->strategyNumber = strategyNumber;
+		matchingCacheEntry->operatorId = operatorId;
+
+		OperatorIdCache = lappend(OperatorIdCache, matchingCacheEntry);
+
+		MemoryContextSwitchTo(oldContext);
+	}
+
+	return matchingCacheEntry->operatorId;
+}
+
+
+/*
  * GetOperatorByType returns the operator oid for the given type, access
  * method, and strategy number.
  */
-static Oid
+Oid
 GetOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber)
 {
 	/* Get default operator class from pg_opclass */
@@ -366,7 +430,7 @@ HashableClauseMutator(Node *originalNode, Var *partitionColumn)
 	 * If this node is not hashable, continue walking down the expression tree
 	 * to find and hash clauses which are eligible.
 	 */
-	if(newNode == NULL)
+	if (newNode == NULL)
 	{
 		newNode = expression_tree_mutator(originalNode, HashableClauseMutator,
 										  (void *) partitionColumn);
@@ -446,7 +510,8 @@ MakeHashedOperatorExpression(OpExpr *operatorExpression)
 	{
 		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION),
 						errmsg("could not identify a hash function for type %s",
-							   format_type_be(constant->consttype))));
+							   format_type_be(constant->consttype)),
+						errdatatype(constant->consttype)));
 	}
 
 	/*
@@ -459,7 +524,7 @@ MakeHashedOperatorExpression(OpExpr *operatorExpression)
 	/* Now create the expression with modified partition column and hashed constant */
 	hashedExpression = (OpExpr *) make_opclause(operatorId,
 												InvalidOid, /* no result type yet */
-												false,	  /* no return set */
+												false,    /* no return set */
 												(Expr *) hashedColumn,
 												(Expr *) hashedConstant,
 												InvalidOid, InvalidOid);
@@ -506,7 +571,7 @@ MakeInt4Constant(Datum constantValue)
 	bool constantIsNull = false;
 	bool constantByValue = true;
 
-	Const *int4Constant = makeConst(constantType, constantTypeMode,	constantCollationId,
+	Const *int4Constant = makeConst(constantType, constantTypeMode, constantCollationId,
 									constantLength, constantValue, constantIsNull,
 									constantByValue);
 	return int4Constant;

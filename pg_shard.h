@@ -4,7 +4,7 @@
  *
  * Declarations for public functions and types needed by the pg_shard extension.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */
@@ -14,10 +14,12 @@
 
 #include "c.h"
 
+#include "access/tupdesc.h"
 #include "nodes/parsenodes.h"
 #include "nodes/pg_list.h"
 #include "nodes/plannodes.h"
 #include "lib/stringinfo.h"
+#include "utils/tuplestore.h"
 
 
 /* prefix used for temporary tables created on the master node */
@@ -34,7 +36,7 @@
 typedef enum DistributedNodeTag
 {
 	/* Tags for distributed planning begin a safe distance after all other tags. */
-	T_DistributedPlan = 2100,		/* plan to be built and passed to executor */
+	T_DistributedPlan = 2100,       /* plan to be built and passed to executor */
 } DistributedNodeTag;
 
 
@@ -57,9 +59,9 @@ typedef enum PlannerType
  */
 typedef struct DistributedPlan
 {
-	Plan plan;			/* this is a "subclass" of Plan */
-	Plan *originalPlan;	/* we save a copy of standard_planner's output */
-	List *taskList;		/* list of tasks to run as part of this plan */
+	Plan plan;          /* this is a "subclass" of Plan */
+	Plan *originalPlan; /* we save a copy of standard_planner's output */
+	List *taskList;     /* list of tasks to run as part of this plan */
 	List *targetList;   /* copy of the target list for remote SELECT queries only */
 
 	bool selectFromMultipleShards; /* does the select run across multiple shards? */
@@ -76,15 +78,17 @@ typedef struct DistributedPlan
  */
 typedef struct Task
 {
-	StringInfo queryString;		/* SQL string suitable for immediate remote execution */
-	List *taskPlacementList;	/* ShardPlacements on which the task can be executed */
-	int64 shardId;				/* Denormalized shardId of tasks for convenience */
+	StringInfo queryString;     /* SQL string suitable for immediate remote execution */
+	List *taskPlacementList;    /* ShardPlacements on which the task can be executed */
+	int64 shardId;              /* Denormalized shardId of tasks for convenience */
 } Task;
 
 
 /* function declarations for extension loading and unloading */
 extern void _PG_init(void);
 extern void _PG_fini(void);
+extern bool ExecuteTaskAndStoreResults(Task *task, TupleDesc tupleDescriptor,
+									   Tuplestorestate *tupleStore);
 
 
 #endif /* PG_SHARD_H */

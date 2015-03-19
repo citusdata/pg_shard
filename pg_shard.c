@@ -5,7 +5,7 @@
  * This file contains functions to perform distributed planning and execution of
  * distributed tables.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */
@@ -16,6 +16,7 @@
 #include "funcapi.h"
 #include "libpq-fe.h"
 #include "miscadmin.h"
+#include "pg_config_manual.h"
 #include "postgres_ext.h"
 
 #include "pg_shard.h"
@@ -45,6 +46,7 @@
 #include "executor/tuptable.h"
 #include "nodes/execnodes.h"
 #include "nodes/makefuncs.h"
+#include "nodes/memnodes.h" /* IWYU pragma: keep */
 #include "nodes/nodeFuncs.h"
 #include "nodes/nodes.h"
 #include "nodes/params.h"
@@ -74,6 +76,7 @@
 #include "utils/relcache.h"
 #include "utils/snapmgr.h"
 #include "utils/tuplestore.h"
+#include "utils/memutils.h"
 
 
 /* controls use of locks to enforce safe commutativity */
@@ -81,6 +84,9 @@ bool AllModificationsCommutative = false;
 
 /* informs pg_shard to use the CitusDB planner */
 bool UseCitusDBSelectLogic = false;
+
+/* logs each statement used in a distributed plan */
+bool LogDistributedStatements = false;
 
 
 /* planner functions forward declarations */
@@ -92,9 +98,13 @@ static Oid ExtractFirstDistributedTableId(Query *query);
 static bool ExtractRangeTableEntryWalker(Node *node, List **rangeTableList);
 static List * DistributedQueryShardList(Query *query);
 static bool SelectFromMultipleShards(Query *query, List *queryShardList);
+static void ClassifyRestrictions(List *queryRestrictList, List **remoteRestrictList,
+								 List **localRestrictList);
+static Query * RowAndColumnFilterQuery(Query *query, List *remoteRestrictList,
+									   List *localRestrictList);
+static Query * BuildLocalQuery(Query *query, List *localRestrictList);
 static PlannedStmt * PlanSequentialScan(Query *query, int cursorOptions,
 										ParamListInfo boundParams);
-static Query * RowAndColumnFilterQuery(Query *query);
 static List * QueryRestrictList(Query *query);
 static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
 static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
@@ -106,13 +116,12 @@ static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalL
 /* executor functions forward declarations */
 static void PgShardExecutorStart(QueryDesc *queryDesc, int eflags);
 static bool IsPgShardPlan(PlannedStmt *plannedStmt);
+static void NextExecutorStartHook(QueryDesc *queryDesc, int eflags);
 static LOCKMODE CommutativityRuleToLockMode(CmdType commandType);
 static void AcquireExecutorShardLocks(List *taskList, LOCKMODE lockMode);
 static int CompareTasksByShardId(const void *leftElement, const void *rightElement);
 static void ExecuteMultipleShardSelect(DistributedPlan *distributedPlan,
 									   RangeVar *intermediateTable);
-static bool ExecuteTaskAndStoreResults(Task *task, TupleDesc tupleDescriptor,
-									   Tuplestorestate *tupleStore);
 static bool SendQueryInSingleRowMode(PGconn *connection, StringInfo query);
 static bool StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 							 Tuplestorestate *tupleStore);
@@ -128,6 +137,7 @@ static void PgShardExecutorEnd(QueryDesc *queryDesc);
 static void PgShardProcessUtility(Node *parsetree, const char *queryString,
 								  ProcessUtilityContext context, ParamListInfo params,
 								  DestReceiver *dest, char *completionTag);
+static void ErrorOnDropIfDistributedTablesExist(DropStmt *dropStatement);
 
 
 /* declarations for dynamic loading */
@@ -179,6 +189,11 @@ _PG_init(void)
 							 &UseCitusDBSelectLogic, false, PGC_USERSET, 0, NULL,
 							 NULL, NULL);
 
+	DefineCustomBoolVariable("pg_shard.log_distributed_statements",
+							 "Logs each statement used in a distributed plan", NULL,
+							 &LogDistributedStatements, false, PGC_USERSET, 0, NULL,
+							 NULL, NULL);
+
 	EmitWarningsOnPlaceholders("pg_shard");
 }
 
@@ -226,7 +241,10 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 
 		ErrorIfQueryNotSupported(distributedQuery);
 
-		/* compute the list of shards this query needs to access */
+		/*
+		 * Compute the list of shards this query needs to access.
+		 * Error out if there are no existing shards for the table.
+		 */
 		queryShardList = DistributedQueryShardList(distributedQuery);
 
 		/*
@@ -243,15 +261,27 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 		if (selectFromMultipleShards)
 		{
 			Oid distributedTableId = InvalidOid;
+			Query *localQuery = NULL;
+			List *queryRestrictList = QueryRestrictList(distributedQuery);
+			List *remoteRestrictList = NIL;
+			List *localRestrictList = NIL;
+
+			/* partition restrictions into remote and local lists */
+			ClassifyRestrictions(queryRestrictList, &remoteRestrictList,
+								 &localRestrictList);
+
+			/* build local and distributed query */
+			distributedQuery = RowAndColumnFilterQuery(distributedQuery,
+													   remoteRestrictList,
+													   localRestrictList);
+			localQuery = BuildLocalQuery(query, localRestrictList);
 
 			/*
 			 * Force a sequential scan as we change the underlying table to
 			 * point to our intermediate temporary table which contains the
 			 * fetched data.
 			 */
-			plannedStatement = PlanSequentialScan(query, cursorOptions, boundParams);
-
-			distributedQuery = RowAndColumnFilterQuery(distributedQuery);
+			plannedStatement = PlanSequentialScan(localQuery, cursorOptions, boundParams);
 
 			/* construct a CreateStmt to clone the existing table */
 			distributedTableId = ExtractFirstDistributedTableId(distributedQuery);
@@ -267,7 +297,17 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 	}
 	else if (plannerType == PLANNER_TYPE_CITUSDB)
 	{
-		Assert(PreviousPlannerHook != NULL);
+		if (PreviousPlannerHook == NULL)
+		{
+			ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+							errmsg("could not plan SELECT query"),
+							errdetail("Configured to use CitusDB's SELECT "
+									  "logic, but CitusDB is not installed."),
+							errhint("Install CitusDB or set the "
+									"\"use_citusdb_select_logic\" "
+									"configuration parameter to \"false\".")));
+		}
+
 		plannedStatement = PreviousPlannerHook(query, cursorOptions, boundParams);
 	}
 	else if (plannerType == PLANNER_TYPE_POSTGRES)
@@ -283,7 +323,7 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 	}
 	else
 	{
-		ereport(ERROR, (errmsg("unknown planner type: %d", plannerType)));
+		ereport(ERROR, (errmsg("unrecognized planner type: %d", plannerType)));
 	}
 
 	return plannedStatement;
@@ -363,7 +403,33 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	if (commandType == CMD_SELECT && queryTree->utilityStmt != NULL)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("unsupported utility statement")));
+						errmsg("cannot perform distributed planning for the given"
+							   " query"),
+						errdetail("Utility commands are not supported in distributed "
+								  "queries.")));
+	}
+
+	/*
+	 * Reject subqueries which are in SELECT or WHERE clause.
+	 * Queries which include subqueries in FROM clauses are rejected below.
+	 */
+	if (queryTree->hasSubLinks == true)
+	{
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("cannot perform distributed planning for the given"
+							   " query"),
+						errdetail("Subqueries are not supported in distributed"
+								  " queries.")));
+	}
+
+	/* reject queries which include CommonTableExpr */
+	if (queryTree->cteList != NIL)
+	{
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("cannot perform distributed planning for the given"
+							   " query"),
+						errdetail("Common table expressions are not supported in"
+								  " distributed queries.")));
 	}
 
 	/* extract range table entries */
@@ -382,9 +448,38 @@ ErrorIfQueryNotSupported(Query *queryTree)
 		}
 		else
 		{
-			/* reject subquery, join, function or CTE range table entries */
-			ereport(ERROR, (errmsg("unsupported range table type: %d",
-								   rangeTableEntry->rtekind)));
+			/*
+			 * Error out for rangeTableEntries that we do not support.
+			 * We do not explicitly specify "in FROM clause" in the error detail
+			 * for the features that we do not support at all (SUBQUERY, JOIN).
+			 * We do not need to check for RTE_CTE because all common table expressions
+			 * are rejected above with queryTree->cteList check.
+			 */
+			char *rangeTableEntryErrorDetail = NULL;
+			if (rangeTableEntry->rtekind == RTE_SUBQUERY)
+			{
+				rangeTableEntryErrorDetail = "Subqueries are not supported in"
+											 " distributed queries.";
+			}
+			else if (rangeTableEntry->rtekind == RTE_JOIN)
+			{
+				rangeTableEntryErrorDetail = "Joins are not supported in distributed"
+											 " queries.";
+			}
+			else if (rangeTableEntry->rtekind == RTE_FUNCTION)
+			{
+				rangeTableEntryErrorDetail = "Functions must not appear in the FROM"
+											 " clause of a distributed query.";
+			}
+			else
+			{
+				rangeTableEntryErrorDetail = "Unrecognized range table entry.";
+			}
+
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("cannot perform distributed planning for the given"
+								   " query"),
+							errdetail("%s", rangeTableEntryErrorDetail)));
 		}
 	}
 
@@ -392,24 +487,29 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	if (queryTableCount != 1)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("cannot perform distributed planning on this query"),
-						errdetail("Joins are currently unsupported")));
+						errmsg("cannot perform distributed planning for the given"
+							   " query"),
+						errdetail("Joins are not supported in distributed queries.")));
 	}
 
 	/* reject queries which involve multi-row inserts */
 	if (hasValuesScan)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("multi-row INSERTs to distributed tables "
-							   "are not supported")));
+						errmsg("cannot perform distributed planning for the given"
+							   " query"),
+						errdetail("Multi-row INSERTs to distributed tables are not "
+								  "supported.")));
 	}
 
 	/* reject queries with a returning list */
 	if (list_length(queryTree->returningList) > 0)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("cannot plan sharded modification that uses a "
-							   "RETURNING clause")));
+						errmsg("cannot perform distributed planning for the given"
+							   " query"),
+						errdetail("RETURNING clauses are not supported in distributed "
+								  "queries.")));
 	}
 
 	if (commandType == CMD_INSERT || commandType == CMD_UPDATE ||
@@ -521,17 +621,36 @@ ExtractRangeTableEntryWalker(Node *node, List **rangeTableList)
 
 /*
  * DistributedQueryShardList prunes the shards for the table in the query based
- * on the query's restriction qualifiers, and returns this list.
+ * on the query's restriction qualifiers, and returns this list. It is possible
+ * that all shards will be pruned if a query's restrictions are unsatisfiable.
+ * In that case, this function can return an empty list; however, if the table
+ * being queried has no shards created whatsoever, this function errors out.
  */
 static List *
 DistributedQueryShardList(Query *query)
 {
-	Oid distributedTableId = ExtractFirstDistributedTableId(query);
+	List *restrictClauseList = NIL;
+	List *prunedShardList = NIL;
 
-	List *restrictClauseList = QueryRestrictList(query);
+	Oid distributedTableId = ExtractFirstDistributedTableId(query);
 	List *shardIntervalList = LookupShardIntervalList(distributedTableId);
-	List *prunedShardList = PruneShardList(distributedTableId, restrictClauseList,
-										   shardIntervalList);
+
+	/* error out if no shards exists for the table */
+	if (shardIntervalList == NIL)
+	{
+		char *relationName = get_rel_name(distributedTableId);
+
+		ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+						errmsg("could not find any shards for query"),
+						errdetail("No shards exist for distributed table \"%s\".",
+								  relationName),
+						errhint("Run master_create_worker_shards to create shards "
+								"and try again.")));
+	}
+
+	restrictClauseList = QueryRestrictList(query);
+	prunedShardList = PruneShardList(distributedTableId, restrictClauseList,
+									 shardIntervalList);
 
 	return prunedShardList;
 }
@@ -553,52 +672,37 @@ SelectFromMultipleShards(Query *query, List *queryShardList)
 
 
 /*
- * PlanSequentialScan attempts to plan the given query using only a sequential
- * scan of the underlying table. The function disables index scan types and
- * plans the query. If the plan still contains a non-sequential scan plan node,
- * the function errors out.
+ * ClassifyRestrictions divides a query's restriction list in two: the subset
+ * of restrictions safe for remote evaluation and the subset of restrictions
+ * that must be evaluated locally. remoteRestrictList and localRestrictList are
+ * output parameters to receive these two subsets.
+ *
+ * Currently places all restrictions in the remote list and leaves the local
+ * one totally empty.
  */
-static PlannedStmt *
-PlanSequentialScan(Query *query, int cursorOptions, ParamListInfo boundParams)
+static void
+ClassifyRestrictions(List *queryRestrictList, List **remoteRestrictList,
+					 List **localRestrictList)
 {
-	PlannedStmt *sequentialScanPlan = NULL;
-	bool indexScanEnabledOldValue = false;
-	bool bitmapScanEnabledOldValue = false;
-	Query *queryCopy = NULL;
-	List *rangeTableList = NIL;
-	ListCell *rangeTableCell = NULL;
+	ListCell *restrictCell = NULL;
 
-	/* error out if the table is a foreign table */
-	ExtractRangeTableEntryWalker((Node *) query, &rangeTableList);
+	*remoteRestrictList = NIL;
+	*localRestrictList = NIL;
 
-	foreach(rangeTableCell, rangeTableList)
+	foreach(restrictCell, queryRestrictList)
 	{
-		RangeTblEntry *rangeTableEntry = (RangeTblEntry *) lfirst(rangeTableCell);
-		if (rangeTableEntry->rtekind == RTE_RELATION)
+		Node *restriction = (Node *) lfirst(restrictCell);
+		bool restrictionSafeToSend = true;
+
+		if (restrictionSafeToSend)
 		{
-			if (rangeTableEntry->relkind == RELKIND_FOREIGN_TABLE)
-			{
-				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("select from multiple shards is unsupported "
-									   "for foreign tables")));
-			}
+			*remoteRestrictList = lappend(*remoteRestrictList, restriction);
+		}
+		else
+		{
+			*localRestrictList = lappend(*localRestrictList, restriction);
 		}
 	}
-
-	/* disable index scan types */
-	indexScanEnabledOldValue = enable_indexscan;
-	bitmapScanEnabledOldValue = enable_bitmapscan;
-
-	enable_indexscan = false;
-	enable_bitmapscan = false;
-
-	queryCopy = copyObject(query);
-	sequentialScanPlan = standard_planner(queryCopy, cursorOptions, boundParams);
-
-	enable_indexscan = indexScanEnabledOldValue;
-	enable_bitmapscan = bitmapScanEnabledOldValue;
-
-	return sequentialScanPlan;
 }
 
 
@@ -608,14 +712,14 @@ PlanSequentialScan(Query *query, int cursorOptions, ParamListInfo boundParams)
  * query. This new query can then be pushed down to the worker nodes.
  */
 static Query *
-RowAndColumnFilterQuery(Query *query)
+RowAndColumnFilterQuery(Query *query, List *remoteRestrictList, List *localRestrictList)
 {
 	Query *filterQuery = NULL;
 	List *rangeTableList = NIL;
-	List *whereClauseList = NIL;
-	List *whereClauseColumnList = NIL;
+	List *whereColumnList = NIL;
 	List *projectColumnList = NIL;
-	List *columnList = NIL;
+	List *havingClauseColumnList = NIL;
+	List *requiredColumnList = NIL;
 	ListCell *columnCell = NULL;
 	List *uniqueColumnList = NIL;
 	List *targetList = NIL;
@@ -626,25 +730,30 @@ RowAndColumnFilterQuery(Query *query)
 	ExtractRangeTableEntryWalker((Node *) query, &rangeTableList);
 	Assert(list_length(rangeTableList) == 1);
 
-	/* build the where-clause expression */
-	whereClauseList = QueryRestrictList(query);
+	/* build the expression to supply FROM/WHERE for the remote query */
 	fromExpr = makeNode(FromExpr);
-	fromExpr->quals = (Node *) make_ands_explicit((List *) whereClauseList);
+	fromExpr->quals = (Node *) make_ands_explicit((List *) remoteRestrictList);
 	fromExpr->fromlist = QueryFromList(rangeTableList);
 
-	/* extract columns from both the where and projection clauses */
-	whereClauseColumnList = pull_var_clause((Node *) fromExpr, aggregateBehavior,
-											placeHolderBehavior);
+	/* must retrieve all columns referenced by local WHERE clauses... */
+	whereColumnList = pull_var_clause((Node *) localRestrictList, aggregateBehavior,
+									  placeHolderBehavior);
+
+	/* as well as any used in projections (GROUP BY, etc.) */
 	projectColumnList = pull_var_clause((Node *) query->targetList, aggregateBehavior,
 										placeHolderBehavior);
-	columnList = list_union(whereClauseColumnList, projectColumnList);
 
-	/*
-	 * list_union() filters duplicates, but only between the lists. For example,
-	 * if we have a where clause like (where order_id = 1 OR order_id = 2), we
-	 * end up with two order_id columns. We therefore de-dupe the columns here.
-	 */
-	foreach(columnCell, columnList)
+	/* finally, need those used in any HAVING quals */
+	havingClauseColumnList = pull_var_clause(query->havingQual, aggregateBehavior,
+											 placeHolderBehavior);
+
+	/* put them together to get list of required columns for query */
+	requiredColumnList = list_concat(requiredColumnList, whereColumnList);
+	requiredColumnList = list_concat(requiredColumnList, projectColumnList);
+	requiredColumnList = list_concat(requiredColumnList, havingClauseColumnList);
+
+	/* ensure there are no duplicates in the list  */
+	foreach(columnCell, requiredColumnList)
 	{
 		Var *column = (Var *) lfirst(columnCell);
 
@@ -652,9 +761,9 @@ RowAndColumnFilterQuery(Query *query)
 	}
 
 	/*
-	 * If the query is a simple "SELECT count(*)", add a NULL constant. This
-	 * constant deparses to "SELECT NULL FROM ...". postgres_fdw generates a
-	 * similar string when no columns are selected.
+	 * If we still have no columns, possible in a query like "SELECT count(*)",
+	 * add a NULL constant. This constant results in "SELECT NULL FROM ...".
+	 * postgres_fdw generates a similar string when no columns are selected.
 	 */
 	if (uniqueColumnList == NIL)
 	{
@@ -670,10 +779,78 @@ RowAndColumnFilterQuery(Query *query)
 	filterQuery = makeNode(Query);
 	filterQuery->commandType = CMD_SELECT;
 	filterQuery->rtable = rangeTableList;
-	filterQuery->targetList = targetList;
 	filterQuery->jointree = fromExpr;
+	filterQuery->targetList = targetList;
 
 	return filterQuery;
+}
+
+
+/*
+ * BuildLocalQuery returns a copy of query with its quals replaced by those
+ * in localRestrictList. Expects queries with a single entry in their FROM
+ * list.
+ */
+static Query *
+BuildLocalQuery(Query *query, List *localRestrictList)
+{
+	Query *localQuery = copyObject(query);
+	FromExpr *joinTree = localQuery->jointree;
+
+	Assert(joinTree != NULL);
+	Assert(list_length(joinTree->fromlist) == 1);
+	joinTree->quals = (Node *) make_ands_explicit((List *) localRestrictList);
+
+	return localQuery;
+}
+
+
+/*
+ * PlanSequentialScan attempts to plan the given query using only a sequential
+ * scan of the underlying table. The function disables index scan types and
+ * plans the query. If the plan still contains a non-sequential scan plan node,
+ * the function errors out. Note this function modifies the query parameter, so
+ * make a copy before calling PlanSequentialScan if that is unacceptable.
+ */
+static PlannedStmt *
+PlanSequentialScan(Query *query, int cursorOptions, ParamListInfo boundParams)
+{
+	PlannedStmt *sequentialScanPlan = NULL;
+	bool indexScanEnabledOldValue = false;
+	bool bitmapScanEnabledOldValue = false;
+	List *rangeTableList = NIL;
+	ListCell *rangeTableCell = NULL;
+
+	/* error out if the table is a foreign table */
+	ExtractRangeTableEntryWalker((Node *) query, &rangeTableList);
+
+	foreach(rangeTableCell, rangeTableList)
+	{
+		RangeTblEntry *rangeTableEntry = (RangeTblEntry *) lfirst(rangeTableCell);
+		if (rangeTableEntry->rtekind == RTE_RELATION)
+		{
+			if (rangeTableEntry->relkind == RELKIND_FOREIGN_TABLE)
+			{
+				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("multi-shard SELECTs from foreign tables are "
+									   "unsupported ")));
+			}
+		}
+	}
+
+	/* disable index scan types */
+	indexScanEnabledOldValue = enable_indexscan;
+	bitmapScanEnabledOldValue = enable_bitmapscan;
+
+	enable_indexscan = false;
+	enable_bitmapscan = false;
+
+	sequentialScanPlan = standard_planner(query, cursorOptions, boundParams);
+
+	enable_indexscan = indexScanEnabledOldValue;
+	enable_bitmapscan = bitmapScanEnabledOldValue;
+
+	return sequentialScanPlan;
 }
 
 
@@ -735,7 +912,7 @@ ExtractPartitionValue(Query *query, Var *partitionColumn)
 		{
 			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							errmsg("cannot plan INSERT to a distributed table "
-									"using a non-constant partition column value")));
+								   "using a non-constant partition column value")));
 		}
 
 		partitionValue = (Const *) targetEntry->expr;
@@ -834,34 +1011,35 @@ TargetEntryList(List *expressionList)
 static CreateStmt *
 CreateTemporaryTableLikeStmt(Oid sourceRelationId)
 {
-	  static unsigned long temporaryTableId = 0;
-	  CreateStmt *createStmt = NULL;
-	  StringInfo clonedTableName = NULL;
-	  RangeVar *clonedRelation = NULL;
+	static unsigned long temporaryTableId = 0;
+	CreateStmt *createStmt = NULL;
+	StringInfo clonedTableName = NULL;
+	RangeVar *clonedRelation = NULL;
 
-	  char *sourceTableName = get_rel_name(sourceRelationId);
-	  Oid sourceSchemaId = get_rel_namespace(sourceRelationId);
-	  char *sourceSchemaName = get_namespace_name(sourceSchemaId);
-	  RangeVar *sourceRelation = makeRangeVar(sourceSchemaName, sourceTableName, -1);
+	char *sourceTableName = get_rel_name(sourceRelationId);
+	Oid sourceSchemaId = get_rel_namespace(sourceRelationId);
+	char *sourceSchemaName = get_namespace_name(sourceSchemaId);
+	RangeVar *sourceRelation = makeRangeVar(sourceSchemaName, sourceTableName, -1);
 
-	  TableLikeClause *tableLikeClause = makeNode(TableLikeClause);
-	  tableLikeClause->relation = sourceRelation;
-	  tableLikeClause->options = 0; /* don't copy over indexes/constraints etc */
+	TableLikeClause *tableLikeClause = makeNode(TableLikeClause);
+	tableLikeClause->relation = sourceRelation;
+	tableLikeClause->options = 0; /* don't copy over indexes/constraints etc */
 
-	  /* create a unique name for the cloned table */
-	  clonedTableName = makeStringInfo();
-	  appendStringInfo(clonedTableName, "%s_%d_%lu",
-					   TEMPORARY_TABLE_PREFIX, MyProcPid, temporaryTableId);
-	  temporaryTableId++;
+	/* create a unique name for the cloned table */
+	clonedTableName = makeStringInfo();
+	appendStringInfo(clonedTableName, "%s_%d_%lu", TEMPORARY_TABLE_PREFIX, MyProcPid,
+					 temporaryTableId);
+	temporaryTableId++;
 
-	  clonedRelation = makeRangeVar(NULL, clonedTableName->data, -1);
-	  clonedRelation->relpersistence = RELPERSISTENCE_TEMP;
+	clonedRelation = makeRangeVar(NULL, clonedTableName->data, -1);
+	clonedRelation->relpersistence = RELPERSISTENCE_TEMP;
 
-	  createStmt = makeNode(CreateStmt);
-	  createStmt->relation = clonedRelation;
-	  createStmt->tableElts = list_make1(tableLikeClause);
+	createStmt = makeNode(CreateStmt);
+	createStmt->relation = clonedRelation;
+	createStmt->tableElts = list_make1(tableLikeClause);
+	createStmt->oncommit = ONCOMMIT_DROP;
 
-	  return createStmt;
+	return createStmt;
 }
 
 
@@ -903,6 +1081,11 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 
 		deparse_shard_query(query, shardId, queryString);
 
+		if (LogDistributedStatements)
+		{
+			ereport(LOG, (errmsg("distributed statement: %s", queryString->data)));
+		}
+
 		task = (Task *) palloc0(sizeof(Task));
 		task->queryString = queryString;
 		task->taskPlacementList = finalizedPlacementList;
@@ -932,10 +1115,19 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 	if (pgShardExecution)
 	{
 		DistributedPlan *distributedPlan = (DistributedPlan *) plannedStatement->planTree;
-
 		bool selectFromMultipleShards = distributedPlan->selectFromMultipleShards;
-		if (!selectFromMultipleShards)
-		  {
+		bool zeroShardQuery = (list_length(distributedPlan->taskList) == 0);
+
+		if (zeroShardQuery)
+		{
+			/* if zero shards are involved, let query hit local table */
+			Plan *originalPlan = distributedPlan->originalPlan;
+			plannedStatement->planTree = originalPlan;
+
+			NextExecutorStartHook(queryDesc, eflags);
+		}
+		else if (!selectFromMultipleShards)
+		{
 			bool topLevel = true;
 			LOCKMODE lockMode = NoLock;
 			EState *executorState = NULL;
@@ -966,61 +1158,45 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 			 * original one.
 			 */
 			Plan *originalPlan = NULL;
-			  RangeTblEntry *sequentialScanRangeTable = NULL;
-			  Oid intermediateResultTableId = InvalidOid;
-			  bool missingOK = false;
+			RangeTblEntry *sequentialScanRangeTable = NULL;
+			Oid intermediateResultTableId = InvalidOid;
+			bool missingOK = false;
 
-			  /* execute the previously created statement to create a temp table */
-			  CreateStmt *createStmt = distributedPlan->createTemporaryTableStmt;
-			  const char *queryDescription = "create temp table like";
-			  RangeVar *intermediateResultTable = createStmt->relation;
+			/* execute the previously created statement to create a temp table */
+			CreateStmt *createStmt = distributedPlan->createTemporaryTableStmt;
+			const char *queryDescription = "create temp table like";
+			RangeVar *intermediateResultTable = createStmt->relation;
 
-			  ProcessUtility((Node *) createStmt, queryDescription,
-							 PROCESS_UTILITY_TOPLEVEL, NULL, None_Receiver, NULL);
+			ProcessUtility((Node *) createStmt, queryDescription,
+						   PROCESS_UTILITY_TOPLEVEL, NULL, None_Receiver, NULL);
 
-			  /* execute select queries and fetch results into the temp table */
-			  ExecuteMultipleShardSelect(distributedPlan, intermediateResultTable);
+			/* execute select queries and fetch results into the temp table */
+			ExecuteMultipleShardSelect(distributedPlan, intermediateResultTable);
 
-			  /* update the query descriptor snapshot so results are visible */
-			  UnregisterSnapshot(queryDesc->snapshot);
-			  UpdateActiveSnapshotCommandId();
-			  queryDesc->snapshot = RegisterSnapshot(GetActiveSnapshot());
+			/* update the query descriptor snapshot so results are visible */
+			UnregisterSnapshot(queryDesc->snapshot);
+			UpdateActiveSnapshotCommandId();
+			queryDesc->snapshot = RegisterSnapshot(GetActiveSnapshot());
 
-			  /* update sequential scan's table entry to point to intermediate table */
-			  intermediateResultTableId = RangeVarGetRelid(intermediateResultTable,
-														   NoLock, missingOK);
+			/* update sequential scan's table entry to point to intermediate table */
+			intermediateResultTableId = RangeVarGetRelid(intermediateResultTable,
+														 NoLock, missingOK);
 
-			  Assert(list_length(plannedStatement->rtable) == 1);
-			  sequentialScanRangeTable = linitial(plannedStatement->rtable);
-			  Assert(sequentialScanRangeTable->rtekind == RTE_RELATION);
-			  sequentialScanRangeTable->relid = intermediateResultTableId;
+			Assert(list_length(plannedStatement->rtable) == 1);
+			sequentialScanRangeTable = linitial(plannedStatement->rtable);
+			Assert(sequentialScanRangeTable->rtekind == RTE_RELATION);
+			sequentialScanRangeTable->relid = intermediateResultTableId;
 
 			/* swap in modified (local) plan for compatibility with standard start hook */
 			originalPlan = distributedPlan->originalPlan;
 			plannedStatement->planTree = originalPlan;
 
-			/* call into the standard executor start, or hook if set */
-			if (PreviousExecutorStartHook != NULL)
-			{
-				PreviousExecutorStartHook(queryDesc, eflags);
-			}
-			else
-			{
-				standard_ExecutorStart(queryDesc, eflags);
-			}
+			NextExecutorStartHook(queryDesc, eflags);
 		}
 	}
 	else
 	{
-		/* call the next hook in the chain or the standard one, if no other hook was set */
-		if (PreviousExecutorStartHook != NULL)
-		{
-			PreviousExecutorStartHook(queryDesc, eflags);
-		}
-		else
-		 {
-		   standard_ExecutorStart(queryDesc, eflags);
-		 }
+		NextExecutorStartHook(queryDesc, eflags);
 	}
 }
 
@@ -1037,6 +1213,26 @@ IsPgShardPlan(PlannedStmt *plannedStmt)
 	bool isPgShardPlan = ((DistributedNodeTag) nodeTag == T_DistributedPlan);
 
 	return isPgShardPlan;
+}
+
+
+/*
+ * NextExecutorStartHook simply encapsulates the common logic of calling the
+ * next executor start hook in the chain or the standard executor start hook
+ * if no other hooks are present.
+ */
+static void
+NextExecutorStartHook(QueryDesc *queryDesc, int eflags)
+{
+	/* call into the standard executor start, or hook if set */
+	if (PreviousExecutorStartHook != NULL)
+	{
+		PreviousExecutorStartHook(queryDesc, eflags);
+	}
+	else
+	{
+		standard_ExecutorStart(queryDesc, eflags);
+	}
 }
 
 
@@ -1162,7 +1358,8 @@ ExecuteMultipleShardSelect(DistributedPlan *distributedPlan,
 		 * the tupleStore into the table.
 		 */
 		Assert(tupleStore != NULL);
-		TupleStoreToTable(intermediateTable, targetList, tupleStoreDescriptor, tupleStore);
+		TupleStoreToTable(intermediateTable, targetList, tupleStoreDescriptor,
+						  tupleStore);
 
 		tuplestore_end(tupleStore);
 	}
@@ -1174,7 +1371,7 @@ ExecuteMultipleShardSelect(DistributedPlan *distributedPlan,
  * the results and stores them in the given tuple store. If the task fails on
  * one of the placements, the function retries it on other placements.
  */
-static bool
+bool
 ExecuteTaskAndStoreResults(Task *task, TupleDesc tupleDescriptor,
 						   Tuplestorestate *tupleStore)
 {
@@ -1267,6 +1464,11 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 	AttInMetadata *attributeInputMetadata = TupleDescGetAttInMetadata(tupleDescriptor);
 	uint32 expectedColumnCount = tupleDescriptor->natts;
 	char **columnArray = (char **) palloc0(expectedColumnCount * sizeof(char *));
+	MemoryContext ioContext = AllocSetContextCreate(CurrentMemoryContext,
+													"StoreQueryResult",
+													ALLOCSET_DEFAULT_MINSIZE,
+													ALLOCSET_DEFAULT_INITSIZE,
+													ALLOCSET_DEFAULT_MAXSIZE);
 
 	Assert(tupleStore != NULL);
 
@@ -1300,6 +1502,7 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 		for (rowIndex = 0; rowIndex < rowCount; rowIndex++)
 		{
 			HeapTuple heapTuple = NULL;
+			MemoryContext oldContext = NULL;
 			memset(columnArray, 0, columnCount * sizeof(char *));
 
 			for (columnIndex = 0; columnIndex < columnCount; columnIndex++)
@@ -1314,8 +1517,19 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 				}
 			}
 
+			/*
+			 * Switch to a temporary memory context that we reset after each tuple. This
+			 * protects us from any memory leaks that might be present in I/O functions
+			 * called by BuildTupleFromCStrings.
+			 */
+			oldContext = MemoryContextSwitchTo(ioContext);
+
 			heapTuple = BuildTupleFromCStrings(attributeInputMetadata, columnArray);
+
+			MemoryContextSwitchTo(oldContext);
+
 			tuplestore_puttuple(tupleStore, heapTuple);
+			MemoryContextReset(ioContext);
 		}
 
 		PQclear(result);
@@ -1374,7 +1588,8 @@ TupleStoreToTable(RangeVar *tableRangeVar, List *storeToTableColumnList,
 		 * location based on the attribute number in the column from the remote
 		 * query's target list.
 		 */
-		for (storeColumnIndex = 0; storeColumnIndex < storeColumnCount; storeColumnIndex++)
+		for (storeColumnIndex = 0; storeColumnIndex < storeColumnCount;
+			 storeColumnIndex++)
 		{
 			TargetEntry *tableEntry = (TargetEntry *) list_nth(storeToTableColumnList,
 															   storeColumnIndex);
@@ -1407,6 +1622,7 @@ TupleStoreToTable(RangeVar *tableRangeVar, List *storeToTableColumnList,
 		CommandCounterIncrement();
 
 		ExecClearTuple(storeTableSlot);
+		heap_freetuple(tableTuple);
 	}
 
 	ExecDropSingleTupleTableSlot(storeTableSlot);
@@ -1604,10 +1820,7 @@ ExecuteSingleShardSelect(DistributedPlan *distributedPlan, EState *executorState
 	TupleTableSlot *tupleTableSlot = NULL;
 
 	List *taskList = distributedPlan->taskList;
-	if (list_length(taskList) != 1)
-	{
-		ereport(ERROR, (errmsg("cannot execute select over multiple shards")));
-	}
+	Assert(list_length(taskList) == 1);
 
 	task = (Task *) linitial(taskList);
 	tupleStore = tuplestore_begin_heap(false, false, work_mem);
@@ -1621,7 +1834,7 @@ ExecuteSingleShardSelect(DistributedPlan *distributedPlan, EState *executorState
 	tupleTableSlot = MakeSingleTupleTableSlot(tupleDescriptor);
 
 	/* startup the tuple receiver */
-	(*destination->rStartup) (destination, CMD_SELECT, tupleDescriptor);
+	(*destination->rStartup)(destination, CMD_SELECT, tupleDescriptor);
 
 	/* iterate over tuples in tuple store, and send them to destination */
 	for (;;)
@@ -1632,14 +1845,14 @@ ExecuteSingleShardSelect(DistributedPlan *distributedPlan, EState *executorState
 			break;
 		}
 
-		(*destination->receiveSlot) (tupleTableSlot, destination);
+		(*destination->receiveSlot)(tupleTableSlot, destination);
 		executorState->es_processed++;
 
 		ExecClearTuple(tupleTableSlot);
 	}
 
 	/* shutdown the tuple receiver */
-	(*destination->rShutdown) (destination);
+	(*destination->rShutdown)(destination);
 
 	ExecDropSingleTupleTableSlot(tupleTableSlot);
 
@@ -1736,7 +1949,7 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 			if (plannerType == PLANNER_TYPE_PG_SHARD)
 			{
 				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("EXPLAIN statements on distributed tables "
+								errmsg("EXPLAIN commands on distributed tables "
 									   "are unsupported")));
 			}
 		}
@@ -1765,7 +1978,7 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 			foreach(argumentTypeCell, argumentTypeList)
 			{
 				TypeName *typeName = lfirst(argumentTypeCell);
-				Oid	typeId = typenameTypeId(parseState, typeName);
+				Oid typeId = typenameTypeId(parseState, typeName);
 
 				argumentTypeArray[argumentTypeIndex] = typeId;
 				argumentTypeIndex++;
@@ -1781,7 +1994,7 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 		if (plannerType == PLANNER_TYPE_PG_SHARD)
 		{
 			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("PREPARE statements on distributed tables "
+							errmsg("PREPARE commands on distributed tables "
 								   "are unsupported")));
 		}
 	}
@@ -1803,7 +2016,7 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 			if (isDistributedTable)
 			{
 				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("COPY statements on distributed tables "
+								errmsg("COPY commands on distributed tables "
 									   "are unsupported")));
 			}
 		}
@@ -1828,10 +2041,15 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 			if (plannerType == PLANNER_TYPE_PG_SHARD)
 			{
 				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("COPY statements involving distributed "
+								errmsg("COPY commands involving distributed "
 									   "tables are unsupported")));
 			}
 		}
+	}
+	else if (statementType == T_DropStmt)
+	{
+		DropStmt *dropStatement = (DropStmt *) parsetree;
+		ErrorOnDropIfDistributedTablesExist(dropStatement);
 	}
 
 	if (PreviousProcessUtilityHook != NULL)
@@ -1843,5 +2061,76 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 	{
 		standard_ProcessUtility(parsetree, queryString, context,
 								params, dest, completionTag);
+	}
+}
+
+
+/*
+ * ErrorOnDropIfDistributedTablesExist prevents attempts to drop the pg_shard
+ * extension if any distributed tables still exist. This prevention will be
+ * circumvented if the user includes the CASCADE option in their DROP command,
+ * in which case a notice is printed and the DROP is allowed to proceed.
+ */
+static void
+ErrorOnDropIfDistributedTablesExist(DropStmt *dropStatement)
+{
+	Oid extensionOid = InvalidOid;
+	bool missingOK = true;
+	ListCell *dropStatementObject = NULL;
+	bool distributedTablesExist = false;
+
+	/* we're only worried about dropping extensions */
+	if (dropStatement->removeType != OBJECT_EXTENSION)
+	{
+		return;
+	}
+
+	extensionOid = get_extension_oid(PG_SHARD_EXTENSION_NAME, missingOK);
+	if (extensionOid == InvalidOid)
+	{
+		/*
+		 * Exit early if the extension has not been created (CREATE EXTENSION).
+		 * This check is required because it's possible to load the hooks in an
+		 * extension without formally "creating" it.
+		 */
+		return;
+	}
+
+	/* nothing to do if no distributed tables are present */
+	distributedTablesExist = DistributedTablesExist();
+	if (!distributedTablesExist)
+	{
+		return;
+	}
+
+	foreach(dropStatementObject, dropStatement->objects)
+	{
+		List *objectNameList = lfirst(dropStatementObject);
+		char *objectName = NameListToString(objectNameList);
+
+		/* we're only concerned with the pg_shard extension */
+		if (strncmp(PG_SHARD_EXTENSION_NAME, objectName, NAMEDATALEN) != 0)
+		{
+			continue;
+		}
+
+		if (dropStatement->behavior == DROP_CASCADE)
+		{
+			/* if CASCADE was used, emit NOTICE and proceed with DROP */
+			ereport(NOTICE, (errmsg("shards remain on worker nodes"),
+							 errdetail("Shards created by the extension are not removed "
+									   "by DROP EXTENSION.")));
+		}
+		else
+		{
+			/* without CASCADE, error if distributed tables present */
+			ereport(ERROR, (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+							errmsg("cannot drop extension " PG_SHARD_EXTENSION_NAME
+								   " because other objects depend on it"),
+							errdetail("Existing distributed tables depend on extension "
+									  PG_SHARD_EXTENSION_NAME),
+							errhint("Use DROP ... CASCADE to drop the dependent "
+									"objects too.")));
+		}
 	}
 }

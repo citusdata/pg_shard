@@ -5,7 +5,7 @@
  * This file contains functions to access and manage the distributed table
  * metadata.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */
@@ -34,7 +34,7 @@
 #include "catalog/pg_type.h"
 #include "commands/sequence.h"
 #include "nodes/makefuncs.h"
-#include "nodes/memnodes.h"
+#include "nodes/memnodes.h" /* IWYU pragma: keep */
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
 #include "storage/lock.h"
@@ -58,7 +58,6 @@ static List *ShardIntervalListCache = NIL;
 
 
 /* local function forward declarations */
-static Var * ColumnNameToColumn(Oid relationId, char *columnName);
 static void LoadShardIntervalRow(int64 shardId, Oid *relationId,
 								 char **minValue, char **maxValue);
 static ShardPlacement * TupleToShardPlacement(HeapTuple heapTuple,
@@ -303,7 +302,8 @@ LoadShardPlacementList(int64 shardId)
 	/* if no shard placements are found, error out */
 	if (shardPlacementList == NIL)
 	{
-		ereport(ERROR, (errmsg("could not find any placements for shardId "
+		ereport(ERROR, (errcode(ERRCODE_NO_DATA),
+						errmsg("no placements exist for shard with ID "
 							   INT64_FORMAT, shardId)));
 	}
 
@@ -349,8 +349,11 @@ PartitionColumn(Oid distributedTableId)
 	}
 	else
 	{
-		ereport(ERROR, (errmsg("could not find partition for distributed "
-							   "relation %u", distributedTableId)));
+		char *relationName = get_rel_name(distributedTableId);
+
+		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+						errmsg("no partition column is defined for relation \"%s\"",
+							   relationName)));
 	}
 
 	heap_endscan(scanDesc);
@@ -396,8 +399,11 @@ PartitionType(Oid distributedTableId)
 	}
 	else
 	{
-		ereport(ERROR, (errmsg("could not find partition for distributed "
-							   "relation %u", distributedTableId)));
+		char *relationName = get_rel_name(distributedTableId);
+
+		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+						errmsg("no partition column is defined for relation \"%s\"",
+							   relationName)));
 	}
 
 	heap_endscan(scanDesc);
@@ -441,11 +447,44 @@ IsDistributedTable(Oid tableId)
 
 
 /*
+ *  DistributedTablesExist returns true if pg_shard has a record of any
+ *  distributed tables; otherwise this function returns false.
+ */
+bool
+DistributedTablesExist(void)
+{
+	bool distributedTablesExist = false;
+	RangeVar *heapRangeVar = NULL;
+	Relation heapRelation = NULL;
+	HeapScanDesc scanDesc = NULL;
+	HeapTuple heapTuple = NULL;
+
+	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);
+	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
+
+	scanDesc = heap_beginscan(heapRelation, SnapshotSelf, 0, NULL);
+
+	heapTuple = heap_getnext(scanDesc, ForwardScanDirection);
+
+	/*
+	 * Check whether the partition metadata table contains any tuples. If so,
+	 * at least one distributed table exists.
+	 */
+	distributedTablesExist = HeapTupleIsValid(heapTuple);
+
+	heap_endscan(scanDesc);
+	relation_close(heapRelation, AccessShareLock);
+
+	return distributedTablesExist;
+}
+
+
+/*
  * ColumnNameToColumn accepts a relation identifier and column name and returns
  * a Var that represents that column in that relation. This function throws an
  * error if the column doesn't exist or is a system column.
  */
-static Var *
+Var *
 ColumnNameToColumn(Oid relationId, char *columnName)
 {
 	Var *partitionColumn = NULL;
@@ -460,14 +499,19 @@ ColumnNameToColumn(Oid relationId, char *columnName)
 	AttrNumber columnId = get_attnum(relationId, columnName);
 	if (columnId == InvalidAttrNumber)
 	{
+		char *relationName = get_rel_name(relationId);
+
 		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_COLUMN),
-						errmsg("partition column \"%s\" not found", columnName)));
+						errmsg("column \"%s\" of relation \"%s\" does not exist",
+							   columnName, relationName)));
 	}
 	else if (!AttrNumberIsForUserDefinedAttr(columnId))
 	{
+		char *relationName = get_rel_name(relationId);
+
 		ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
-						errmsg("specified partition column \"%s\" is a system "
-							   "column", columnName)));
+						errmsg("column \"%s\" of relation \"%s\" is a system column",
+							   columnName, relationName)));
 	}
 
 	get_atttypetypmodcoll(relationId, columnId, &columnTypeOid, &columnTypeMod,
@@ -525,19 +569,17 @@ LoadShardIntervalRow(int64 shardId, Oid *relationId, char **minValue,
 		(*relationId) = DatumGetObjectId(relationIdDatum);
 		(*minValue) = TextDatumGetCString(minValueDatum);
 		(*maxValue) = TextDatumGetCString(maxValueDatum);
-
 	}
 	else
 	{
-		ereport(ERROR, (errmsg("could not find entry for shard " INT64_FORMAT,
-						shardId)));
+		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+						errmsg("shard with ID " INT64_FORMAT " does not exist",
+							   shardId)));
 	}
 
 	index_endscan(indexScanDesc);
 	index_close(indexRelation, AccessShareLock);
 	relation_close(heapRelation, AccessShareLock);
-
-	return;
 }
 
 
@@ -743,15 +785,14 @@ DeleteShardPlacementRow(uint64 shardPlacementId)
 	}
 	else
 	{
-		ereport(ERROR, (errmsg("could not find entry for shard placement " INT64_FORMAT,
+		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+						errmsg("shard placement with ID " INT64_FORMAT " does not exist",
 							   shardPlacementId)));
 	}
 
 	index_endscan(indexScanDesc);
 	index_close(indexRelation, AccessShareLock);
 	relation_close(heapRelation, RowExclusiveLock);
-
-	return;
 }
 
 
@@ -796,13 +837,14 @@ LockShard(int64 shardId, LOCKMODE lockMode)
 
 	if (lockMode == ExclusiveLock || lockMode == ShareLock)
 	{
-		bool sessionLock = false;	/* we want a transaction lock */
-		bool dontWait = false;		/* block indefinitely until acquired */
+		bool sessionLock = false;   /* we want a transaction lock */
+		bool dontWait = false;      /* block indefinitely until acquired */
 
 		(void) LockAcquire(&lockTag, lockMode, sessionLock, dontWait);
 	}
 	else
 	{
-		ereport(ERROR, (errmsg("attempted to lock shard using unsupported mode")));
+		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						errmsg("lockMode must be one of: ExclusiveLock, ShareLock")));
 	}
 }
