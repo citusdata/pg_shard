@@ -177,7 +177,7 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 	{
 		ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 						errmsg("table \"%s\" has already had shards created for it",
-						       tableName)));
+							   tableName)));
 	}
 
 	/* make sure that at least one shard is specified */
@@ -373,7 +373,7 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 	{
 		ereport(ERROR, (errcode_for_file_access(),
 						errmsg("could not open worker list file \"%s\": %m",
-						       workerFilePath)));
+							   workerFilePath)));
 	}
 
 	/* build pattern to contain node name length limit */

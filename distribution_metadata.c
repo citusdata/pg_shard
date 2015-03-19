@@ -353,7 +353,7 @@ PartitionColumn(Oid distributedTableId)
 
 		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
 						errmsg("no partition column is defined for relation \"%s\"",
-						       relationName)));
+							   relationName)));
 	}
 
 	heap_endscan(scanDesc);
@@ -403,7 +403,7 @@ PartitionType(Oid distributedTableId)
 
 		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
 						errmsg("no partition column is defined for relation \"%s\"",
-						       relationName)));
+							   relationName)));
 	}
 
 	heap_endscan(scanDesc);
@@ -503,7 +503,7 @@ ColumnNameToColumn(Oid relationId, char *columnName)
 
 		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_COLUMN),
 						errmsg("column \"%s\" of relation \"%s\" does not exist",
-						       columnName, relationName)));
+							   columnName, relationName)));
 	}
 	else if (!AttrNumberIsForUserDefinedAttr(columnId))
 	{
@@ -511,7 +511,7 @@ ColumnNameToColumn(Oid relationId, char *columnName)
 
 		ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
 						errmsg("column \"%s\" of relation \"%s\" is a system column",
-						       columnName, relationName)));
+							   columnName, relationName)));
 	}
 
 	get_atttypetypmodcoll(relationId, columnId, &columnTypeOid, &columnTypeMod,
@@ -574,7 +574,7 @@ LoadShardIntervalRow(int64 shardId, Oid *relationId, char **minValue,
 	{
 		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
 						errmsg("shard with ID " INT64_FORMAT " does not exist",
-						       shardId)));
+							   shardId)));
 	}
 
 	index_endscan(indexScanDesc);
@@ -787,7 +787,7 @@ DeleteShardPlacementRow(uint64 shardPlacementId)
 	{
 		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
 						errmsg("shard placement with ID " INT64_FORMAT " does not exist",
-						       shardPlacementId)));
+							   shardPlacementId)));
 	}
 
 	index_endscan(indexScanDesc);

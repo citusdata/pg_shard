@@ -70,7 +70,7 @@ GetConnection(char *nodeName, int32 nodePort)
 	{
 		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 						errmsg("hostname exceeds the maximum length of %d",
-						       MAX_NODE_LENGTH)));
+							   MAX_NODE_LENGTH)));
 	}
 
 	/* if first call, initialize the connection hash */

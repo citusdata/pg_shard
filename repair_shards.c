@@ -13,7 +13,6 @@
 #include "postgres.h"
 #include "c.h"
 #include "fmgr.h"
-#include "libpq-fe.h"
 #include "miscadmin.h"
 #include "postgres_ext.h"
 
@@ -103,7 +102,6 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 	{
 		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 						errmsg("source placement must be in finalized state")));
-
 	}
 
 	targetPlacement = SearchShardPlacementInList(shardPlacementList, targetNodeName,
@@ -112,7 +110,6 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 	{
 		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 						errmsg("target placement must be in inactive state")));
-
 	}
 
 	/* retrieve the DDL commands for the table and run them */
@@ -233,7 +230,7 @@ SearchShardPlacementInList(List *shardPlacementList, text *nodeNameText, int32 n
 	{
 		ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
 						errmsg("could not find placement matching \"%s:%d\"",
-						       nodeName, nodePort),
+							   nodeName, nodePort),
 						errhint("Confirm the placement still exists and try again.")));
 	}
 

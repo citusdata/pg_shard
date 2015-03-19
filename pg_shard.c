@@ -16,6 +16,7 @@
 #include "funcapi.h"
 #include "libpq-fe.h"
 #include "miscadmin.h"
+#include "pg_config_manual.h"
 #include "postgres_ext.h"
 
 #include "pg_shard.h"
@@ -38,7 +39,6 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_type.h"
-#include "catalog/objectaddress.h"
 #include "commands/extension.h"
 #include "executor/execdesc.h"
 #include "executor/executor.h"
@@ -46,6 +46,7 @@
 #include "executor/tuptable.h"
 #include "nodes/execnodes.h"
 #include "nodes/makefuncs.h"
+#include "nodes/memnodes.h" /* IWYU pragma: keep */
 #include "nodes/nodeFuncs.h"
 #include "nodes/nodes.h"
 #include "nodes/params.h"
