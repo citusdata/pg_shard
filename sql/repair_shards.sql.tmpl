@@ -16,14 +16,23 @@ VALUES
 
 -- Note we are "distributing" this table on localhost and 127.0.0.1, i.e. two
 -- hostnames for the same machine. This is a hack to get the pg_shard master to
--- connect back to itself (most we can hope for with installcheck).
+-- connect back to itself (most we can hope for with installcheck). The other
+-- entries are to test input parameter validation.
 INSERT INTO pgs_distribution_metadata.shard_placement
 	(id, node_name, node_port, shard_id, shard_state)
 VALUES
 	(200, 'localhost', $PGPORT, 20, 1),
-	(201, '127.0.0.1', $PGPORT, 20, 3);
+	(201, '127.0.0.1', $PGPORT, 20, 3),
+	(202, 'dummyhost', $PGPORT, 20, 1),
+	(203, 'otherhost', $PGPORT, 20, 3);
 
--- create an empty "shard" for the table
+-- first, test input checking by trying to copy into a finalized placement
+SELECT master_copy_shard_placement(20, 'localhost', $PGPORT, 'dummyhost', $PGPORT);
+
+-- also try to copy from an inactive placement
+SELECT master_copy_shard_placement(20, 'otherhost', $PGPORT, '127.0.0.1', $PGPORT);
+
+-- next, create an empty "shard" for the table
 CREATE TABLE customer_engagements_20 ( LIKE customer_engagements );
 
 -- capture its current object identifier

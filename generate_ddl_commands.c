@@ -356,7 +356,7 @@ generate_relation_name(Oid relationId)
 	tp = SearchSysCache1(RELOID, ObjectIdGetDatum(relationId));
 	if (!HeapTupleIsValid(tp))
 	{
-		elog(ERROR, "cache lookup failed for relation %u", relationId);
+		ereport(ERROR, (errmsg("cache lookup failed for relation %u", relationId)));
 	}
 
 	reltup = (Form_pg_class) GETSTRUCT(tp);

@@ -68,7 +68,9 @@ GetConnection(char *nodeName, int32 nodePort)
 	/* check input */
 	if (strnlen(nodeName, MAX_NODE_LENGTH + 1) > MAX_NODE_LENGTH)
 	{
-		ereport(ERROR, (errmsg("hostnames may not exceed 255 characters")));
+		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						errmsg("hostname exceeds the maximum length of %d",
+						       MAX_NODE_LENGTH)));
 	}
 
 	/* if first call, initialize the connection hash */
@@ -125,25 +127,29 @@ PurgeConnection(PGconn *connection)
 	NodeConnectionKey nodeConnectionKey;
 	NodeConnectionEntry *nodeConnectionEntry = NULL;
 	bool entryFound = false;
+	char *nodeNameString = NULL;
+	char *nodePortString = NULL;
 
-	char *nodeNameString = ConnectionGetOptionValue(connection, "host");
-	char *nodePortString = ConnectionGetOptionValue(connection, "port");
-
-	if (nodeNameString != NULL && nodePortString != NULL)
+	nodeNameString = ConnectionGetOptionValue(connection, "host");
+	if (nodeNameString == NULL)
 	{
-		int32 nodePort = pg_atoi(nodePortString, sizeof(int32), 0);
-
-		memset(&nodeConnectionKey, 0, sizeof(nodeConnectionKey));
-		strncpy(nodeConnectionKey.nodeName, nodeNameString, MAX_NODE_LENGTH);
-		nodeConnectionKey.nodePort = nodePort;
-
-		pfree(nodeNameString);
-		pfree(nodePortString);
+		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						errmsg("connection is missing host option")));
 	}
-	else
+
+	nodePortString = ConnectionGetOptionValue(connection, "port");
+	if (nodePortString == NULL)
 	{
-		ereport(ERROR, (errmsg("connections must have host and port options set")));
+		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						errmsg("connection is missing port option")));
 	}
+
+	memset(&nodeConnectionKey, 0, sizeof(nodeConnectionKey));
+	strncpy(nodeConnectionKey.nodeName, nodeNameString, MAX_NODE_LENGTH);
+	nodeConnectionKey.nodePort = pg_atoi(nodePortString, sizeof(int32), 0);
+
+	pfree(nodeNameString);
+	pfree(nodePortString);
 
 	nodeConnectionEntry = hash_search(NodeConnectionHash, &nodeConnectionKey,
 									  HASH_REMOVE, &entryFound);
@@ -157,7 +163,7 @@ PurgeConnection(PGconn *connection)
 		 */
 		if (nodeConnectionEntry->connection != connection)
 		{
-			ereport(WARNING, (errmsg("hash entry for %s:%d contained different "
+			ereport(WARNING, (errmsg("hash entry for \"%s:%d\" contained different "
 									 "connection than that provided by caller",
 									 nodeConnectionKey.nodeName,
 									 nodeConnectionKey.nodePort)));
@@ -166,7 +172,8 @@ PurgeConnection(PGconn *connection)
 	}
 	else
 	{
-		ereport(WARNING, (errmsg("could not find hash entry for connection to %s:%d",
+		ereport(WARNING, (errcode(ERRCODE_NO_DATA),
+						  errmsg("could not find hash entry for connection to \"%s:%d\"",
 								 nodeConnectionKey.nodeName,
 								 nodeConnectionKey.nodePort)));
 	}
