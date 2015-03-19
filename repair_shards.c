@@ -96,13 +96,24 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 	LockShard(shardId, ExclusiveLock);
 
 	shardPlacementList = LoadShardPlacementList(shardId);
+
 	sourcePlacement = SearchShardPlacementInList(shardPlacementList, sourceNodeName,
 												 sourceNodePort);
+	if (sourcePlacement->shardState != STATE_FINALIZED)
+	{
+		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						errmsg("source placement must be in finalized state")));
+
+	}
+
 	targetPlacement = SearchShardPlacementInList(shardPlacementList, targetNodeName,
 												 targetNodePort);
+	if (targetPlacement->shardState != STATE_INACTIVE)
+	{
+		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						errmsg("target placement must be in inactive state")));
 
-	Assert(sourcePlacement->shardState == STATE_FINALIZED);
-	Assert(targetPlacement->shardState == STATE_INACTIVE);
+	}
 
 	/* retrieve the DDL commands for the table and run them */
 	ddlCommandList = RecreateTableDDLCommandList(distributedTableId, shardId);
