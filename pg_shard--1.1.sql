@@ -265,22 +265,22 @@ COMMENT ON FUNCTION create_insert_proxy_for_table(regclass, regclass)
 
 
 
-CREATE OR REPLACE FUNCTION pgs_distribution_metadata.remove_partition()
-  RETURNS trigger AS '
-BEGIN
-				DELETE FROM shard_placement where shard_id IN (SELECT id FROM shard WHERE relation_id = OLD.relation_id);
-				DELETE FROM shard where relation_id = OLD.relation_id;
-				RETURN NULL;
-END; ' language plpgsql;
+-- CREATE OR REPLACE FUNCTION pgs_distribution_metadata.remove_partition()
+--  RETURNS trigger AS '
+--BEGIN
+--				DELETE FROM  pgs_distribution_metadata.shard_placement where shard_id IN (SELECT id FROM  pgs_distribution_metadata.shard WHERE relation_id = OLD.relation_id);
+--				DELETE FROM  pgs_distribution_metadata.shard where relation_id = OLD.relation_id;
+--				RETURN NULL;
+--END; ' language plpgsql;
 
 
 
 
-CREATE TRIGGER remove_metadata_on_table_delete
-BEFORE DELETE
-ON pgs_distribution_metadata.partition
-FOR EACH ROW
-EXECUTE PROCEDURE remove_partition();
+--CREATE TRIGGER remove_metadata_on_table_delete
+--BEFORE DELETE
+--ON pgs_distribution_metadata.partition
+--FOR EACH ROW
+--EXECUTE PROCEDURE remove_partition();
 
 
 

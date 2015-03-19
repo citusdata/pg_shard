@@ -735,9 +735,8 @@ InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
 	heap_close(shardPlacementRelation, RowExclusiveLock);
 }
 
-#include "tcop/dest.h"
-#include "tcop/tcopprot.h"
-#include "tcop/utility.h"
+#include "catalog/dependency.h"
+
 /*
  * DeleteDistributedTableMetadata deletes all the information in the metadata tables
  * which are dependent to the distributed table with given distributedTableId. The
@@ -746,31 +745,31 @@ InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
 void
 DeleteDistributedTableMetadata(Oid distributedTableId)
 {
+	ObjectAddress object;
+	//Relation distributedTable = RelationIdGetRelation(distributedTableId);
 
-	DeleteStmt *deleteStatement = NULL;
 
-
-	char *sourceTableName = get_rel_name(distributedTableId);
-	Oid sourceSchemaId = get_rel_namespace(distributedTableId);
-	char *sourceSchemaName = get_namespace_name(sourceSchemaId);
-	RangeVar *sourceRelation = makeRangeVar(sourceSchemaName, sourceTableName, -1);
-
+	object.classId = RelationRelationId;
+	object.objectId = 19857;// RelationGetRelid(distributedTable);
+	//object.objectSubId = RelationGetRelid(distributedTable);
 
 
 
-	deleteStatement = makeNode(DeleteStmt);
+	ObjectAddress object2;
 
-	deleteStatement->relation = sourceRelation;
 
-	deleteStatement->whereClause = NIL;
+	object2.classId = 19969;
+	object2.objectId =distributedTableId ;// RelationGetRelid(distributedTable);
+	object2.objectSubId = 0;
 
-	deleteStatement->returningList = NIL;
-	deleteStatement->withClause = NIL;
-	deleteStatement->usingClause = NIL;
 
-	ProcessUtility((Node *) deleteStatement, "delete from pgs_distribution_metadata.partition",
-				   PROCESS_UTILITY_TOPLEVEL, NULL, None_Receiver, NULL);
 
+	//recordDependencyOn(object, object2 , DEPENDENCY_NORMAL);
+
+
+
+	performDeletion(&object2, DROP_CASCADE, PERFORM_DELETION_CONCURRENTLY);
+	//deleteWhatDependsOn(&object2, 0);
 }
 
 
