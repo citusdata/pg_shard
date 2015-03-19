@@ -510,7 +510,8 @@ MakeHashedOperatorExpression(OpExpr *operatorExpression)
 	{
 		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION),
 						errmsg("could not identify a hash function for type %s",
-							   format_type_be(constant->consttype))));
+							   format_type_be(constant->consttype)),
+						errdatatype(constant->consttype)));
 	}
 
 	/*

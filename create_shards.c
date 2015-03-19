@@ -101,6 +101,7 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 			ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION),
 							errmsg("could not identify a hash function for type %s",
 								   format_type_be(partitionColumn->vartype)),
+							errdatatype(partitionColumn->vartype),
 							errdetail("Partition column types must have a hash function "
 									  "defined to use hash partitioning.")));
 		}
@@ -126,6 +127,7 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 					(errcode(ERRCODE_UNDEFINED_FUNCTION),
 					 errmsg("could not identify a comparison function for type %s",
 							format_type_be(partitionColumn->vartype)),
+					 errdatatype(partitionColumn->vartype),
 					 errdetail("Partition column types must have a comparison function "
 							   "defined to use range partitioning.")));
 		}
@@ -606,6 +608,7 @@ SupportFunctionForColumn(Var *partitionColumn, Oid accessMethodId,
 		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
 						errmsg("data type %s has no default operator class for specified"
 							   " partition method", format_type_be(columnOid)),
+						errdatatype(columnOid),
 						errdetail("Partition column types must have a default operator"
 								  " class defined.")));
 	}
