@@ -322,7 +322,7 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 	}
 	else
 	{
-		ereport(ERROR, (errmsg("unknown planner type: %d", plannerType)));
+		ereport(ERROR, (errmsg("unrecognized planner type: %d", plannerType)));
 	}
 
 	return plannedStatement;
@@ -404,7 +404,7 @@ ErrorIfQueryNotSupported(Query *queryTree)
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						errmsg("cannot perform distributed planning for the given"
 							   " query"),
-						errdetail("Utility statements are not supported in distributed "
+						errdetail("Utility commands are not supported in distributed "
 								  "queries.")));
 	}
 
@@ -1948,7 +1948,7 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 			if (plannerType == PLANNER_TYPE_PG_SHARD)
 			{
 				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("EXPLAIN statements on distributed tables "
+								errmsg("EXPLAIN commands on distributed tables "
 									   "are unsupported")));
 			}
 		}
@@ -1993,7 +1993,7 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 		if (plannerType == PLANNER_TYPE_PG_SHARD)
 		{
 			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("PREPARE statements on distributed tables "
+							errmsg("PREPARE commands on distributed tables "
 								   "are unsupported")));
 		}
 	}
@@ -2015,7 +2015,7 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 			if (isDistributedTable)
 			{
 				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("COPY statements on distributed tables "
+								errmsg("COPY commands on distributed tables "
 									   "are unsupported")));
 			}
 		}
@@ -2040,7 +2040,7 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 			if (plannerType == PLANNER_TYPE_PG_SHARD)
 			{
 				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("COPY statements involving distributed "
+								errmsg("COPY commands involving distributed "
 									   "tables are unsupported")));
 			}
 		}

@@ -24,7 +24,7 @@ VALUES
 	('set_of_ids'::regclass, 'h', 'id');
 -- should get ERROR for NULL, non-existent, or non-distributed table
 SELECT partition_column_to_node_string(NULL);
-ERROR:  table_oid cannot be null
+ERROR:  table_oid must not be null
 SELECT partition_column_to_node_string(0);
 ERROR:  no partition column is defined for relation "(null)"
 SELECT partition_column_to_node_string('pg_class'::regclass);
