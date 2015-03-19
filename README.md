@@ -29,6 +29,16 @@ Once you have PostgreSQL or CitusDB installed, you're ready to build `pg_shard`.
 
 **Note:** If you'd like to build against CitusDB, please contact us at engage @ citusdata.com.
 
+### Upgrading from Previous Versions
+
+To upgrade an existing installation, simply:
+
+  1. Build and install the latest `pg_shard` release (see the _Building_ section)
+  2. Restart your PostgreSQL server
+  3. Run `ALTER EXTENSION pg_shard UPDATE;` on the PostgreSQL server
+
+Note that taking advantage of the new repair functionality requires that you also install `pg_shard` on all your worker nodes.
+
 ## Setup
 
 `pg_shard` uses a master node to store shard metadata. In the simple setup, this node also acts as the interface for all queries to the cluster. As a user, you can pick any one of your PostgreSQL nodes as the master, and the other nodes in the cluster will then be your workers.
@@ -52,16 +62,6 @@ Second, the master node in `pg_shard` reads worker host information from a file 
     worker-102  5432
 
 Then, you can save these settings and restart the master node.
-
-## Upgrading from Previous Versions
-
-To upgrade an existing installation, simply:
-
-  1. Build and install the latest `pg_shard` release (see the _Building_ section)
-  2. Restart your PostgreSQL server
-  3. Run `ALTER EXTENSION pg_shard UPDATE;` on the PostgreSQL server
-
-Note that taking advantage of the new repair functionality requires that you also install `pg_shard` on all your worker nodes.
 
 ### Table Sharding
 
