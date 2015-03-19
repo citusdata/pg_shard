@@ -26,9 +26,9 @@ VALUES
 SELECT partition_column_to_node_string(NULL);
 ERROR:  table_oid cannot be null
 SELECT partition_column_to_node_string(0);
-ERROR:  could not find partition for distributed relation 0
+ERROR:  no partition column is defined for relation "(null)"
 SELECT partition_column_to_node_string('pg_class'::regclass);
-ERROR:  could not find partition for distributed relation 1259
+ERROR:  no partition column is defined for relation "pg_class"
 -- should get node representation for distributed table
 SELECT partition_column_to_node_string('set_of_ids'::regclass);
                                             partition_column_to_node_string                                             

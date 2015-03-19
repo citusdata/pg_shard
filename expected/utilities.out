@@ -17,7 +17,8 @@ COPY sharded_table FROM STDIN;
 ERROR:  COPY statements on distributed tables are unsupported
 -- cursors may not involve distributed tables
 DECLARE all_sharded_rows CURSOR FOR SELECT * FROM sharded_table;
-ERROR:  unsupported utility statement
+ERROR:  cannot perform distributed planning for the given query
+DETAIL:  Utility statements are not supported in distributed queries.
 -- EXPLAIN support isn't implemented
 EXPLAIN SELECT * FROM sharded_table;
 ERROR:  EXPLAIN statements on distributed tables are unsupported

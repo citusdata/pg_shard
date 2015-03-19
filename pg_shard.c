@@ -298,7 +298,8 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 	{
 		if (PreviousPlannerHook == NULL)
 		{
-			ereport(ERROR, (errmsg("could not plan SELECT query"),
+			ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+							errmsg("could not plan SELECT query"),
 							errdetail("Configured to use CitusDB's SELECT "
 									  "logic, but CitusDB is not installed."),
 							errhint("Install CitusDB or set the "
@@ -401,7 +402,10 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	if (commandType == CMD_SELECT && queryTree->utilityStmt != NULL)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("unsupported utility statement")));
+						errmsg("cannot perform distributed planning for the given"
+							   " query"),
+						errdetail("Utility statements are not supported in distributed "
+								  "queries.")));
 	}
 
 	/*
@@ -491,16 +495,20 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	if (hasValuesScan)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("multi-row INSERTs to distributed tables "
-							   "are not supported")));
+						errmsg("cannot perform distributed planning for the given"
+							   " query"),
+						errdetail("Multi-row INSERTs to distributed tables are not "
+								  "supported.")));
 	}
 
 	/* reject queries with a returning list */
 	if (list_length(queryTree->returningList) > 0)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("cannot plan sharded modification that uses a "
-							   "RETURNING clause")));
+						errmsg("cannot perform distributed planning for the given"
+							   " query"),
+						errdetail("RETURNING clauses are not supported in distributed "
+								  "queries.")));
 	}
 
 	if (commandType == CMD_INSERT || commandType == CMD_UPDATE ||
@@ -823,8 +831,8 @@ PlanSequentialScan(Query *query, int cursorOptions, ParamListInfo boundParams)
 			if (rangeTableEntry->relkind == RELKIND_FOREIGN_TABLE)
 			{
 				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("select from multiple shards is unsupported "
-									   "for foreign tables")));
+								errmsg("multi-shard SELECTs from foreign tables are "
+									   "unsupported ")));
 			}
 		}
 	}

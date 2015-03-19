@@ -70,7 +70,7 @@ CREATE FOREIGN TABLE remote_engagements_30 (
 -- oops! we don't support repairing shards backed by foreign tables
 SELECT master_copy_shard_placement(30, 'localhost', $PGPORT, '127.0.0.1', $PGPORT);
 ERROR:  cannot repair shard
-DETAIL:  Repairing shards backed by foreign tables is currently unsupported.
+DETAIL:  Repairing shards backed by foreign tables is not supported.
 -- At this point, we've tested recreating a shard's table, but haven't seen
 -- whether the rows themselves are correctly copied. We'll insert a few rows
 -- into our "shard" and use our hack to get the pg_shard worker to connect back

@@ -126,7 +126,7 @@ SELECT extend_ddl_command('employees', 12345, 'ALTER TABLE ONLY employees ADD ' 
 
 -- generate a command to re-cluster a shard's table on a specific index
 SELECT extend_ddl_command('employees', 12345, 'CLUSTER employees USING start_time_idx');
-ERROR:  unsupported node type during deparse: 714
+ERROR:  unsupported node type: 714
 -- command extension also works with foreign table creation 
 CREATE FOREIGN TABLE telecommuters (
 	id bigint not null,

@@ -220,8 +220,9 @@ SearchShardPlacementInList(List *shardPlacementList, text *nodeNameText, int32 n
 
 	if (matchingPlacement == NULL)
 	{
-		ereport(ERROR, (errmsg("could not find placement matching %s:%d", nodeName,
-							   nodePort),
+		ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+						errmsg("could not find placement matching \"%s:%d\"",
+						       nodeName, nodePort),
 						errhint("Confirm the placement still exists and try again.")));
 	}
 
@@ -301,7 +302,7 @@ CopyDataFromFinalizedPlacement(Oid distributedTableId, int64 shardId,
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						errmsg("cannot repair shard"),
 						errdetail("Repairing shards backed by foreign tables is "
-								  "currently unsupported.")));
+								  "not supported.")));
 	}
 
 	AppendShardIdToName(&relationName, shardId);

@@ -79,7 +79,8 @@ INSERT INTO limit_orders VALUES (2036, 'GOOG', 5634, now(), 'buy', random());
 ERROR:  cannot plan sharded modification containing values which are not constants or constant expressions
 -- commands with multiple rows are unsupported
 INSERT INTO limit_orders VALUES (DEFAULT), (DEFAULT);
-ERROR:  multi-row INSERTs to distributed tables are not supported
+ERROR:  cannot perform distributed planning for the given query
+DETAIL:  Multi-row INSERTs to distributed tables are not supported.
 -- INSERT ... SELECT ... FROM commands are unsupported
 INSERT INTO limit_orders SELECT * FROM limit_orders;
 ERROR:  cannot perform distributed planning for the given query
@@ -87,7 +88,8 @@ DETAIL:  Subqueries are not supported in distributed queries.
 -- commands with a RETURNING clause are unsupported
 INSERT INTO limit_orders VALUES (7285, 'AMZN', 3278, '2016-01-05 02:07:36', 'sell', 0.00)
 						 RETURNING *;
-ERROR:  cannot plan sharded modification that uses a RETURNING clause
+ERROR:  cannot perform distributed planning for the given query
+DETAIL:  RETURNING clauses are not supported in distributed queries.
 -- commands containing a CTE are unsupported
 WITH deleted_orders AS (DELETE FROM limit_orders RETURNING *)
 INSERT INTO limit_orders DEFAULT VALUES;
@@ -135,7 +137,8 @@ ERROR:  cannot perform distributed planning for the given query
 DETAIL:  Joins are not supported in distributed queries.
 -- commands with a RETURNING clause are unsupported
 DELETE FROM limit_orders WHERE id = 246 RETURNING *;
-ERROR:  cannot plan sharded modification that uses a RETURNING clause
+ERROR:  cannot perform distributed planning for the given query
+DETAIL:  RETURNING clauses are not supported in distributed queries.
 -- commands containing a CTE are unsupported
 WITH deleted_orders AS (INSERT INTO limit_orders DEFAULT VALUES RETURNING *)
 DELETE FROM limit_orders;
@@ -181,7 +184,8 @@ ERROR:  cannot perform distributed planning for the given query
 DETAIL:  Joins are not supported in distributed queries.
 -- commands with a RETURNING clause are unsupported
 UPDATE limit_orders SET symbol = 'GM' WHERE id = 246 RETURNING *;
-ERROR:  cannot plan sharded modification that uses a RETURNING clause
+ERROR:  cannot perform distributed planning for the given query
+DETAIL:  RETURNING clauses are not supported in distributed queries.
 -- commands containing a CTE are unsupported
 WITH deleted_orders AS (INSERT INTO limit_orders DEFAULT VALUES RETURNING *)
 UPDATE limit_orders SET symbol = 'GM';

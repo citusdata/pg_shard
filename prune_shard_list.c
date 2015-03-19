@@ -118,7 +118,7 @@ PruneShardList(Oid relationId, List *whereClauseList, List *shardIntervalList)
 		shardPruned = predicate_refuted_by(constraintList, restrictInfoList);
 		if (shardPruned)
 		{
-			ereport(DEBUG2, (errmsg("predicate pruning for shardId "
+			ereport(DEBUG2, (errmsg("predicate pruning for shard with ID "
 									UINT64_FORMAT, shardInterval->id)));
 		}
 		else
