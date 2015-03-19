@@ -1,3 +1,23 @@
+### pg_shard v1.1.0 (March 19, 2015) ###
+
+* Speeds up INSERTs by up to 300%
+
+* Adds function to repair inactive placements
+
+* Adds script to simplify copying data from files
+
+* Adds function to sync metadata to CitusDB catalogs
+
+* Fixes resource leaks that occurred during large queries
+
+* Improves error messages and user experience
+
+* Protects users from accidentally removing metadata
+
+* Optimizes columns fetched during SELECT queries
+
+* Brings full testing and continuous integration to the project
+
 ### pg_shard v1.0.2 (February 24, 2015) ###
 
 * Adds META.json file for PGXN

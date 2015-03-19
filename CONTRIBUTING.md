@@ -16,7 +16,7 @@ instead.
 Before opening a bug report:
 
   1. Search for a duplicate issue using GitHub's issue search
-  2. Check whethe the bug remains in the lasest `master` or `develop` commit
+  2. Check whether the bug remains in the latest `master` or `develop` commit
   3. Create a reduced test case: remove code and data not relevant to the bug
 
 A contributor should be able to begin work on your bug without asking too many
