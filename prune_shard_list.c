@@ -318,12 +318,15 @@ LookupOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber)
 Oid
 GetOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber)
 {
-	/* Get default operator class from pg_opclass */
+	/* get default operator class from pg_opclass */
 	Oid operatorClassId = GetDefaultOpClass(typeId, accessMethodId);
 
 	Oid operatorFamily = get_opclass_family(operatorClassId);
+	Oid operatorClassInputType = get_opclass_input_type(operatorClassId);
 
-	Oid operatorId = get_opfamily_member(operatorFamily, typeId, typeId, strategyNumber);
+	/* lookup for the operator with the desired input type in the family */
+	Oid operatorId = get_opfamily_member(operatorFamily, operatorClassInputType,
+										 operatorClassInputType, strategyNumber);
 
 	return operatorId;
 }
