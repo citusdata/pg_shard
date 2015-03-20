@@ -268,8 +268,8 @@ ROLLBACK;
 SET pg_shard.log_distributed_statements = on;
 SET client_min_messages = log;
 SELECT count(*) FROM articles WHERE word_count > 10000;
-LOG:  distributed statement: SELECT NULL::unknown FROM ONLY articles_102045 WHERE (word_count > 10000)
-LOG:  distributed statement: SELECT NULL::unknown FROM ONLY articles_102046 WHERE (word_count > 10000)
+LOG:  distributed statement: SELECT NULL::unknown FROM ONLY articles_102077 WHERE (word_count > 10000)
+LOG:  distributed statement: SELECT NULL::unknown FROM ONLY articles_102078 WHERE (word_count > 10000)
  count 
 -------
     23

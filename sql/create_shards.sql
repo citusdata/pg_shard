@@ -154,7 +154,9 @@ DELETE FROM pgs_distribution_metadata.shard
 DELETE FROM pgs_distribution_metadata.partition
 	WHERE relation_id = 'foreign_table_to_distribute'::regclass;	
 
--- test for distributing enum types
+\set VERBOSITY terse
+
+-- test for partioning enum types
   CREATE TYPE bug_status AS ENUM ('new', 'open', 'closed');
 
 CREATE TABLE bugs (
@@ -164,4 +166,17 @@ CREATE TABLE bugs (
 
 SELECT master_create_distributed_table('bugs', 'status');
 
-SELECT master_create_worker_shards('bugs', 2, 2);
+SELECT master_create_worker_shards('bugs', 16, 1);
+
+-- test for varchar partioning 
+CREATE TABLE varchar_partitioned_table    
+(
+    c1 varchar,
+    row int
+);
+
+SELECT master_create_distributed_table('varchar_partitioned_table', 'c1');
+
+SELECT master_create_worker_shards('varchar_partitioned_table', 16, 1);
+
+\set VERBOSITY default
