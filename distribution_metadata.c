@@ -33,6 +33,7 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
 #include "commands/sequence.h"
+#include "executor/spi.h"
 #include "nodes/makefuncs.h"
 #include "nodes/memnodes.h" /* IWYU pragma: keep */
 #include "nodes/pg_list.h"
@@ -62,7 +63,6 @@ static void LoadShardIntervalRow(int64 shardId, Oid *relationId,
 								 char **minValue, char **maxValue);
 static ShardPlacement * TupleToShardPlacement(HeapTuple heapTuple,
 											  TupleDesc tupleDescriptor);
-static void DeletePartitionRow(Oid relationId);
 
 
 /*
@@ -735,78 +735,51 @@ InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
 	heap_close(shardPlacementRelation, RowExclusiveLock);
 }
 
-#include "catalog/dependency.h"
 
 /*
  * DeleteDistributedTableMetadata deletes all the information in the metadata tables
- * which are dependent to the distributed table with given distributedTableId. The
- * metadata tables that are searched include partition, shard and shard_placement.
+ * which are dependent to the distributed table with given distributedTableId. We delete
+ * the corresponding row in partition table, which cascades to shard and shard placement
+ * tables and removes all dependent rows.
  */
 void
 DeleteDistributedTableMetadata(Oid distributedTableId)
 {
-	ObjectAddress object;
-	//Relation distributedTable = RelationIdGetRelation(distributedTableId);
+	long numberOfRows = 1;
+	StringInfo deletePartitionRowQuery = makeStringInfo();
+	int spiConnected = 0;
+	int spiQueryResult = 0;
+	int spiFinished = 0;
+	bool readOnly = false;
 
+	spiConnected = SPI_connect();
+	if (spiConnected == SPI_ERROR_CONNECT)
+	{
+		 ereport(INFO, (errmsg("metadata for the distributed table could not be"
+				 	 	 	   " deleted"),
+				 	 	errdetail("Attempt to connect SPI manager was not "
+				 	 			  "successful.")));
+	}
 
-	object.classId = RelationRelationId;
-	object.objectId = 19857;// RelationGetRelid(distributedTable);
-	//object.objectSubId = RelationGetRelid(distributedTable);
+	appendStringInfo(deletePartitionRowQuery, "DELETE FROM %s.%s where relation_id = %u",
+											   METADATA_SCHEMA_NAME,
+											   PARTITION_TABLE_NAME,
+											   distributedTableId);
 
+	spiQueryResult = SPI_execute(deletePartitionRowQuery->data, readOnly, numberOfRows);
+	if (spiQueryResult != SPI_OK_DELETE)
+	{
+		 ereport(INFO, (errmsg("metadata for the distributed table could not be"
+				 	 	 	   " deleted")));
+	}
 
+	spiFinished = SPI_finish();
+	if (spiFinished != SPI_OK_FINISH)
+	{
+		ereport(ERROR, (errmsg("could not disconnect from SPI manager")));
+	}
 
-	ObjectAddress object2;
-
-
-	object2.classId = 19969;
-	object2.objectId =distributedTableId ;// RelationGetRelid(distributedTable);
-	object2.objectSubId = 0;
-
-
-
-	//recordDependencyOn(object, object2 , DEPENDENCY_NORMAL);
-
-
-
-	performDeletion(&object2, DROP_CASCADE, PERFORM_DELETION_CONCURRENTLY);
-	//deleteWhatDependsOn(&object2, 0);
-}
-
-
-/*
- * DeleteShardRow removes the row corresponding to the provided shard
- * identifier, erroring out if it cannot find such a row.
- */
-void
-DeletePartitionRow(Oid relationId)
-{
-   RangeVar *heapRangeVar = NULL;
-   Relation heapRelation = NULL;
-   HeapScanDesc scanDesc = NULL;
-   HeapTuple heapTuple = NULL;
-   const int scanKeyCount = 1;
-   ScanKeyData scanKey[scanKeyCount];
-
-   heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);
-   heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
-
-   ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ,
-               Int64GetDatum(relationId));
-
-   scanDesc = heap_beginscan(heapRelation, SnapshotSelf, scanKeyCount, scanKey);
-
-   heapTuple = heap_getnext(scanDesc, ForwardScanDirection);
-   if (HeapTupleIsValid(heapTuple))
-   {
-       simple_heap_delete(heapRelation, &heapTuple->t_self);
-   }
-   else
-   {
-       ereport(ERROR, (errmsg("could not find entry for relation  %d", relationId)));
-   }
-
-   heap_endscan(scanDesc);
-   relation_close(heapRelation, AccessShareLock);
+	pfree(deletePartitionRowQuery->data);
 }
 
 
