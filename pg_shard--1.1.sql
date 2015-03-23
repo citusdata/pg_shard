@@ -6,21 +6,17 @@
 -- the pgs_distribution_metadata schema stores data distribution information
 CREATE SCHEMA pgs_distribution_metadata
 
-
-
-   
-
 	-- partition lists a partition key for each distributed table
 	CREATE TABLE partition (
-		relation_id oid unique not null , 
+		relation_id oid unique not null,
 		partition_method "char" not null,
 		key text not null
 	)
-	
+
 	-- shard keeps track of hash value ranges for each shard
 	CREATE TABLE shard (
 		id bigint primary key,
-		relation_id oid not null references partition(relation_id) ON DELETE CASCADE,
+		relation_id oid not null REFERENCES partition(relation_id) ON DELETE CASCADE,
 		storage "char" not null,
 		min_value text not null,
 		max_value text not null
@@ -29,14 +25,12 @@ CREATE SCHEMA pgs_distribution_metadata
 	-- shard_placement records which nodes contain which shards
 	CREATE TABLE shard_placement (
 		id bigint primary key,
-		shard_id bigint not null references shard(id) ON DELETE CASCADE,
+		shard_id bigint not null REFERENCES shard(id) ON DELETE CASCADE,
 		shard_state integer not null,
 		node_name text not null,
 		node_port integer not null
 	)
 
-
-  	
 	-- make a few more indexes for fast access
 	CREATE INDEX shard_relation_index ON shard (relation_id)
 	CREATE INDEX shard_placement_node_name_node_port_index
@@ -260,28 +254,3 @@ $create_insert_proxy_for_table$ LANGUAGE plpgsql SET search_path = 'pg_catalog';
 
 COMMENT ON FUNCTION create_insert_proxy_for_table(regclass, regclass)
 		IS 'create a proxy table that redirects INSERTed rows to a target table';
-
-
-
-
-
--- CREATE OR REPLACE FUNCTION pgs_distribution_metadata.remove_partition()
---  RETURNS trigger AS '
---BEGIN
---				DELETE FROM  pgs_distribution_metadata.shard_placement where shard_id IN (SELECT id FROM  pgs_distribution_metadata.shard WHERE relation_id = OLD.relation_id);
---				DELETE FROM  pgs_distribution_metadata.shard where relation_id = OLD.relation_id;
---				RETURN NULL;
---END; ' language plpgsql;
-
-
-
-
---CREATE TRIGGER remove_metadata_on_table_delete
---BEFORE DELETE
---ON pgs_distribution_metadata.partition
---FOR EACH ROW
---EXECUTE PROCEDURE remove_partition();
-
-
-
-

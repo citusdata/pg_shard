@@ -752,14 +752,14 @@ InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
 /*
  * DeleteDistributedTableMetadata deletes all the information in the metadata tables
  * which are dependent to the distributed table with given distributedTableId. We delete
- * the corresponding row in partition table, which cascades to shard and shard placement
- * tables and removes all dependent rows.
+ * the corresponding row in partition table. It cascades to shard and shard placement
+ * tables and removes all dependent rows via referential integrity on metadata schema.
  */
 void
 DeleteDistributedTableMetadata(Oid distributedTableId)
 {
-	long numberOfRows = 1;
-	StringInfo deletePartitionRowQuery = makeStringInfo();
+	StringInfo deletePartitionRow = makeStringInfo();
+	long numberOfRowsAffected = 1;
 	int spiConnected = 0;
 	int spiQueryResult = 0;
 	int spiFinished = 0;
@@ -769,21 +769,22 @@ DeleteDistributedTableMetadata(Oid distributedTableId)
 	if (spiConnected == SPI_ERROR_CONNECT)
 	{
 		 ereport(INFO, (errmsg("metadata for the distributed table could not be"
-				 	 	 	   " deleted"),
-				 	 	errdetail("Attempt to connect SPI manager was not "
-				 	 			  "successful.")));
+		                       " deleted"),
+	                    errdetail("Attempt to connect SPI manager was not "
+	                              "successful.")));
 	}
 
-	appendStringInfo(deletePartitionRowQuery, "DELETE FROM %s.%s where relation_id = %u",
-											   METADATA_SCHEMA_NAME,
-											   PARTITION_TABLE_NAME,
-											   distributedTableId);
+	appendStringInfo(deletePartitionRow, "DELETE FROM %s.%s where relation_id = %u",
+										  METADATA_SCHEMA_NAME,
+										  PARTITION_TABLE_NAME,
+										  distributedTableId);
 
-	spiQueryResult = SPI_execute(deletePartitionRowQuery->data, readOnly, numberOfRows);
+	spiQueryResult = SPI_execute(deletePartitionRow->data, readOnly,
+								 numberOfRowsAffected);
 	if (spiQueryResult != SPI_OK_DELETE)
 	{
 		 ereport(INFO, (errmsg("metadata for the distributed table could not be"
-				 	 	 	   " deleted")));
+                               " deleted")));
 	}
 
 	spiFinished = SPI_finish();
@@ -792,7 +793,8 @@ DeleteDistributedTableMetadata(Oid distributedTableId)
 		ereport(ERROR, (errmsg("could not disconnect from SPI manager")));
 	}
 
-	pfree(deletePartitionRowQuery->data);
+	pfree(deletePartitionRow->data);
+	pfree(deletePartitionRow);
 }
 
 
