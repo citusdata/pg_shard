@@ -5,7 +5,7 @@
  * This file contains functions to repair unhealthy shard placements using data
  * from healthy ones.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */
@@ -13,7 +13,6 @@
 #include "postgres.h"
 #include "c.h"
 #include "fmgr.h"
-#include "libpq-fe.h"
 #include "miscadmin.h"
 #include "postgres_ext.h"
 
@@ -96,13 +95,22 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 	LockShard(shardId, ExclusiveLock);
 
 	shardPlacementList = LoadShardPlacementList(shardId);
+
 	sourcePlacement = SearchShardPlacementInList(shardPlacementList, sourceNodeName,
 												 sourceNodePort);
+	if (sourcePlacement->shardState != STATE_FINALIZED)
+	{
+		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						errmsg("source placement must be in finalized state")));
+	}
+
 	targetPlacement = SearchShardPlacementInList(shardPlacementList, targetNodeName,
 												 targetNodePort);
-
-	Assert(sourcePlacement->shardState == STATE_FINALIZED);
-	Assert(targetPlacement->shardState == STATE_INACTIVE);
+	if (targetPlacement->shardState != STATE_INACTIVE)
+	{
+		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						errmsg("target placement must be in inactive state")));
+	}
 
 	/* retrieve the DDL commands for the table and run them */
 	ddlCommandList = RecreateTableDDLCommandList(distributedTableId, shardId);
@@ -220,8 +228,9 @@ SearchShardPlacementInList(List *shardPlacementList, text *nodeNameText, int32 n
 
 	if (matchingPlacement == NULL)
 	{
-		ereport(ERROR, (errmsg("could not find placement matching %s:%d", nodeName,
-							   nodePort),
+		ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+						errmsg("could not find placement matching \"%s:%d\"",
+							   nodeName, nodePort),
 						errhint("Confirm the placement still exists and try again.")));
 	}
 
@@ -301,7 +310,7 @@ CopyDataFromFinalizedPlacement(Oid distributedTableId, int64 shardId,
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						errmsg("cannot repair shard"),
 						errdetail("Repairing shards backed by foreign tables is "
-								  "currently unsupported.")));
+								  "not supported.")));
 	}
 
 	AppendShardIdToName(&relationName, shardId);

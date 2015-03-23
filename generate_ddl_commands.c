@@ -5,7 +5,7 @@
  * This file contains functions to retrieve ddl commands for a table. Functions
  * contained here are borrowed from CitusDB.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */
@@ -356,7 +356,7 @@ generate_relation_name(Oid relationId)
 	tp = SearchSysCache1(RELOID, ObjectIdGetDatum(relationId));
 	if (!HeapTupleIsValid(tp))
 	{
-		elog(ERROR, "cache lookup failed for relation %u", relationId);
+		ereport(ERROR, (errmsg("cache lookup failed for relation %u", relationId)));
 	}
 
 	reltup = (Form_pg_class) GETSTRUCT(tp);

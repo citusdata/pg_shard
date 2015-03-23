@@ -5,7 +5,7 @@
  * This file contains functions to exercise distributed table metadata
  * functionality within pg_shard.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */

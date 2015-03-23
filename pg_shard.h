@@ -4,7 +4,7 @@
  *
  * Declarations for public functions and types needed by the pg_shard extension.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */

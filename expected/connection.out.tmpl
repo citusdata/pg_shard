@@ -29,7 +29,7 @@ WARNING:  Connection failed to dummy-host-name:$PGPORT
 \set VERBOSITY default
 -- try to use hostname over 255 characters
 SELECT initialize_remote_temp_table(repeat('a', 256)::cstring, $PGPORT);
-ERROR:  hostnames may not exceed 255 characters
+ERROR:  hostname exceeds the maximum length of 255
 -- connect to localhost and build a temp table
 SELECT initialize_remote_temp_table('localhost', $PGPORT);
  initialize_remote_temp_table 

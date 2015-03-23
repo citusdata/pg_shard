@@ -5,7 +5,7 @@
  * This file contains functions to access and manage the distributed table
  * metadata.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */
@@ -303,7 +303,8 @@ LoadShardPlacementList(int64 shardId)
 	/* if no shard placements are found, error out */
 	if (shardPlacementList == NIL)
 	{
-		ereport(ERROR, (errmsg("could not find any placements for shardId "
+		ereport(ERROR, (errcode(ERRCODE_NO_DATA),
+						errmsg("no placements exist for shard with ID "
 							   INT64_FORMAT, shardId)));
 	}
 
@@ -349,8 +350,11 @@ PartitionColumn(Oid distributedTableId)
 	}
 	else
 	{
-		ereport(ERROR, (errmsg("could not find partition for distributed "
-							   "relation %u", distributedTableId)));
+		char *relationName = get_rel_name(distributedTableId);
+
+		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+						errmsg("no partition column is defined for relation \"%s\"",
+							   relationName)));
 	}
 
 	heap_endscan(scanDesc);
@@ -396,8 +400,11 @@ PartitionType(Oid distributedTableId)
 	}
 	else
 	{
-		ereport(ERROR, (errmsg("could not find partition for distributed "
-							   "relation %u", distributedTableId)));
+		char *relationName = get_rel_name(distributedTableId);
+
+		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+						errmsg("no partition column is defined for relation \"%s\"",
+							   relationName)));
 	}
 
 	heap_endscan(scanDesc);
@@ -493,14 +500,19 @@ ColumnNameToColumn(Oid relationId, char *columnName)
 	AttrNumber columnId = get_attnum(relationId, columnName);
 	if (columnId == InvalidAttrNumber)
 	{
+		char *relationName = get_rel_name(relationId);
+
 		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_COLUMN),
-						errmsg("partition column \"%s\" not found", columnName)));
+						errmsg("column \"%s\" of relation \"%s\" does not exist",
+							   columnName, relationName)));
 	}
 	else if (!AttrNumberIsForUserDefinedAttr(columnId))
 	{
+		char *relationName = get_rel_name(relationId);
+
 		ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
-						errmsg("specified partition column \"%s\" is a system "
-							   "column", columnName)));
+						errmsg("column \"%s\" of relation \"%s\" is a system column",
+							   columnName, relationName)));
 	}
 
 	get_atttypetypmodcoll(relationId, columnId, &columnTypeOid, &columnTypeMod,
@@ -561,7 +573,8 @@ LoadShardIntervalRow(int64 shardId, Oid *relationId, char **minValue,
 	}
 	else
 	{
-		ereport(ERROR, (errmsg("could not find entry for shard " INT64_FORMAT,
+		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+						errmsg("shard with ID " INT64_FORMAT " does not exist",
 							   shardId)));
 	}
 
@@ -820,7 +833,8 @@ DeleteShardPlacementRow(uint64 shardPlacementId)
 	}
 	else
 	{
-		ereport(ERROR, (errmsg("could not find entry for shard placement " INT64_FORMAT,
+		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+						errmsg("shard placement with ID " INT64_FORMAT " does not exist",
 							   shardPlacementId)));
 	}
 
@@ -878,6 +892,7 @@ LockShard(int64 shardId, LOCKMODE lockMode)
 	}
 	else
 	{
-		ereport(ERROR, (errmsg("attempted to lock shard using unsupported mode")));
+		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						errmsg("lockMode must be one of: ExclusiveLock, ShareLock")));
 	}
 }

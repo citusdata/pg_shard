@@ -5,7 +5,7 @@
  * This file contains functions to sync pg_shard metadata to the CitusDB
  * metadata tables.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */
@@ -48,7 +48,7 @@ partition_column_to_node_string(PG_FUNCTION_ARGS)
 	if (PG_ARGISNULL(0))
 	{
 		ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-						errmsg("table_oid cannot be null")));
+						errmsg("table_oid must not be null")));
 	}
 
 	distributedTableId = PG_GETARG_OID(0);

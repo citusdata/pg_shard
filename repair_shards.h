@@ -5,7 +5,7 @@
  * Declarations for public functions and types to implement shard repair
  * functionality.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */

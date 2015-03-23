@@ -5,7 +5,7 @@
  * This file contains functions to distribute a table by creating shards for it
  * across a set of worker nodes.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */
@@ -83,7 +83,7 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 	if (relationKind != RELKIND_RELATION && relationKind != RELKIND_FOREIGN_TABLE)
 	{
 		ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-						errmsg("cannot distribute relation: \"%s\"", tableName),
+						errmsg("cannot distribute relation: %s", tableName),
 						errdetail("Distributed relations must be regular or "
 								  "foreign tables.")));
 	}
@@ -101,6 +101,7 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 			ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION),
 							errmsg("could not identify a hash function for type %s",
 								   format_type_be(partitionColumn->vartype)),
+							errdatatype(partitionColumn->vartype),
 							errdetail("Partition column types must have a hash function "
 									  "defined to use hash partitioning.")));
 		}
@@ -126,6 +127,7 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 					(errcode(ERRCODE_UNDEFINED_FUNCTION),
 					 errmsg("could not identify a comparison function for type %s",
 							format_type_be(partitionColumn->vartype)),
+					 errdatatype(partitionColumn->vartype),
 					 errdetail("Partition column types must have a comparison function "
 							   "defined to use range partitioning.")));
 		}
@@ -156,6 +158,7 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 
 	Oid distributedTableId = ResolveRelationId(tableNameText);
 	char relationKind = get_rel_relkind(distributedTableId);
+	char *tableName = text_to_cstring(tableNameText);
 	char shardStorageType = '\0';
 	int32 shardIndex = 0;
 	List *workerNodeList = NIL;
@@ -172,24 +175,23 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 	existingShardList = LoadShardIntervalList(distributedTableId);
 	if (existingShardList != NIL)
 	{
-		ereport(ERROR, (errmsg("cannot create new shards for table"),
-						errdetail("Shards have already been created")));
+		ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+						errmsg("table \"%s\" has already had shards created for it",
+							   tableName)));
 	}
 
 	/* make sure that at least one shard is specified */
 	if (shardCount <= 0)
 	{
-		ereport(ERROR, (errmsg("cannot create shards for the table"),
-						errdetail("The shardCount argument is invalid"),
-						errhint("Specify a positive value for shardCount")));
+		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						errmsg("shardCount must be positive")));
 	}
 
 	/* make sure that at least one replica is specified */
 	if (replicationFactor <= 0)
 	{
-		ereport(ERROR, (errmsg("cannot create shards for the table"),
-						errdetail("The replicationFactor argument is invalid"),
-						errhint("Specify a positive value for replicationFactor")));
+		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						errmsg("replicationFactor must be positive")));
 	}
 
 	/* calculate the split of the hash space */
@@ -208,9 +210,11 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 	workerNodeCount = list_length(workerNodeList);
 	if (replicationFactor > workerNodeCount)
 	{
-		ereport(ERROR, (errmsg("cannot create new shards for table"),
-						(errdetail("Replication factor: %u exceeds worker node count: %u",
-								   replicationFactor, workerNodeCount))));
+		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						errmsg("replicationFactor (%d) exceeds number of worker nodes "
+							   "(%d)", replicationFactor, workerNodeCount),
+						errhint("Add more worker nodes or try again with a lower "
+								"replication factor.")));
 	}
 
 	/* if we have enough nodes, add an extra placement attempt for backup */
@@ -289,8 +293,10 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 		/* check if we created enough shard replicas */
 		if (placementCount < replicationFactor)
 		{
-			ereport(ERROR, (errmsg("could only create %u of %u of required shard "
-								   "replicas", placementCount, replicationFactor)));
+			ereport(ERROR, (errmsg("could not satisfy specified replication factor"),
+							errdetail("Created %d shard replicas, less than the "
+									  "requested replication factor of %d.",
+									  placementCount, replicationFactor)));
 		}
 
 		/* insert the shard metadata row along with its min/max values */
@@ -341,7 +347,8 @@ CheckHashPartitionedTable(Oid distributedTableId)
 	char partitionType = PartitionType(distributedTableId);
 	if (partitionType != HASH_PARTITION_TYPE)
 	{
-		ereport(ERROR, (errmsg("unsupported table partition type: %c", partitionType)));
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("unsupported table partition type: %c", partitionType)));
 	}
 }
 
@@ -364,8 +371,9 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 	workerFileStream = AllocateFile(workerFilePath, PG_BINARY_R);
 	if (workerFileStream == NULL)
 	{
-		ereport(ERROR, (errcode(ERRCODE_CONFIG_FILE_ERROR),
-						errmsg("could not open worker file: %s", workerFilePath)));
+		ereport(ERROR, (errcode_for_file_access(),
+						errmsg("could not open worker list file \"%s\": %m",
+							   workerFilePath)));
 	}
 
 	/* build pattern to contain node name length limit */
@@ -384,7 +392,8 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 		if (strnlen(workerNodeLine, MAXPGPATH) == MAXPGPATH - 1)
 		{
 			ereport(ERROR, (errcode(ERRCODE_CONFIG_FILE_ERROR),
-							errmsg("worker node list file line too long")));
+							errmsg("worker node list file line exceeds the maximum "
+								   "length of %d", MAXPGPATH)));
 		}
 
 		/* skip leading whitespace and check for # comment */
@@ -405,8 +414,12 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 		parsedValues = sscanf(workerNodeLine, workerLinePattern, nodeName, &nodePort);
 		if (parsedValues != 2)
 		{
-			ereport(ERROR, (errmsg("unable to parse worker node line: %s",
-								   workerNodeLine)));
+			ereport(ERROR, (errcode(ERRCODE_CONFIG_FILE_ERROR),
+							errmsg("could not parse worker node line: %s",
+								   workerNodeLine),
+							errhint("Lines in the worker node file consist of a node "
+									"name and port separated by whitespace. Lines that "
+									"start with a '#' character are skipped.")));
 		}
 
 		/* allocate worker node structure and set fields */
@@ -595,6 +608,7 @@ SupportFunctionForColumn(Var *partitionColumn, Oid accessMethodId,
 		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
 						errmsg("data type %s has no default operator class for specified"
 							   " partition method", format_type_be(columnOid)),
+						errdatatype(columnOid),
 						errdetail("Partition column types must have a default operator"
 								  " class defined.")));
 	}

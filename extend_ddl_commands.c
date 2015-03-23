@@ -5,7 +5,7 @@
  * This file contains functions to extend ddl commands for a table with a shard
  * ID. Functions contained here are borrowed from CitusDB.
  *
- * Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014-2015, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */
@@ -346,8 +346,7 @@ DeparseDDLCommand(Node *ddlCommandNode, Oid masterRelationId)
 
 		default:
 		{
-			ereport(ERROR, (errmsg("unsupported node type during deparse: %d",
-								   nodeType)));
+			ereport(ERROR, (errmsg("unsupported node type: %d", (int) nodeType)));
 			break;
 		}
 	}
@@ -443,8 +442,10 @@ DeparseAlterTableStmt(AlterTableStmt *alterTableStmt)
 
 			default:
 			{
-				ereport(ERROR, (errmsg("unsupported alter table type: %d",
-									   alterTableType)));
+				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("cannot deparse ALTER TABLE command"),
+								errdetail("Only the ADD CONSTRAINT, CLUSTER ON, and SET "
+										  "STORAGE/STATISTICS forms are supported.")));
 			}
 		}
 	}
@@ -491,7 +492,10 @@ DeparseIndexConstraint(Constraint *constraint)
 	}
 	else
 	{
-		ereport(ERROR, (errmsg("unsupported constraint type: %d", constraintType)));
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("cannot deparse ADD CONSTRAINT command"),
+						errdetail("Only the PRIMARY KEY and UNIQUE forms are "
+								  "supported.")));
 	}
 
 	/* add the column names */
@@ -632,8 +636,9 @@ DeparseCreateStmt(CreateStmt *createStmt, Oid masterRelationId)
 
 		if (constraint->contype != CONSTR_CHECK)
 		{
-			ereport(ERROR, (errmsg("unsupported column constraint type: %d",
-								   constraint->contype)));
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("cannot deparse table CONSTRAINT clause"),
+							errdetail("Only the CHECK form is supported.")));
 		}
 
 		if (firstConstraintPrinted)
@@ -880,7 +885,7 @@ DeparseIndexStmt(IndexStmt *indexStmt, Oid masterRelationId)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						errmsg("cannot deparse index: %s", indexStmt->idxname),
-						errdetail("Partial indexes are currently unsupported")));
+						errdetail("Deparsing partial indexes is not yet implemented.")));
 	}
 
 	return deparsedIndexStmt->data;
