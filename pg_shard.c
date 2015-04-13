@@ -541,7 +541,7 @@ ErrorIfQueryNotSupported(Query *queryTree)
 		}
 
 		whereClause = ((queryTree->jointree == NULL) ?
-						NULL : queryTree->jointree->quals);
+					   NULL : queryTree->jointree->quals);
 		if (contain_mutable_functions(whereClause) ||
 			contain_volatile_functions(whereClause))
 		{
