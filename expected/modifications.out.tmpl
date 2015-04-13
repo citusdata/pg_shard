@@ -77,6 +77,9 @@ ERROR:  cannot plan sharded modification containing values which are not constan
 -- commands with expressions that cannot be collapsed are unsupported
 INSERT INTO limit_orders VALUES (2036, 'GOOG', 5634, now(), 'buy', random());
 ERROR:  cannot plan sharded modification containing values which are not constants or constant expressions
+-- commands with mutable or volitale functions 
+DELETE FROM limit_orders WHERE id = 246 AND bidder_id = (random() * 1000);
+ERROR:  cannot plan sharded modification containing values which are not constants or constant expressions
 -- commands with multiple rows are unsupported
 INSERT INTO limit_orders VALUES (DEFAULT), (DEFAULT);
 ERROR:  cannot perform distributed planning for the given query
