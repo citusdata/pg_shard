@@ -89,6 +89,16 @@ RETURNS text
 AS 'MODULE_PATHNAME'
 LANGUAGE C;
 
+CREATE FUNCTION column_name_to_column(table_oid oid, column_name text)
+RETURNS text
+AS 'MODULE_PATHNAME'
+LANGUAGE C STABLE STRICT;
+
+CREATE FUNCTION column_to_column_name(table_oid oid, column_var text)
+RETURNS text
+AS 'MODULE_PATHNAME'
+LANGUAGE C STABLE STRICT;
+
 COMMENT ON FUNCTION partition_column_to_node_string(oid)
 		IS 'return textual form of distributed table''s partition column';
 
