@@ -521,19 +521,33 @@ TupleToShardInterval(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 	Oid relationId = DatumGetObjectId(relationIdDatum);
 
 	char partitionType = DatumGetChar(partitionTypeDatum);
-	if (partitionType == HASH_PARTITION_TYPE)
+	switch (partitionType)
 	{
-		intervalTypeId = INT4OID;
-	}
-	else
-	{
-		Datum keyDatum = SPI_getbinval(heapTuple, tupleDescriptor,
-									   TLIST_NUM_SHARD_KEY, &isNull);
-		char *partitionColumnName = TextDatumGetCString(keyDatum);
+		case APPEND_PARTITION_TYPE:
+		case RANGE_PARTITION_TYPE:
+		{
+			Datum keyDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+										   TLIST_NUM_SHARD_KEY, &isNull);
+			char *partitionColumnName = TextDatumGetCString(keyDatum);
 
-		Var *partitionColumn = ColumnNameToColumn(relationId, partitionColumnName);
-		intervalTypeId = partitionColumn->vartype;
-		intervalTypeMod = partitionColumn->vartypmod;
+			Var *partitionColumn = ColumnNameToColumn(relationId, partitionColumnName);
+			intervalTypeId = partitionColumn->vartype;
+			intervalTypeMod = partitionColumn->vartypmod;
+			break;
+		}
+
+		case HASH_PARTITION_TYPE:
+		{
+			intervalTypeId = INT4OID;
+			break;
+		}
+
+		default:
+		{
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("unsupported table partition type: %c",
+								   partitionType)));
+		}
 	}
 
 	getTypeInputInfo(intervalTypeId, &inputFunctionId, &typeIoParam);

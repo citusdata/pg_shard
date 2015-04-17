@@ -51,6 +51,7 @@
 #define TLIST_NUM_SHARD_PLACEMENT_NODE_PORT 5
 
 /* denotes partition type of the distributed table */
+#define APPEND_PARTITION_TYPE 'a'
 #define HASH_PARTITION_TYPE 'h'
 #define RANGE_PARTITION_TYPE 'r'
 
