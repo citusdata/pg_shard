@@ -3,57 +3,173 @@
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION pg_shard" to load this file. \quit
 
--- the pgs_distribution_metadata schema stores data distribution information
-CREATE SCHEMA pgs_distribution_metadata
+-- needed in our views
+CREATE FUNCTION column_to_column_name(table_oid oid, column_var text)
+RETURNS text
+AS 'MODULE_PATHNAME'
+LANGUAGE C STABLE STRICT;
 
-	-- shard keeps track of hash value ranges for each shard
-	CREATE TABLE shard (
-		id bigint primary key default nextval('shard_id_sequence'),
-		relation_id oid not null,
-		storage "char" not null,
-		min_value text not null,
-		max_value text not null
-	)
+DO $$
+DECLARE
+	replication_factor integer;
+	use_citus_metadata boolean := false;
+BEGIN
+	BEGIN
+		replication_factor = current_setting('shard_replication_factor')::integer;
+		use_citus_metadata = (replication_factor IS NOT NULL);
+	EXCEPTION
+		WHEN undefined_object THEN
+			use_citus_metadata = false;
+	END;
 
-	-- shard_placement records which nodes contain which shards
-	CREATE TABLE shard_placement (
-		id bigint primary key default nextval('shard_placement_id_sequence'),
-		shard_id bigint not null references shard(id),
-		shard_state integer not null,
-		node_name text not null,
-		node_port integer not null
-	)
+	IF use_citus_metadata THEN
+		CREATE FUNCTION adapt_and_insert_shard() RETURNS TRIGGER AS $aais$
+		BEGIN
+			IF NEW.id IS NULL THEN
+				NEW.id = nextval('pg_dist_shardid_seq');
+			END IF;
 
-	-- partition lists a partition key for each distributed table
-	CREATE TABLE partition (
-		relation_id oid unique not null,
-		partition_method "char" not null,
-		key text not null
-	)
+			INSERT INTO pg_dist_shard
+						(logicalrelid,
+						 shardid,
+						 shardstorage,
+						 shardalias,
+						 shardminvalue,
+						 shardmaxvalue)
+			VALUES      (NEW.relation_id,
+						 NEW.id,
+						 NEW.storage,
+						 NULL,
+						 NEW.min_value,
+						 NEW.max_value);
 
-	-- make a few more indexes for fast access
-	CREATE INDEX shard_relation_index ON shard (relation_id)
-	CREATE INDEX shard_placement_node_name_node_port_index
-		ON shard_placement (node_name, node_port)
-	CREATE INDEX shard_placement_shard_index ON shard_placement (shard_id)
+			RETURN NEW;
+		END
+		$aais$ LANGUAGE plpgsql;
 
-	-- make sequences for shards and placements
-	CREATE SEQUENCE shard_id_sequence MINVALUE 10000 NO CYCLE
-	CREATE SEQUENCE shard_placement_id_sequence NO CYCLE;
+		CREATE FUNCTION adapt_and_insert_shard_placement() RETURNS trigger AS $aaisp$
+		BEGIN
+			INSERT INTO pg_dist_shard_placement
+						(shardid,
+						 shardstate,
+						 shardlength,
+						 nodename,
+						 nodeport)
+			VALUES      (NEW.shard_id,
+						 NEW.shard_state,
+						 0,
+						 NEW.node_name,
+						 NEW.node_port)
+			RETURNING oid INTO STRICT NEW.id;
 
--- associate sequences with their columns
-ALTER SEQUENCE pgs_distribution_metadata.shard_id_sequence
-	OWNED BY pgs_distribution_metadata.shard.id;
-ALTER SEQUENCE pgs_distribution_metadata.shard_placement_id_sequence
-	OWNED BY pgs_distribution_metadata.shard_placement.id;
+			RETURN NEW;
+		END
+		$aaisp$ LANGUAGE plpgsql;
 
--- mark each of the above as config tables to have pg_dump preserve them
-SELECT pg_catalog.pg_extension_config_dump(
-	'pgs_distribution_metadata.shard', '');
-SELECT pg_catalog.pg_extension_config_dump(
-	'pgs_distribution_metadata.shard_placement', '');
-SELECT pg_catalog.pg_extension_config_dump(
-	'pgs_distribution_metadata.partition', '');
+		CREATE FUNCTION adapt_and_insert_partition() RETURNS trigger AS $aaip$
+		BEGIN
+			INSERT INTO pg_dist_partition
+						(logicalrelid,
+						 partmethod,
+						 partkey)
+			VALUES      (NEW.relation_id,
+						 NEW.partition_method,
+						 column_name_to_column(NEW.relation_id, NEW.key));
+
+			RETURN NEW;
+		END
+		$aaip$ LANGUAGE plpgsql;
+
+		-- metadata relations are views under CitusDB
+		CREATE SCHEMA pgs_distribution_metadata
+			CREATE VIEW shard AS
+				SELECT shardid       AS id,
+					   logicalrelid  AS relation_id,
+					   shardstorage  AS storage,
+					   shardminvalue AS min_value,
+					   shardmaxvalue AS max_value
+				FROM   pg_dist_shard
+
+			CREATE TRIGGER shard_insert INSTEAD OF INSERT ON shard
+				FOR EACH ROW
+				EXECUTE PROCEDURE adapt_and_insert_shard()
+
+			CREATE VIEW shard_placement AS
+				SELECT oid::bigint AS id,
+					   shardid     AS shard_id,
+					   shardstate  AS shard_state,
+					   nodename    AS node_name,
+					   nodeport    AS node_port
+				FROM   pg_dist_shard_placement
+
+			CREATE TRIGGER shard_placement_insert INSTEAD OF INSERT ON shard_placement
+				FOR EACH ROW
+				EXECUTE PROCEDURE adapt_and_insert_shard_placement()
+
+			CREATE VIEW partition AS
+				SELECT logicalrelid AS relation_id,
+					   partmethod   AS partition_method,
+					   column_to_column_name(logicalrelid, partkey) AS key
+				FROM   pg_dist_partition
+
+			CREATE TRIGGER partition_insert INSTEAD OF INSERT ON partition
+				FOR EACH ROW
+				EXECUTE PROCEDURE adapt_and_insert_partition();
+
+	ELSE
+		-- the pgs_distribution_metadata schema stores data distribution information
+		CREATE SCHEMA pgs_distribution_metadata
+			-- shard keeps track of hash value ranges for each shard
+			CREATE TABLE shard (
+				id bigint primary key default nextval('shard_id_sequence'),
+				relation_id oid not null,
+				storage "char" not null,
+				min_value text not null,
+				max_value text not null
+			)
+
+			-- shard_placement records which nodes contain which shards
+			CREATE TABLE shard_placement (
+				id bigint primary key default nextval('shard_placement_id_sequence'),
+				shard_id bigint not null references shard(id),
+				shard_state integer not null,
+				node_name text not null,
+				node_port integer not null
+			)
+
+			-- partition lists a partition key for each distributed table
+			CREATE TABLE partition (
+				relation_id oid unique not null,
+				partition_method "char" not null,
+				key text not null
+			)
+
+			-- make a few more indexes for fast access
+			CREATE INDEX shard_relation_index ON shard (relation_id)
+			CREATE INDEX shard_placement_node_name_node_port_index
+				ON shard_placement (node_name, node_port)
+			CREATE INDEX shard_placement_shard_index ON shard_placement (shard_id)
+
+			-- make sequences for shards and placements
+			CREATE SEQUENCE shard_id_sequence MINVALUE 10000 NO CYCLE
+			CREATE SEQUENCE shard_placement_id_sequence NO CYCLE;
+
+			-- associate sequences with their columns
+			ALTER SEQUENCE pgs_distribution_metadata.shard_id_sequence
+				OWNED BY pgs_distribution_metadata.shard.id;
+			ALTER SEQUENCE pgs_distribution_metadata.shard_placement_id_sequence
+				OWNED BY pgs_distribution_metadata.shard_placement.id;
+
+		-- mark each of the above as config tables to have pg_dump preserve them
+		PERFORM pg_catalog.pg_extension_config_dump(
+			'pgs_distribution_metadata.shard', '');
+		PERFORM pg_catalog.pg_extension_config_dump(
+			'pgs_distribution_metadata.shard_placement', '');
+		PERFORM pg_catalog.pg_extension_config_dump(
+			'pgs_distribution_metadata.partition', '');
+	END IF;
+END;
+$$;
 
 -- define the table distribution functions
 CREATE FUNCTION master_create_distributed_table(table_name text, partition_column text,
@@ -90,11 +206,6 @@ AS 'MODULE_PATHNAME'
 LANGUAGE C;
 
 CREATE FUNCTION column_name_to_column(table_oid oid, column_name text)
-RETURNS text
-AS 'MODULE_PATHNAME'
-LANGUAGE C STABLE STRICT;
-
-CREATE FUNCTION column_to_column_name(table_oid oid, column_var text)
 RETURNS text
 AS 'MODULE_PATHNAME'
 LANGUAGE C STABLE STRICT;

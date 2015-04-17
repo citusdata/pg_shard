@@ -46,11 +46,11 @@ CREATE FUNCTION create_healthy_local_shard_placement_row(bigint)
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 CREATE FUNCTION delete_shard_placement_row(bigint)
-	RETURNS void
+	RETURNS bool
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 CREATE FUNCTION update_shard_placement_row_state(bigint, int)
-	RETURNS void
+	RETURNS bool
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 CREATE FUNCTION acquire_shared_shard_lock(bigint)
@@ -164,18 +164,6 @@ SELECT partition_column_id('events');
                    2
 (1 row)
 
-BEGIN;
-	UPDATE pgs_distribution_metadata.partition
-	SET    key = REPEAT('a', 1024)
-	WHERE  relation_id = 'events' :: regclass;
-	---- should see error that partition column is too long
-	SELECT Partition_column_id('events');
-ERROR:  column name too long
-DETAIL:  Column name must be less than 64 characters.
-ROLLBACK;
--- should see error (catalog is not distributed)
-SELECT partition_column_id('pg_type');
-ERROR:  no partition column is defined for relation "pg_type"
 -- should see hash partition type and fail for non-distributed tables
 SELECT partition_type('events');
  partition_type 
@@ -284,17 +272,18 @@ WHERE id = :new_shard_id;
 -- add a placement and manually inspect row
 SELECT create_healthy_local_shard_placement_row(:new_shard_id) AS new_placement_id
 \gset
-SELECT * FROM pgs_distribution_metadata.shard_placement WHERE id = :new_placement_id;
- id | shard_id | shard_state | node_name | node_port 
-----+----------+-------------+-----------+-----------
-  1 |    10000 |           1 | localhost |      5432
+SELECT shard_state, node_name, node_port FROM pgs_distribution_metadata.shard_placement
+WHERE id = :new_placement_id;
+ shard_state | node_name | node_port 
+-------------+-----------+-----------
+           1 | localhost |      5432
 (1 row)
 
 -- mark it as unhealthy and inspect
 SELECT update_shard_placement_row_state(:new_placement_id, 3);
  update_shard_placement_row_state 
 ----------------------------------
- 
+ t
 (1 row)
 
 SELECT shard_state FROM pgs_distribution_metadata.shard_placement
@@ -308,7 +297,7 @@ WHERE id = :new_placement_id;
 SELECT delete_shard_placement_row(:new_placement_id);
  delete_shard_placement_row 
 ----------------------------
- 
+ t
 (1 row)
 
 SELECT COUNT(*) FROM pgs_distribution_metadata.shard_placement
@@ -320,9 +309,17 @@ WHERE id = :new_placement_id;
 
 -- deleting or updating a non-existent row should fail
 SELECT delete_shard_placement_row(:new_placement_id);
-ERROR:  shard placement with ID 1 does not exist
+ delete_shard_placement_row 
+----------------------------
+ f
+(1 row)
+
 SELECT update_shard_placement_row_state(:new_placement_id, 3);
-ERROR:  shard placement with ID 1 does not exist
+ update_shard_placement_row_state 
+----------------------------------
+ f
+(1 row)
+
 -- now we'll even test our lock methods...
 -- use transaction to bound how long we hold the lock
 BEGIN;

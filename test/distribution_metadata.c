@@ -21,6 +21,7 @@
 #include <stdint.h>
 
 #include "catalog/pg_type.h"
+#include "executor/spi.h"
 #include "lib/stringinfo.h"
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
@@ -307,10 +308,28 @@ Datum
 delete_shard_placement_row(PG_FUNCTION_ARGS)
 {
 	int64 shardPlacementId = PG_GETARG_INT64(0);
+	bool successful = false;
 
-	DeleteShardPlacementRow(shardPlacementId);
+	PG_TRY();
+	{
+		DeleteShardPlacementRow(shardPlacementId);
+		successful = true;
+	}
+	PG_CATCH();
+	{
+		if (geterrcode() == ERRCODE_UNDEFINED_OBJECT)
+		{
+			SPI_finish();
+			FlushErrorState();
+		}
+		else
+		{
+			PG_RE_THROW();
+		}
+	}
+	PG_END_TRY();
 
-	PG_RETURN_VOID();
+	PG_RETURN_BOOL(successful);
 }
 
 
@@ -323,10 +342,28 @@ update_shard_placement_row_state(PG_FUNCTION_ARGS)
 {
 	int64 shardPlacementId = PG_GETARG_INT64(0);
 	ShardState shardState = (ShardState) PG_GETARG_INT32(1);
+	bool successful = false;
 
-	UpdateShardPlacementRowState(shardPlacementId, shardState);
+	PG_TRY();
+	{
+		UpdateShardPlacementRowState(shardPlacementId, shardState);
+		successful = true;
+	}
+	PG_CATCH();
+	{
+		if (geterrcode() == ERRCODE_UNDEFINED_OBJECT)
+		{
+			SPI_finish();
+			FlushErrorState();
+		}
+		else
+		{
+			PG_RE_THROW();
+		}
+	}
+	PG_END_TRY();
 
-	PG_RETURN_VOID();
+	PG_RETURN_BOOL(successful);
 }
 
 

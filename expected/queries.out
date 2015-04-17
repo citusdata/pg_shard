@@ -89,7 +89,7 @@ SELECT COUNT(*) FROM articles WHERE author_id = 1 AND author_id = 2;
      0
 (1 row)
 
--- zero-shard modifications should be no-ops but not fail
+-- zero-shard modifications should be no-ops in pg_shard, fail in CitusDB
 UPDATE articles SET title = '' WHERE author_id = 1 AND author_id = 2;
 DELETE FROM articles WHERE author_id = 1 AND author_id = 2;
 -- single-shard tests
@@ -201,11 +201,6 @@ DETAIL:  Joins are not supported in distributed queries.
 SELECT * FROM  (articles INNER JOIN authors ON articles.id = authors.id);
 ERROR:  cannot perform distributed planning for the given query
 DETAIL:  Joins are not supported in distributed queries.
--- test CitusDB code path (this will error out in normal PostgreSQL)
-SELECT sync_table_metadata_to_citus('articles');
-ERROR:  relation "pg_dist_shard_placement" does not exist
-CONTEXT:  SQL statement "LOCK TABLE pg_dist_shard_placement IN EXCLUSIVE MODE"
-PL/pgSQL function sync_table_metadata_to_citus(text) line 7 at SQL statement
 -- with normal PostgreSQL, expect error about CitusDB being missing
 -- with CitusDB, expect an error about JOINing local table with distributed
 SET pg_shard.use_citusdb_select_logic TO true;
@@ -257,7 +252,8 @@ SELECT author_id, sum(word_count) AS corpus_size FROM articles
 -- cross-shard queries on a foreign table should fail
 -- we'll just point the article shards to a foreign table
 BEGIN;
-	CREATE FOREIGN TABLE foreign_articles (author_id bigint) SERVER fake_fdw_server;
+	CREATE FOREIGN TABLE foreign_articles (id bigint, author_id bigint)
+	SERVER fake_fdw_server;
 	UPDATE pgs_distribution_metadata.partition
 	SET relation_id='foreign_articles'::regclass
 	WHERE relation_id='articles'::regclass;
@@ -272,8 +268,8 @@ ROLLBACK;
 SET pg_shard.log_distributed_statements = on;
 SET client_min_messages = log;
 SELECT count(*) FROM articles WHERE word_count > 10000;
-LOG:  distributed statement: SELECT NULL::unknown FROM ONLY articles_10037 WHERE (word_count > 10000)
-LOG:  distributed statement: SELECT NULL::unknown FROM ONLY articles_10038 WHERE (word_count > 10000)
+LOG:  distributed statement: SELECT NULL::unknown FROM ONLY articles_102045 WHERE (word_count > 10000)
+LOG:  distributed statement: SELECT NULL::unknown FROM ONLY articles_102046 WHERE (word_count > 10000)
  count 
 -------
     23
