@@ -22,8 +22,8 @@ Once you have PostgreSQL or CitusDB installed, you're ready to build `pg_shard`.
     sudo PATH=/usr/local/pgsql/bin/:$PATH make install
 
     # Path when CitusDB package is installed
-    PATH=/opt/citusdb/3.0/bin/:$PATH make
-    sudo PATH=/opt/citusdb/3.0/bin/:$PATH make install
+    PATH=/opt/citusdb/4.0/bin/:$PATH make
+    sudo PATH=/opt/citusdb/4.0/bin/:$PATH make install
 
 `pg_shard` also includes regression tests. To verify your installation, start your PostgreSQL instance with the `shared_preload_libraries` setting mentioned below, and run `make installcheck`.
 
