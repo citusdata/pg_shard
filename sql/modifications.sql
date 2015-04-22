@@ -54,8 +54,11 @@ INSERT INTO limit_orders VALUES (random() * 100, 'ORCL', 152, '2011-08-25 11:50:
 -- commands with expressions that cannot be collapsed are unsupported
 INSERT INTO limit_orders VALUES (2036, 'GOOG', 5634, now(), 'buy', random());
 
--- commands with mutable or volitale functions 
+-- commands with mutable functions in their quals
 DELETE FROM limit_orders WHERE id = 246 AND bidder_id = (random() * 1000);
+
+-- commands with mutable but non-volatilte functions in their quals
+DELETE FROM limit_orders WHERE id = 246 AND placed_at = current_timestamp;
 
 -- commands with multiple rows are unsupported
 INSERT INTO limit_orders VALUES (DEFAULT), (DEFAULT);
