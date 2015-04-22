@@ -395,7 +395,6 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	bool hasNonConstTargetEntryExprs = false;
 	bool hasNonConstQualExprs = false;
 	bool specifiesPartitionValue = false;
-	Node *whereClause = NULL;
 
 	CmdType commandType = queryTree->commandType;
 	Assert(commandType == CMD_SELECT || commandType == CMD_INSERT ||
@@ -517,6 +516,7 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	if (commandType == CMD_INSERT || commandType == CMD_UPDATE ||
 		commandType == CMD_DELETE)
 	{
+		FromExpr *joinTree = NULL;
 		ListCell *targetEntryCell = NULL;
 
 		foreach(targetEntryCell, queryTree->targetList)
@@ -540,10 +540,8 @@ ErrorIfQueryNotSupported(Query *queryTree)
 			}
 		}
 
-		whereClause = ((queryTree->jointree == NULL) ?
-					   NULL : queryTree->jointree->quals);
-		if (contain_mutable_functions(whereClause) ||
-			contain_volatile_functions(whereClause))
+		joinTree = queryTree->jointree;
+		if (joinTree != NULL && contain_mutable_functions(joinTree->quals))
 		{
 			hasNonConstQualExprs = true;
 		}
