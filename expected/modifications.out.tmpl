@@ -80,7 +80,7 @@ ERROR:  cannot plan sharded modification containing values which are not constan
 -- commands with mutable functions in their quals
 DELETE FROM limit_orders WHERE id = 246 AND bidder_id = (random() * 1000);
 ERROR:  cannot plan sharded modification containing values which are not constants or constant expressions
--- commands with mutable but non-volatilte functions in their quals
+-- commands with mutable but non-volatilte functions(ie: stable func.) in their quals
 DELETE FROM limit_orders WHERE id = 246 AND placed_at = current_timestamp;
 ERROR:  cannot plan sharded modification containing values which are not constants or constant expressions
 -- commands with multiple rows are unsupported
