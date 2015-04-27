@@ -436,12 +436,14 @@ DistributedTablesExist(void)
 /*
  * ColumnNameToColumn accepts a relation identifier and column name and returns
  * a Var that represents that column in that relation. This function throws an
- * error if the column doesn't exist or is a system column.
+ * error if the column doesn't exist, is a system column, or if the provided
+ * name is longer than NAMEDATALEN bytes.
  */
 Var *
 ColumnNameToColumn(Oid relationId, char *columnName)
 {
 	Var *partitionColumn = NULL;
+	AttrNumber columnId = InvalidAttrNumber;
 	Oid columnTypeOid = InvalidOid;
 	int32 columnTypeMod = -1;
 	Oid columnCollationOid = InvalidOid;
@@ -450,7 +452,17 @@ ColumnNameToColumn(Oid relationId, char *columnName)
 	const Index tableId = 1;
 	const Index columnLevelsUp = 0;
 
-	AttrNumber columnId = get_attnum(relationId, columnName);
+	/* check length to prevent failed Assert for long names in get_attnum */
+	if (strnlen(columnName, NAMEDATALEN) == NAMEDATALEN)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_NAME_TOO_LONG),
+				 errmsg("columnName too long"),
+				 errdetail("columnName must be less than %d characters.",
+						   NAMEDATALEN)));
+	}
+
+	columnId = get_attnum(relationId, columnName);
 	if (columnId == InvalidAttrNumber)
 	{
 		char *relationName = get_rel_name(relationId);

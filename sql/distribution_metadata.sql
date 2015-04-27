@@ -150,6 +150,15 @@ SELECT load_shard_placement_array(6, false);
 -- should see column id of 'name'
 SELECT partition_column_id('events');
 
+BEGIN;
+	UPDATE pgs_distribution_metadata.partition
+	SET    key = REPEAT('a', 1024)
+	WHERE  relation_id = 'events' :: regclass;
+
+	---- should see error that partition column is too long
+	SELECT Partition_column_id('events');
+ROLLBACK;
+
 -- should see error (catalog is not distributed)
 SELECT partition_column_id('pg_type');
 
