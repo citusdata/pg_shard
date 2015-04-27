@@ -641,7 +641,7 @@ DeparseCreateStmt(CreateStmt *createStmt, Oid masterRelationId)
 							errdetail("Only the CHECK form is supported.")));
 		}
 
-		if (firstConstraintPrinted)
+		if (firstAttributePrinted || firstConstraintPrinted)
 		{
 			appendStringInfoString(deparsedCreate, ", ");
 		}
