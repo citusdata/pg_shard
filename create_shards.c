@@ -130,6 +130,12 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 							   "defined to use range partitioning.")));
 		}
 	}
+	else
+	{
+		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						errmsg("unrecognized table partition type: %c",
+							   partitionMethod)));
+	}
 
 	/* insert row into the partition metadata table */
 	InsertPartitionRow(distributedTableId, partitionMethod, partitionColumnText);
