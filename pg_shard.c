@@ -393,6 +393,7 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	bool hasValuesScan = false;
 	uint32 queryTableCount = 0;
 	bool hasNonConstTargetEntryExprs = false;
+	bool hasNonConstQualExprs = false;
 	bool specifiesPartitionValue = false;
 
 	CmdType commandType = queryTree->commandType;
@@ -515,6 +516,7 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	if (commandType == CMD_INSERT || commandType == CMD_UPDATE ||
 		commandType == CMD_DELETE)
 	{
+		FromExpr *joinTree = NULL;
 		ListCell *targetEntryCell = NULL;
 
 		foreach(targetEntryCell, queryTree->targetList)
@@ -537,9 +539,15 @@ ErrorIfQueryNotSupported(Query *queryTree)
 				specifiesPartitionValue = true;
 			}
 		}
+
+		joinTree = queryTree->jointree;
+		if (joinTree != NULL && contain_mutable_functions(joinTree->quals))
+		{
+			hasNonConstQualExprs = true;
+		}
 	}
 
-	if (hasNonConstTargetEntryExprs)
+	if (hasNonConstTargetEntryExprs || hasNonConstQualExprs)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						errmsg("cannot plan sharded modification containing values "
