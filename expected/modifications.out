@@ -10,7 +10,14 @@ CREATE TABLE limit_orders (
 	kind order_side NOT NULL,
 	limit_price decimal NOT NULL DEFAULT 0.00 CHECK (limit_price >= 0.00)
 );
+CREATE TABLE insufficient_shards ( LIKE limit_orders );
 SELECT master_create_distributed_table('limit_orders', 'id');
+ master_create_distributed_table 
+---------------------------------
+ 
+(1 row)
+
+SELECT master_create_distributed_table('insufficient_shards', 'id');
  master_create_distributed_table 
 ---------------------------------
  
@@ -25,6 +32,17 @@ WARNING:  could not create shard on "adeadhost:5432"
  
 (1 row)
 
+-- make a single shard that covers no partition values
+SELECT master_create_worker_shards('insufficient_shards', 1, 1);
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+ master_create_worker_shards 
+-----------------------------
+ 
+(1 row)
+
+UPDATE pgs_distribution_metadata.shard SET min_value = 0, max_value = 0
+WHERE relation_id = 'insufficient_shards'::regclass;
 \set VERBOSITY default
 -- basic single-row INSERT
 INSERT INTO limit_orders VALUES (32743, 'AAPL', 9580, '2004-10-19 10:23:54', 'buy',
@@ -35,6 +53,11 @@ SELECT COUNT(*) FROM limit_orders WHERE id = 32743;
      1
 (1 row)
 
+-- try a single-row INSERT with no shard to receive it
+INSERT INTO insufficient_shards VALUES (32743, 'AAPL', 9580, '2004-10-19 10:23:54', 'buy',
+										20.69);
+ERROR:  could not find destination shard for new row
+DETAIL:  Target relation does not contain any shards capable of storing the new row.
 -- INSERT with DEFAULT in the target list
 INSERT INTO limit_orders VALUES (12756, 'MSFT', 10959, '2013-05-08 07:29:23', 'sell',
 								 DEFAULT);
