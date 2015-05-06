@@ -29,6 +29,7 @@
 #include "access/skey.h"
 #include "access/tupdesc.h"
 #include "access/xact.h"
+#include "executor/spi.h"
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
@@ -320,44 +321,47 @@ Var *
 PartitionColumn(Oid distributedTableId)
 {
 	Var *partitionColumn = NULL;
-	RangeVar *heapRangeVar = NULL;
-	Relation heapRelation = NULL;
-	HeapScanDesc scanDesc = NULL;
-	const int scanKeyCount = 1;
-	ScanKeyData scanKey[scanKeyCount];
-	HeapTuple heapTuple = NULL;
+	Oid argTypes[] = { OIDOID };
+	Datum argValues[] = { ObjectIdGetDatum(distributedTableId) };
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus = 0;
+	MemoryContext upperContext = CurrentMemoryContext;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);
-	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
+	SPI_connect();
 
-	ScanKeyInit(&scanKey[0], ATTR_NUM_PARTITION_RELATION_ID, InvalidStrategy,
-				F_OIDEQ, ObjectIdGetDatum(distributedTableId));
+	spiStatus = SPI_execute_with_args("SELECT key "
+									  "FROM pgs_distribution_metadata.partition "
+									  "WHERE relation_id = $1", argCount, argTypes,
+									  argValues, NULL, false, 1);
 
-	scanDesc = heap_beginscan(heapRelation, SnapshotSelf, scanKeyCount, scanKey);
-
-	heapTuple = heap_getnext(scanDesc, ForwardScanDirection);
-	if (HeapTupleIsValid(heapTuple))
+	if (spiStatus == SPI_OK_SELECT && SPI_tuptable != NULL)
 	{
-		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
-		bool isNull = false;
+		if (SPI_processed == 1)
+		{
+			SPITupleTable *tupleTable = SPI_tuptable;
+			TupleDesc tupleDescriptor = tupleTable->tupdesc;
+			HeapTuple heapTuple = tupleTable->vals[0];
+			bool isNull = false;
 
-		Datum keyDatum = heap_getattr(heapTuple, ATTR_NUM_PARTITION_KEY,
-									  tupleDescriptor, &isNull);
-		char *partitionColumnName = TextDatumGetCString(keyDatum);
+			Datum keyDatum = SPI_getbinval(heapTuple, tupleDescriptor, 1, &isNull);
+			MemoryContext oldContext = MemoryContextSwitchTo(upperContext);
+			char *partitionColumnName = TextDatumGetCString(keyDatum);
 
-		partitionColumn = ColumnNameToColumn(distributedTableId, partitionColumnName);
+			partitionColumn = ColumnNameToColumn(distributedTableId, partitionColumnName);
+
+			MemoryContextSwitchTo(oldContext);
+		}
+		else
+		{
+			char *relationName = get_rel_name(distributedTableId);
+
+			ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+							errmsg("no partition column is defined for relation \"%s\"",
+								   relationName)));
+		}
 	}
-	else
-	{
-		char *relationName = get_rel_name(distributedTableId);
 
-		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
-						errmsg("no partition column is defined for relation \"%s\"",
-							   relationName)));
-	}
-
-	heap_endscan(scanDesc);
-	relation_close(heapRelation, AccessShareLock);
+	SPI_finish();
 
 	return partitionColumn;
 }
@@ -372,42 +376,42 @@ char
 PartitionType(Oid distributedTableId)
 {
 	char partitionType = 0;
-	RangeVar *heapRangeVar = NULL;
-	Relation heapRelation = NULL;
-	HeapScanDesc scanDesc = NULL;
-	const int scanKeyCount = 1;
-	ScanKeyData scanKey[scanKeyCount];
-	HeapTuple heapTuple = NULL;
+	Oid argTypes[] = { OIDOID };
+	Datum argValues[] = { ObjectIdGetDatum(distributedTableId) };
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus = 0;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);
-	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
+	SPI_connect();
 
-	ScanKeyInit(&scanKey[0], ATTR_NUM_PARTITION_RELATION_ID, InvalidStrategy,
-				F_OIDEQ, ObjectIdGetDatum(distributedTableId));
+	spiStatus = SPI_execute_with_args("SELECT partition_method "
+									  "FROM pgs_distribution_metadata.partition "
+									  "WHERE relation_id = $1", argCount, argTypes,
+									  argValues, NULL, false, 1);
 
-	scanDesc = heap_beginscan(heapRelation, SnapshotSelf, scanKeyCount, scanKey);
-
-	heapTuple = heap_getnext(scanDesc, ForwardScanDirection);
-	if (HeapTupleIsValid(heapTuple))
+	if (spiStatus == SPI_OK_SELECT && SPI_tuptable != NULL)
 	{
-		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
-		bool isNull = false;
+		if (SPI_processed == 1)
+		{
+			SPITupleTable *tupleTable = SPI_tuptable;
+			TupleDesc tupleDescriptor = tupleTable->tupdesc;
+			HeapTuple heapTuple = tupleTable->vals[0];
+			bool isNull = false;
 
-		Datum partitionTypeDatum = heap_getattr(heapTuple, ATTR_NUM_PARTITION_TYPE,
-												tupleDescriptor, &isNull);
-		partitionType = DatumGetChar(partitionTypeDatum);
+			Datum partitionTypeDatum = SPI_getbinval(heapTuple, tupleDescriptor, 1,
+													 &isNull);
+			partitionType = DatumGetChar(partitionTypeDatum);
+		}
+		else
+		{
+			char *relationName = get_rel_name(distributedTableId);
+
+			ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+							errmsg("no partition column is defined for relation \"%s\"",
+								   relationName)));
+		}
 	}
-	else
-	{
-		char *relationName = get_rel_name(distributedTableId);
 
-		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
-						errmsg("no partition column is defined for relation \"%s\"",
-							   relationName)));
-	}
-
-	heap_endscan(scanDesc);
-	relation_close(heapRelation, AccessShareLock);
+	SPI_finish();
 
 	return partitionType;
 }
@@ -419,28 +423,32 @@ PartitionType(Oid distributedTableId)
 bool
 IsDistributedTable(Oid tableId)
 {
+	Oid metadataNamespaceOid = get_namespace_oid("pgs_distribution_metadata", false);
+	Oid tableNamespaceOid = get_rel_namespace(tableId);
 	bool isDistributedTable = false;
-	RangeVar *heapRangeVar = NULL;
-	Relation heapRelation = NULL;
-	HeapScanDesc scanDesc = NULL;
-	const int scanKeyCount = 1;
-	ScanKeyData scanKey[scanKeyCount];
-	HeapTuple heapTuple = NULL;
+	Oid argTypes[] = { OIDOID };
+	Datum argValues[] = { ObjectIdGetDatum(tableId) };
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus = 0;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);
-	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
+	if (tableNamespaceOid == metadataNamespaceOid)
+	{
+		return false;
+	}
 
-	ScanKeyInit(&scanKey[0], ATTR_NUM_PARTITION_RELATION_ID, InvalidStrategy,
-				F_OIDEQ, ObjectIdGetDatum(tableId));
+	SPI_connect();
 
-	scanDesc = heap_beginscan(heapRelation, SnapshotSelf, scanKeyCount, scanKey);
+	spiStatus = SPI_execute_with_args("SELECT NULL "
+									  "FROM pgs_distribution_metadata.partition "
+									  "WHERE relation_id = $1", argCount, argTypes,
+									  argValues, NULL, false, 1);
 
-	heapTuple = heap_getnext(scanDesc, ForwardScanDirection);
+	if (spiStatus == SPI_OK_SELECT && SPI_tuptable != NULL)
+	{
+		isDistributedTable = (SPI_processed == 1);
+	}
 
-	isDistributedTable = HeapTupleIsValid(heapTuple);
-
-	heap_endscan(scanDesc);
-	relation_close(heapRelation, AccessShareLock);
+	SPI_finish();
 
 	return isDistributedTable;
 }
@@ -454,26 +462,20 @@ bool
 DistributedTablesExist(void)
 {
 	bool distributedTablesExist = false;
-	RangeVar *heapRangeVar = NULL;
-	Relation heapRelation = NULL;
-	HeapScanDesc scanDesc = NULL;
-	HeapTuple heapTuple = NULL;
+	int spiStatus = 0;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);
-	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
+	SPI_connect();
 
-	scanDesc = heap_beginscan(heapRelation, SnapshotSelf, 0, NULL);
+	spiStatus = SPI_execute_with_args("SELECT NULL "
+									  "FROM pgs_distribution_metadata.partition", 0,
+									  NULL, NULL, NULL, false, 1);
 
-	heapTuple = heap_getnext(scanDesc, ForwardScanDirection);
+	if (spiStatus == SPI_OK_SELECT && SPI_tuptable != NULL)
+	{
+		distributedTablesExist = (SPI_processed > 0);
+	}
 
-	/*
-	 * Check whether the partition metadata table contains any tuples. If so,
-	 * at least one distributed table exists.
-	 */
-	distributedTablesExist = HeapTupleIsValid(heapTuple);
-
-	heap_endscan(scanDesc);
-	relation_close(heapRelation, AccessShareLock);
+	SPI_finish();
 
 	return distributedTablesExist;
 }
@@ -623,34 +625,28 @@ TupleToShardPlacement(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 void
 InsertPartitionRow(Oid distributedTableId, char partitionType, text *partitionKeyText)
 {
-	Relation partitionRelation = NULL;
-	RangeVar *partitionRangeVar = NULL;
-	TupleDesc tupleDescriptor = NULL;
-	HeapTuple heapTuple = NULL;
-	Datum values[PARTITION_TABLE_ATTRIBUTE_COUNT];
-	bool isNulls[PARTITION_TABLE_ATTRIBUTE_COUNT];
+	Oid argTypes[] = { OIDOID, CHAROID, TEXTOID };
+	Datum argValues[] = {
+		ObjectIdGetDatum(distributedTableId),
+		CharGetDatum(partitionType),
+		PointerGetDatum(partitionKeyText)
+	};
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus = 0;
 
-	/* form new partition tuple */
-	memset(values, 0, sizeof(values));
-	memset(isNulls, false, sizeof(isNulls));
+	SPI_connect();
 
-	values[ATTR_NUM_PARTITION_RELATION_ID - 1] = ObjectIdGetDatum(distributedTableId);
-	values[ATTR_NUM_PARTITION_TYPE - 1] = CharGetDatum(partitionType);
-	values[ATTR_NUM_PARTITION_KEY - 1] = PointerGetDatum(partitionKeyText);
+	spiStatus = SPI_execute_with_args("INSERT INTO pgs_distribution_metadata.partition "
+									  "(relation_id, partition_method, key) "
+									  "VALUES ($1, $2, $3)", argCount, argTypes,
+									  argValues, NULL, false, 0);
 
-	/* open the partition relation and insert new tuple */
-	partitionRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);
-	partitionRelation = heap_openrv(partitionRangeVar, RowExclusiveLock);
+	if (spiStatus != SPI_OK_INSERT)
+	{
+		ereport(ERROR, (errmsg("failed to insert row")));
+	}
 
-	tupleDescriptor = RelationGetDescr(partitionRelation);
-	heapTuple = heap_form_tuple(tupleDescriptor, values, isNulls);
-
-	simple_heap_insert(partitionRelation, heapTuple);
-	CatalogUpdateIndexes(partitionRelation, heapTuple);
-	CommandCounterIncrement();
-
-	/* close relation */
-	relation_close(partitionRelation, RowExclusiveLock);
+	SPI_finish();
 }
 
 
