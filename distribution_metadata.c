@@ -625,13 +625,13 @@ InsertPartitionRow(Oid distributedTableId, char partitionType, text *partitionKe
 
 
 /*
- * InsertShardRow opens the shard metadata table and inserts a new row with
+ * CreateShardRow opens the shard metadata table and inserts a new row with
  * the given values into that table. Note that we allow the user to pass in
  * null min/max values.
  */
 int64
 CreateShardRow(Oid distributedTableId, char shardStorage, text *shardMinValue,
-               text *shardMaxValue)
+			   text *shardMaxValue)
 {
 	int64 newShardId = -1;
 	Oid argTypes[] = { OIDOID, CHAROID, TEXTOID, TEXTOID };
@@ -683,13 +683,13 @@ CreateShardRow(Oid distributedTableId, char shardStorage, text *shardMinValue,
  * InsertShardPlacementRow opens the shard placement metadata table and inserts
  * a row with the given values into the table.
  */
-void
-InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
-						ShardState shardState, char *nodeName, uint32 nodePort)
+int64
+CreateShardPlacementRow(uint64 shardId, ShardState shardState, char *nodeName,
+						uint32 nodePort)
 {
-	Oid argTypes[] = { INT8OID, INT8OID, INT4OID, TEXTOID, INT4OID };
+	int64 newShardPlacementId = -1;
+	Oid argTypes[] = { INT8OID, INT4OID, TEXTOID, INT4OID };
 	Datum argValues[] = {
-		Int64GetDatum(shardPlacementId),
 		Int64GetDatum(shardId),
 		Int32GetDatum((int32) shardState),
 		CStringGetTextDatum(nodeName),
@@ -702,16 +702,28 @@ InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
 
 	spiStatus = SPI_execute_with_args("INSERT INTO "
 									  "pgs_distribution_metadata.shard_placement "
-									  "(id, shard_id, shard_state, node_name, node_port) "
-									  "VALUES ($1, $2, $3, $4, $5)", argCount, argTypes,
-									  argValues, NULL, false, 0);
+									  "(shard_id, shard_state, node_name, node_port) "
+									  "VALUES ($1, $2, $3, $4) RETURNING id", argCount,
+									  argTypes, argValues, NULL, false, 1);
 
-	if (spiStatus != SPI_OK_INSERT)
+	if (spiStatus == SPI_OK_INSERT_RETURNING && SPI_tuptable != NULL)
+	{
+		SPITupleTable *tupleTable = SPI_tuptable;
+		TupleDesc tupleDescriptor = tupleTable->tupdesc;
+		HeapTuple heapTuple = tupleTable->vals[0];
+		bool isNull = false;
+
+		Datum placementIdDatum = SPI_getbinval(heapTuple, tupleDescriptor, 1, &isNull);
+		newShardPlacementId = DatumGetInt64(placementIdDatum);
+	}
+	else
 	{
 		ereport(ERROR, (errmsg("failed to insert row")));
 	}
 
 	SPI_finish();
+
+	return newShardPlacementId;
 }
 
 
@@ -737,6 +749,38 @@ DeleteShardPlacementRow(uint64 shardPlacementId)
 	if (spiStatus != SPI_OK_DELETE)
 	{
 		ereport(ERROR, (errmsg("failed to insert row")));
+	}
+	else if (SPI_processed != 1)
+	{
+		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+						errmsg("shard placement with ID " INT64_FORMAT " does not exist",
+							   shardPlacementId)));
+	}
+
+	SPI_finish();
+}
+
+
+void
+UpdateShardPlacementRowState(int64 shardPlacementId, ShardState newState)
+{
+	Oid argTypes[] = { INT8OID, INT4OID };
+	Datum argValues[] = {
+		Int64GetDatum(shardPlacementId),
+		Int32GetDatum((int32) newState)
+	};
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus = 0;
+
+	SPI_connect();
+
+	spiStatus = SPI_execute_with_args("UPDATE pgs_distribution_metadata.shard_placement "
+									  "SET shard_state = $2 WHERE id = $1",
+									  argCount, argTypes, argValues, NULL, false, 1);
+
+	if (spiStatus != SPI_OK_UPDATE)
+	{
+		ereport(ERROR, (errmsg("failed to update placement state")));
 	}
 	else if (SPI_processed != 1)
 	{

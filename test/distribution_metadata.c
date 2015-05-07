@@ -215,8 +215,8 @@ insert_monolithic_shard_row(PG_FUNCTION_ARGS)
 	appendStringInfo(maxInfo, "%d", INT32_MAX);
 
 	newShardId = CreateShardRow(distributedTableId, SHARD_STORAGE_TABLE,
-	                            cstring_to_text(minInfo->data),
-	                            cstring_to_text(maxInfo->data));
+								cstring_to_text(minInfo->data),
+								cstring_to_text(maxInfo->data));
 
 	PG_RETURN_INT64(newShardId);
 }
@@ -230,13 +230,11 @@ insert_monolithic_shard_row(PG_FUNCTION_ARGS)
 Datum
 insert_healthy_local_shard_placement_row(PG_FUNCTION_ARGS)
 {
-	uint64 shardPlacementId = (uint64) PG_GETARG_INT64(0);
-	uint64 shardId = (uint64) PG_GETARG_INT64(1);
+	uint64 shardId = (uint64) PG_GETARG_INT64(0);
+	int64 newShardPlacementId = CreateShardPlacementRow(shardId, STATE_FINALIZED,
+														"localhost", 5432);
 
-	InsertShardPlacementRow(shardPlacementId, shardId, STATE_FINALIZED, "localhost",
-							5432);
-
-	PG_RETURN_VOID();
+	PG_RETURN_INT64(newShardPlacementId);
 }
 
 

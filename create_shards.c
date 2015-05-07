@@ -257,7 +257,7 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 		minHashTokenText = IntegerToText(shardMinHashToken);
 		maxHashTokenText = IntegerToText(shardMaxHashToken);
 		shardId = CreateShardRow(distributedTableId, shardStorageType, minHashTokenText,
-		                         maxHashTokenText);
+								 maxHashTokenText);
 
 		List *extendedDDLCommands = ExtendedDDLCommandList(distributedTableId, shardId,
 														   ddlCommandList);
@@ -275,13 +275,7 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 													extendedDDLCommands);
 			if (created)
 			{
-				uint64 shardPlacementId = 0;
-				ShardState shardState = STATE_FINALIZED;
-
-
-				shardPlacementId = NextSequenceId(SHARD_PLACEMENT_ID_SEQUENCE_NAME);
-				InsertShardPlacementRow(shardPlacementId, shardId, shardState,
-										nodeName, nodePort);
+				CreateShardPlacementRow(shardId, STATE_FINALIZED, nodeName, nodePort);
 				placementCount++;
 			}
 			else

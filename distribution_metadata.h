@@ -109,11 +109,11 @@ extern Var * ColumnNameToColumn(Oid relationId, char *columnName);
 extern void InsertPartitionRow(Oid distributedTableId, char partitionType,
 							   text *partitionKeyText);
 extern int64 CreateShardRow(Oid distributedTableId, char shardStorage,
-						    text *shardMinValue, text *shardMaxValue);
-extern void InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
-									ShardState shardState, char *nodeName,
-									uint32 nodePort);
+							text *shardMinValue, text *shardMaxValue);
+extern int64 CreateShardPlacementRow(uint64 shardId, ShardState shardState,
+									 char *nodeName, uint32 nodePort);
 extern void DeleteShardPlacementRow(uint64 shardPlacementId);
+extern void UpdateShardPlacementRowState(int64 shardPlacementId, ShardState newState);
 extern uint64 NextSequenceId(char *sequenceName);
 extern void LockShard(int64 shardId, LOCKMODE lockMode);
 

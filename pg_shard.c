@@ -1798,10 +1798,7 @@ ExecuteDistributedModify(DistributedPlan *plan)
 	{
 		ShardPlacement *failedPlacement = (ShardPlacement *) lfirst(failedPlacementCell);
 
-		DeleteShardPlacementRow(failedPlacement->id);
-		InsertShardPlacementRow(failedPlacement->id, failedPlacement->shardId,
-								STATE_INACTIVE, failedPlacement->nodeName,
-								failedPlacement->nodePort);
+		UpdateShardPlacementRowState(failedPlacement->id, STATE_INACTIVE);
 	}
 
 	return affectedTupleCount;
