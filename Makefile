@@ -58,7 +58,7 @@ ifeq ($(enable_coverage),yes)
 	EXTRA_CLEAN += *.gcno *.gcda test/*.gcno test/*.gcda
 endif
 
-ifneq ($(SUPPORT_SHARD_EXPRS), undefined)
+ifeq ($(SUPPORT_SHARD_EXPRS), yes)
     PG_CPPFLAGS += -DSUPPORT_SHARD_EXPRS
 
 endif
