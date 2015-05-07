@@ -63,12 +63,12 @@ ERROR:  cannot plan INSERT using row with NULL value in partition column
 INSERT INTO limit_orders VALUES (18811, 'BUD', 14962, '2014-04-05 08:32:16', 'sell',
 								 -5.00);
 WARNING:  Bad result from localhost:$PGPORT
-DETAIL:  Remote message: new row for relation "limit_orders_10034" violates check constraint "limit_orders_limit_price_check"
+DETAIL:  Remote message: new row for relation "limit_orders_10035" violates check constraint "limit_orders_limit_price_check"
 ERROR:  could not modify any active placements
 -- INSERT violating primary key constraint
 INSERT INTO limit_orders VALUES (32743, 'LUV', 5994, '2001-04-16 03:37:28', 'buy', 0.58);
 WARNING:  Bad result from localhost:$PGPORT
-DETAIL:  Remote message: duplicate key value violates unique constraint "limit_orders_pkey_10035"
+DETAIL:  Remote message: duplicate key value violates unique constraint "limit_orders_pkey_10036"
 ERROR:  could not modify any active placements
 -- commands with non-constant partition values are unsupported
 INSERT INTO limit_orders VALUES (random() * 100, 'ORCL', 152, '2011-08-25 11:50:45',

@@ -207,17 +207,18 @@ Datum
 insert_monolithic_shard_row(PG_FUNCTION_ARGS)
 {
 	Oid distributedTableId = PG_GETARG_OID(0);
-	uint64 shardId = (uint64) PG_GETARG_INT64(1);
 	StringInfo minInfo = makeStringInfo();
 	StringInfo maxInfo = makeStringInfo();
+	int64 newShardId = -1;
 
 	appendStringInfo(minInfo, "%d", INT32_MIN);
 	appendStringInfo(maxInfo, "%d", INT32_MAX);
 
-	InsertShardRow(distributedTableId, shardId, SHARD_STORAGE_TABLE,
-				   cstring_to_text(minInfo->data), cstring_to_text(maxInfo->data));
+	newShardId = CreateShardRow(distributedTableId, SHARD_STORAGE_TABLE,
+	                            cstring_to_text(minInfo->data),
+	                            cstring_to_text(maxInfo->data));
 
-	PG_RETURN_VOID();
+	PG_RETURN_INT64(newShardId);
 }
 
 

@@ -236,13 +236,10 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 
 	for (shardIndex = 0; shardIndex < shardCount; shardIndex++)
 	{
-		uint64 shardId = NextSequenceId(SHARD_ID_SEQUENCE_NAME);
+		int64 shardId = -1;
 		int32 placementCount = 0;
 		uint32 placementIndex = 0;
 		uint32 roundRobinNodeIndex = shardIndex % workerNodeCount;
-
-		List *extendedDDLCommands = ExtendedDDLCommandList(distributedTableId, shardId,
-														   ddlCommandList);
 
 		/* initialize the hash token space for this shard */
 		text *minHashTokenText = NULL;
@@ -259,8 +256,11 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 		/* insert the shard metadata row along with its min/max values */
 		minHashTokenText = IntegerToText(shardMinHashToken);
 		maxHashTokenText = IntegerToText(shardMaxHashToken);
-		InsertShardRow(distributedTableId, shardId, shardStorageType,
-					   minHashTokenText, maxHashTokenText);
+		shardId = CreateShardRow(distributedTableId, shardStorageType, minHashTokenText,
+		                         maxHashTokenText);
+
+		List *extendedDDLCommands = ExtendedDDLCommandList(distributedTableId, shardId,
+														   ddlCommandList);
 
 		for (placementIndex = 0; placementIndex < placementAttemptCount; placementIndex++)
 		{

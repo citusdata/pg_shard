@@ -8,7 +8,7 @@ CREATE SCHEMA pgs_distribution_metadata
 
 	-- shard keeps track of hash value ranges for each shard
 	CREATE TABLE shard (
-		id bigint primary key,
+		id bigint primary key default nextval('shard_id_sequence'),
 		relation_id oid not null,
 		storage "char" not null,
 		min_value text not null,
@@ -17,7 +17,7 @@ CREATE SCHEMA pgs_distribution_metadata
 
 	-- shard_placement records which nodes contain which shards
 	CREATE TABLE shard_placement (
-		id bigint primary key,
+		id bigint primary key default nextval('shard_placement_id_sequence'),
 		shard_id bigint not null references shard(id),
 		shard_state integer not null,
 		node_name text not null,

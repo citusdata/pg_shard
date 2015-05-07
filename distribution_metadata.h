@@ -108,8 +108,8 @@ extern bool DistributedTablesExist(void);
 extern Var * ColumnNameToColumn(Oid relationId, char *columnName);
 extern void InsertPartitionRow(Oid distributedTableId, char partitionType,
 							   text *partitionKeyText);
-extern void InsertShardRow(Oid distributedTableId, uint64 shardId, char shardStorage,
-						   text *shardMinValue, text *shardMaxValue);
+extern int64 CreateShardRow(Oid distributedTableId, char shardStorage,
+						    text *shardMinValue, text *shardMaxValue);
 extern void InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
 									ShardState shardState, char *nodeName,
 									uint32 nodePort);

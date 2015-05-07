@@ -250,7 +250,8 @@ LoadShardPlacementList(int64 shardId)
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args("SELECT * "
+	spiStatus = SPI_execute_with_args("SELECT id, shard_id, shard_state, "
+									  "node_name, node_port "
 									  "FROM pgs_distribution_metadata.shard_placement "
 									  "WHERE shard_id = $1",
 									  argCount, argTypes,
@@ -628,19 +629,19 @@ InsertPartitionRow(Oid distributedTableId, char partitionType, text *partitionKe
  * the given values into that table. Note that we allow the user to pass in
  * null min/max values.
  */
-void
-InsertShardRow(Oid distributedTableId, uint64 shardId, char shardStorage,
-			   text *shardMinValue, text *shardMaxValue)
+int64
+CreateShardRow(Oid distributedTableId, char shardStorage, text *shardMinValue,
+               text *shardMaxValue)
 {
-	Oid argTypes[] = { INT8OID, OIDOID, CHAROID, TEXTOID, TEXTOID };
+	int64 newShardId = -1;
+	Oid argTypes[] = { OIDOID, CHAROID, TEXTOID, TEXTOID };
 	Datum argValues[] = {
-		Int64GetDatum(shardId),
 		ObjectIdGetDatum(distributedTableId),
 		CharGetDatum(shardStorage),
 		PointerGetDatum(shardMinValue),
 		PointerGetDatum(shardMaxValue)
 	};
-	char nulls[] = { ' ', ' ', ' ', ' ', ' ' };
+	char nulls[] = { ' ', ' ', ' ', ' ' };
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 	int spiStatus = 0;
 
@@ -648,21 +649,33 @@ InsertShardRow(Oid distributedTableId, uint64 shardId, char shardStorage,
 
 	if (shardMinValue == NULL || shardMaxValue == NULL)
 	{
+		nulls[2] = 'n';
 		nulls[3] = 'n';
-		nulls[4] = 'n';
 	}
 
 	spiStatus = SPI_execute_with_args("INSERT INTO pgs_distribution_metadata.shard "
-									  "(id, relation_id, storage, min_value, max_value) "
-									  "VALUES ($1, $2, $3, $4, $5)", argCount, argTypes,
-									  argValues, nulls, false, 0);
+									  "(relation_id, storage, min_value, max_value) "
+									  "VALUES ($1, $2, $3, $4) RETURNING id", argCount,
+									  argTypes, argValues, nulls, false, 1);
 
-	if (spiStatus != SPI_OK_INSERT)
+	if (spiStatus == SPI_OK_INSERT_RETURNING && SPI_tuptable != NULL)
+	{
+		SPITupleTable *tupleTable = SPI_tuptable;
+		TupleDesc tupleDescriptor = tupleTable->tupdesc;
+		HeapTuple heapTuple = tupleTable->vals[0];
+		bool isNull = false;
+
+		Datum shardIdDatum = SPI_getbinval(heapTuple, tupleDescriptor, 1, &isNull);
+		newShardId = DatumGetInt64(shardIdDatum);
+	}
+	else
 	{
 		ereport(ERROR, (errmsg("failed to insert row")));
 	}
 
 	SPI_finish();
+
+	return newShardId;
 }
 
 
