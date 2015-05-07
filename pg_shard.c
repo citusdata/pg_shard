@@ -547,7 +547,7 @@ ErrorIfQueryNotSupported(Query *queryTree)
 		}
 	}
 
-    #ifndef $(experimentalSupportExprs)
+    #ifndef EXP_SUPPORT_EXPRS
 	if (hasNonConstTargetEntryExprs || hasNonConstQualExprs)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
