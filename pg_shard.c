@@ -88,6 +88,14 @@ bool UseCitusDBSelectLogic = false;
 /* logs each statement used in a distributed plan */
 bool LogDistributedStatements = false;
 
+/* EXPERIMENTAL: Allow support of expressions in setting values on shards. */
+
+#ifndef SUPPORT_SHARD_EXPRS
+bool SupportShardExprs = false;
+#else 
+bool SupportShardExprs = true;
+#endif
+
 
 /* planner functions forward declarations */
 static PlannedStmt * PgShardPlanner(Query *parse, int cursorOptions,
@@ -547,12 +555,15 @@ ErrorIfQueryNotSupported(Query *queryTree)
 		}
 	}
 
-	if (hasNonConstTargetEntryExprs || hasNonConstQualExprs)
-	{
-		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("cannot plan sharded modification containing values "
-							   "which are not constants or constant expressions")));
-	}
+    if (!SupportShardExprs)
+    {
+        if (hasNonConstTargetEntryExprs || hasNonConstQualExprs)
+        {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("cannot plan sharded modification containing values "
+                                   "which are not constants or constant expressions")));
+        }
+    }
 
 	if (specifiesPartitionValue && (commandType == CMD_UPDATE))
 	{

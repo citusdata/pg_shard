@@ -58,6 +58,11 @@ ifeq ($(enable_coverage),yes)
 	EXTRA_CLEAN += *.gcno *.gcda test/*.gcno test/*.gcda
 endif
 
+ifeq ($(SUPPORT_SHARD_EXPRS), yes)
+    PG_CPPFLAGS += -DSUPPORT_SHARD_EXPRS
+
+endif
+
 # Let the test makefile tell us what objects to build.
 include test/Makefile
 
