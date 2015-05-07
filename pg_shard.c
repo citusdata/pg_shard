@@ -547,12 +547,14 @@ ErrorIfQueryNotSupported(Query *queryTree)
 		}
 	}
 
+    #ifndef $(experimentalSupportExprs)
 	if (hasNonConstTargetEntryExprs || hasNonConstQualExprs)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						errmsg("cannot plan sharded modification containing values "
 							   "which are not constants or constant expressions")));
 	}
+    #endif
 
 	if (specifiesPartitionValue && (commandType == CMD_UPDATE))
 	{
