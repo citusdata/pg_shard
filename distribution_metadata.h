@@ -21,9 +21,6 @@
 #include "storage/lock.h"
 
 
-/* schema for configuration related to distributed tables */
-#define METADATA_SCHEMA_NAME "pgs_distribution_metadata"
-
 /* denotes storage type of the underlying shard */
 #define SHARD_STORAGE_TABLE 't'
 #define SHARD_STORAGE_FOREIGN 'f'
@@ -31,10 +28,6 @@
 /* denotes partition type of the distributed table */
 #define HASH_PARTITION_TYPE 'h'
 #define RANGE_PARTITION_TYPE 'r'
-
-/* sequence names to generate new shard id and shard placement id */
-#define SHARD_ID_SEQUENCE_NAME "shard_id_sequence"
-#define SHARD_PLACEMENT_ID_SEQUENCE_NAME "shard_placement_id_sequence"
 
 
 /* ShardState represents the last known state of a shard on a given node */
@@ -114,7 +107,6 @@ extern int64 CreateShardPlacementRow(uint64 shardId, ShardState shardState,
 									 char *nodeName, uint32 nodePort);
 extern void DeleteShardPlacementRow(uint64 shardPlacementId);
 extern void UpdateShardPlacementRowState(int64 shardPlacementId, ShardState newState);
-extern uint64 NextSequenceId(char *sequenceName);
 extern void LockShard(int64 shardId, LOCKMODE lockMode);
 
 

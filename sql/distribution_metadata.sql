@@ -47,11 +47,6 @@ CREATE FUNCTION acquire_shared_shard_lock(bigint)
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 
-CREATE FUNCTION next_shard_id()
-	RETURNS bigint
-	AS 'pg_shard'
-	LANGUAGE C STRICT;
-
 -- ===================================================================
 -- test distribution metadata functionality
 -- ===================================================================
@@ -160,9 +155,6 @@ SELECT * FROM pgs_distribution_metadata.shard_placement WHERE id = :new_placemen
 SELECT delete_shard_placement_row(:new_placement_id);
 SELECT COUNT(*) FROM pgs_distribution_metadata.shard_placement
 WHERE id = :new_placement_id;
-
--- ask for next shard id
-SELECT next_shard_id();
 
 -- now we'll even test our lock methods...
 

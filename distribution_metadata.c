@@ -26,7 +26,6 @@
 #include "executor/spi.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
-#include "commands/sequence.h"
 #include "nodes/makefuncs.h"
 #include "nodes/memnodes.h" /* IWYU pragma: keep */
 #include "nodes/pg_list.h"
@@ -790,27 +789,6 @@ UpdateShardPlacementRowState(int64 shardPlacementId, ShardState newState)
 	}
 
 	SPI_finish();
-}
-
-
-/*
- * NextSequenceId allocates and returns a new unique id generated from the given
- * sequence name.
- */
-uint64
-NextSequenceId(char *sequenceName)
-{
-	RangeVar *sequenceRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
-											  sequenceName, -1);
-	bool failOk = false;
-	Oid sequenceRelationId = RangeVarGetRelid(sequenceRangeVar, NoLock, failOk);
-	Datum sequenceRelationIdDatum = ObjectIdGetDatum(sequenceRelationId);
-
-	/* generate new and unique id from sequence */
-	Datum sequenceIdDatum = DirectFunctionCall1(nextval_oid, sequenceRelationIdDatum);
-	uint64 nextSequenceId = (uint64) DatumGetInt64(sequenceIdDatum);
-
-	return nextSequenceId;
 }
 
 

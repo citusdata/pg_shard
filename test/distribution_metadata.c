@@ -253,18 +253,6 @@ delete_shard_placement_row(PG_FUNCTION_ARGS)
 
 
 /*
- * next_shard_id returns the next value from the shard ID sequence.
- */
-Datum
-next_shard_id(PG_FUNCTION_ARGS __attribute__((unused)))
-{
-	int64 shardId = (int64) NextSequenceId(SHARD_ID_SEQUENCE_NAME);
-
-	PG_RETURN_INT64(shardId);
-}
-
-
-/*
  * acquire_shared_shard_lock grabs a shared lock for the specified shard.
  */
 Datum
