@@ -114,7 +114,7 @@ ERROR:  shard with ID 5 does not exist
 SELECT load_shard_placement_array(2, false);
            load_shard_placement_array            
 -------------------------------------------------
- {cluster-worker-03:5434,cluster-worker-01:5432}
+ {cluster-worker-01:5432,cluster-worker-03:5434}
 (1 row)
 
 -- only one of which is finalized

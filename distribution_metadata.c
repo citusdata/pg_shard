@@ -263,42 +263,39 @@ List *
 LoadShardPlacementList(int64 shardId)
 {
 	List *shardPlacementList = NIL;
-	RangeVar *heapRangeVar = NULL;
-	RangeVar *indexRangeVar = NULL;
-	Relation heapRelation = NULL;
-	Relation indexRelation = NULL;
-	IndexScanDesc indexScanDesc = NULL;
-	const int scanKeyCount = 1;
-	ScanKeyData scanKey[scanKeyCount];
-	HeapTuple heapTuple = NULL;
+	Oid argTypes[] = { INT8OID };
+	Datum argValues[] = { Int64GetDatum(shardId) };
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus = 0;
+	MemoryContext upperContext = CurrentMemoryContext;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_PLACEMENT_TABLE_NAME, -1);
-	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
-								 SHARD_PLACEMENT_SHARD_INDEX_NAME, -1);
+	SPI_connect();
 
-	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
-	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
+	spiStatus = SPI_execute_with_args("SELECT * "
+									  "FROM pgs_distribution_metadata.shard_placement "
+									  "WHERE shard_id = $1",
+									  argCount, argTypes,
+									  argValues,
+									  NULL, false, 0);
 
-	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ, Int64GetDatum(shardId));
-
-	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotSelf,
-									scanKeyCount, 0);
-	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
-
-	heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
-	while (HeapTupleIsValid(heapTuple))
+	if (spiStatus == SPI_OK_SELECT && SPI_tuptable != NULL)
 	{
-		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
-		ShardPlacement *shardPlacement = TupleToShardPlacement(heapTuple,
-															   tupleDescriptor);
-		shardPlacementList = lappend(shardPlacementList, shardPlacement);
+		SPITupleTable *tupleTable = SPI_tuptable;
+		TupleDesc tupleDescriptor = tupleTable->tupdesc;
+		MemoryContext oldContext = MemoryContextSwitchTo(upperContext);
 
-		heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
+		for (uint32 rowNumber = 0; rowNumber < SPI_processed; rowNumber++)
+		{
+			HeapTuple heapTuple = tupleTable->vals[rowNumber];
+			ShardPlacement *shardPlacement = TupleToShardPlacement(heapTuple,
+																   tupleDescriptor);
+			shardPlacementList = lappend(shardPlacementList, shardPlacement);
+		}
+
+		MemoryContextSwitchTo(oldContext);
 	}
 
-	index_endscan(indexScanDesc);
-	index_close(indexRelation, AccessShareLock);
-	relation_close(heapRelation, AccessShareLock);
+	SPI_finish();
 
 	/* if no shard placements are found, error out */
 	if (shardPlacementList == NIL)
@@ -596,16 +593,11 @@ TupleToShardPlacement(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 	ShardPlacement *shardPlacement = NULL;
 	bool isNull = false;
 
-	Datum idDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_ID,
-								 tupleDescriptor, &isNull);
-	Datum shardIdDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_SHARD_ID,
-									  tupleDescriptor, &isNull);
-	Datum shardStateDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_SHARD_STATE,
-										 tupleDescriptor, &isNull);
-	Datum nodeNameDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_NODE_NAME,
-									   tupleDescriptor, &isNull);
-	Datum nodePortDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_NODE_PORT,
-									   tupleDescriptor, &isNull);
+	Datum idDatum = SPI_getbinval(heapTuple, tupleDescriptor, 1, &isNull);
+	Datum shardIdDatum = SPI_getbinval(heapTuple, tupleDescriptor, 2, &isNull);
+	Datum shardStateDatum = SPI_getbinval(heapTuple, tupleDescriptor, 3, &isNull);
+	Datum nodeNameDatum = SPI_getbinval(heapTuple, tupleDescriptor, 4, &isNull);
+	Datum nodePortDatum = SPI_getbinval(heapTuple, tupleDescriptor, 5, &isNull);
 
 	shardPlacement = palloc0(sizeof(ShardPlacement));
 	shardPlacement->id = DatumGetInt64(idDatum);
@@ -710,37 +702,31 @@ void
 InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
 						ShardState shardState, char *nodeName, uint32 nodePort)
 {
-	Relation shardPlacementRelation = NULL;
-	RangeVar *shardPlacementRangeVar = NULL;
-	TupleDesc tupleDescriptor = NULL;
-	HeapTuple heapTuple = NULL;
-	Datum values[SHARD_PLACEMENT_TABLE_ATTRIBUTE_COUNT];
-	bool isNulls[SHARD_PLACEMENT_TABLE_ATTRIBUTE_COUNT];
+	Oid argTypes[] = { INT8OID, INT8OID, INT4OID, TEXTOID, INT4OID };
+	Datum argValues[] = {
+		Int64GetDatum(shardPlacementId),
+		Int64GetDatum(shardId),
+		Int32GetDatum((int32) shardState),
+		CStringGetTextDatum(nodeName),
+		Int32GetDatum(nodePort)
+	};
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus = 0;
 
-	/* form new shard placement tuple */
-	memset(values, 0, sizeof(values));
-	memset(isNulls, false, sizeof(isNulls));
+	SPI_connect();
 
-	values[ATTR_NUM_SHARD_PLACEMENT_ID - 1] = Int64GetDatum(shardPlacementId);
-	values[ATTR_NUM_SHARD_PLACEMENT_SHARD_ID - 1] = Int64GetDatum(shardId);
-	values[ATTR_NUM_SHARD_PLACEMENT_SHARD_STATE - 1] = UInt32GetDatum(shardState);
-	values[ATTR_NUM_SHARD_PLACEMENT_NODE_NAME - 1] = CStringGetTextDatum(nodeName);
-	values[ATTR_NUM_SHARD_PLACEMENT_NODE_PORT - 1] = UInt32GetDatum(nodePort);
+	spiStatus = SPI_execute_with_args("INSERT INTO "
+									  "pgs_distribution_metadata.shard_placement "
+									  "(id, shard_id, shard_state, node_name, node_port) "
+									  "VALUES ($1, $2, $3, $4, $5)", argCount, argTypes,
+									  argValues, NULL, false, 0);
 
-	/* open shard placement relation and insert new tuple */
-	shardPlacementRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
-										  SHARD_PLACEMENT_TABLE_NAME, -1);
-	shardPlacementRelation = heap_openrv(shardPlacementRangeVar, RowExclusiveLock);
+	if (spiStatus != SPI_OK_INSERT)
+	{
+		ereport(ERROR, (errmsg("failed to insert row")));
+	}
 
-	tupleDescriptor = RelationGetDescr(shardPlacementRelation);
-	heapTuple = heap_form_tuple(tupleDescriptor, values, isNulls);
-
-	simple_heap_insert(shardPlacementRelation, heapTuple);
-	CatalogUpdateIndexes(shardPlacementRelation, heapTuple);
-	CommandCounterIncrement();
-
-	/* close relation */
-	heap_close(shardPlacementRelation, RowExclusiveLock);
+	SPI_finish();
 }
 
 
@@ -751,44 +737,30 @@ InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
 void
 DeleteShardPlacementRow(uint64 shardPlacementId)
 {
-	RangeVar *heapRangeVar = NULL;
-	RangeVar *indexRangeVar = NULL;
-	Relation heapRelation = NULL;
-	Relation indexRelation = NULL;
-	IndexScanDesc indexScanDesc = NULL;
-	const int scanKeyCount = 1;
-	ScanKeyData scanKey[scanKeyCount];
-	HeapTuple heapTuple = NULL;
+	Oid argTypes[] = { INT8OID };
+	Datum argValues[] = { Int64GetDatum(shardPlacementId) };
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus = 0;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_PLACEMENT_TABLE_NAME, -1);
-	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
-								 SHARD_PLACEMENT_PKEY_INDEX_NAME, -1);
+	SPI_connect();
 
-	heapRelation = relation_openrv(heapRangeVar, RowExclusiveLock);
-	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
+	spiStatus = SPI_execute_with_args("DELETE FROM "
+									  "pgs_distribution_metadata.shard_placement "
+									  "WHERE id = $1", argCount, argTypes, argValues,
+									  NULL, false, 0);
 
-	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ,
-				Int64GetDatum(shardPlacementId));
-
-	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotSelf,
-									scanKeyCount, 0);
-	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
-
-	heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
-	if (HeapTupleIsValid(heapTuple))
+	if (spiStatus != SPI_OK_DELETE)
 	{
-		simple_heap_delete(heapRelation, &heapTuple->t_self);
+		ereport(ERROR, (errmsg("failed to insert row")));
 	}
-	else
+	else if (SPI_processed != 1)
 	{
 		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
 						errmsg("shard placement with ID " INT64_FORMAT " does not exist",
 							   shardPlacementId)));
 	}
 
-	index_endscan(indexScanDesc);
-	index_close(indexRelation, AccessShareLock);
-	relation_close(heapRelation, RowExclusiveLock);
+	SPI_finish();
 }
 
 

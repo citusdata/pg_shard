@@ -256,6 +256,12 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 			shardMaxHashToken = INT_MAX;
 		}
 
+		/* insert the shard metadata row along with its min/max values */
+		minHashTokenText = IntegerToText(shardMinHashToken);
+		maxHashTokenText = IntegerToText(shardMaxHashToken);
+		InsertShardRow(distributedTableId, shardId, shardStorageType,
+					   minHashTokenText, maxHashTokenText);
+
 		for (placementIndex = 0; placementIndex < placementAttemptCount; placementIndex++)
 		{
 			int32 candidateNodeIndex =
@@ -298,12 +304,6 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 									  "requested replication factor of %d.",
 									  placementCount, replicationFactor)));
 		}
-
-		/* insert the shard metadata row along with its min/max values */
-		minHashTokenText = IntegerToText(shardMinHashToken);
-		maxHashTokenText = IntegerToText(shardMaxHashToken);
-		InsertShardRow(distributedTableId, shardId, shardStorageType,
-					   minHashTokenText, maxHashTokenText);
 	}
 
 	if (QueryCancelPending)
