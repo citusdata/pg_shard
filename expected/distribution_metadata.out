@@ -83,14 +83,14 @@ VALUES
 SELECT load_shard_id_array('events', false);
  load_shard_id_array 
 ---------------------
- {4,3,2,1}
+ {1,2,3,4}
 (1 row)
 
 -- cache them for later use
 SELECT load_shard_id_array('events', true);
  load_shard_id_array 
 ---------------------
- {4,3,2,1}
+ {1,2,3,4}
 (1 row)
 
 -- should see empty array (catalog is not distributed)
@@ -153,7 +153,7 @@ SELECT load_shard_id_array('events', false);
 SELECT load_shard_id_array('events', true);
  load_shard_id_array 
 ---------------------
- {4,3,2,1}
+ {1,2,3,4}
 (1 row)
 
 -- create second table to distribute
