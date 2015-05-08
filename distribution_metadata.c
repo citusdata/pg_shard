@@ -138,7 +138,7 @@ LoadShardIntervalList(Oid distributedTableId)
 	{
 		HeapTuple heapTuple = SPI_tuptable->vals[rowNumber];
 		ShardInterval *shardInterval = TupleToShardInterval(heapTuple,
-		                                                    SPI_tuptable->tupdesc);
+															SPI_tuptable->tupdesc);
 		shardIntervalList = lappend(shardIntervalList, shardInterval);
 	}
 
@@ -252,7 +252,7 @@ LoadShardPlacementList(int64 shardId)
 	{
 		HeapTuple heapTuple = SPI_tuptable->vals[rowNumber];
 		ShardPlacement *shardPlacement = TupleToShardPlacement(heapTuple,
-		                                                       SPI_tuptable->tupdesc);
+															   SPI_tuptable->tupdesc);
 		shardPlacementList = lappend(shardPlacementList, shardPlacement);
 	}
 
@@ -355,7 +355,7 @@ PartitionType(Oid distributedTableId)
 	}
 
 	partitionTypeDatum = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1,
-	                                   &isNull);
+									   &isNull);
 	partitionType = DatumGetChar(partitionTypeDatum);
 
 	SPI_finish();
@@ -626,7 +626,7 @@ CreateShardRow(Oid distributedTableId, char shardStorage, text *shardMinValue,
 	Assert(spiStatus == SPI_OK_INSERT_RETURNING);
 
 	shardIdDatum = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1,
-	                             &isNull);
+								 &isNull);
 	newShardId = DatumGetInt64(shardIdDatum);
 
 	SPI_finish();
@@ -666,7 +666,7 @@ CreateShardPlacementRow(uint64 shardId, ShardState shardState, char *nodeName,
 	Assert(spiStatus == SPI_OK_INSERT_RETURNING);
 
 	placementIdDatum = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1,
-	                                 &isNull);
+									 &isNull);
 	newShardPlacementId = DatumGetInt64(placementIdDatum);
 
 	SPI_finish();
