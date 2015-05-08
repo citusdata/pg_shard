@@ -605,7 +605,6 @@ CreateShardRow(Oid distributedTableId, char shardStorage, text *shardMinValue,
 		PointerGetDatum(shardMinValue),
 		PointerGetDatum(shardMaxValue)
 	};
-	char nulls[] = { ' ', ' ', ' ', ' ' };
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 	int spiStatus = 0;
 	bool isNull = false;
@@ -613,16 +612,10 @@ CreateShardRow(Oid distributedTableId, char shardStorage, text *shardMinValue,
 
 	SPI_connect();
 
-	if (shardMinValue == NULL || shardMaxValue == NULL)
-	{
-		nulls[2] = 'n';
-		nulls[3] = 'n';
-	}
-
 	spiStatus = SPI_execute_with_args("INSERT INTO pgs_distribution_metadata.shard "
 									  "(relation_id, storage, min_value, max_value) "
 									  "VALUES ($1, $2, $3, $4) RETURNING id", argCount,
-									  argTypes, argValues, nulls, false, 1);
+									  argTypes, argValues, NULL, false, 1);
 	Assert(spiStatus == SPI_OK_INSERT_RETURNING);
 
 	shardIdDatum = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1,
