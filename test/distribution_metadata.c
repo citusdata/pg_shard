@@ -37,10 +37,9 @@ PG_FUNCTION_INFO_V1(load_shard_interval_array);
 PG_FUNCTION_INFO_V1(load_shard_placement_array);
 PG_FUNCTION_INFO_V1(partition_column_id);
 PG_FUNCTION_INFO_V1(insert_hash_partition_row);
-PG_FUNCTION_INFO_V1(insert_monolithic_shard_row);
-PG_FUNCTION_INFO_V1(insert_healthy_local_shard_placement_row);
+PG_FUNCTION_INFO_V1(create_monolithic_shard_row);
+PG_FUNCTION_INFO_V1(create_healthy_local_shard_placement_row);
 PG_FUNCTION_INFO_V1(delete_shard_placement_row);
-PG_FUNCTION_INFO_V1(next_shard_id);
 PG_FUNCTION_INFO_V1(acquire_shared_shard_lock);
 
 
@@ -199,12 +198,12 @@ insert_hash_partition_row(PG_FUNCTION_ARGS)
 
 
 /*
- * insert_monolithic_shard_row creates a single shard covering all possible
+ * create_monolithic_shard_row creates a single shard covering all possible
  * hash values for a given table and inserts a row representing that shard
- * into the backing store.
+ * into the backing store. It returns the primary key of the new row.
  */
 Datum
-insert_monolithic_shard_row(PG_FUNCTION_ARGS)
+create_monolithic_shard_row(PG_FUNCTION_ARGS)
 {
 	Oid distributedTableId = PG_GETARG_OID(0);
 	StringInfo minInfo = makeStringInfo();
@@ -223,12 +222,12 @@ insert_monolithic_shard_row(PG_FUNCTION_ARGS)
 
 
 /*
- * insert_healthy_local_shard_placement_row inserts a row representing a
+ * create_healthy_local_shard_placement_row inserts a row representing a
  * finalized placement for localhost (on the default port) into the backing
- * store.
+ * store. It returns the primary key of the new row.
  */
 Datum
-insert_healthy_local_shard_placement_row(PG_FUNCTION_ARGS)
+create_healthy_local_shard_placement_row(PG_FUNCTION_ARGS)
 {
 	uint64 shardId = (uint64) PG_GETARG_INT64(0);
 	int64 newShardPlacementId = CreateShardPlacementRow(shardId, STATE_FINALIZED,

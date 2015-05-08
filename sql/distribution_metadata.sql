@@ -27,12 +27,12 @@ CREATE FUNCTION insert_hash_partition_row(regclass, text)
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 
-CREATE FUNCTION insert_monolithic_shard_row(regclass)
+CREATE FUNCTION create_monolithic_shard_row(regclass)
 	RETURNS bigint
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 
-CREATE FUNCTION insert_healthy_local_shard_placement_row(bigint)
+CREATE FUNCTION create_healthy_local_shard_placement_row(bigint)
 	RETURNS bigint
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
@@ -141,13 +141,13 @@ SELECT partition_method, key FROM pgs_distribution_metadata.partition
 	WHERE relation_id = 'customers'::regclass;
 
 -- make one huge shard and manually inspect shard row
-SELECT insert_monolithic_shard_row('customers') AS new_shard_id
+SELECT create_monolithic_shard_row('customers') AS new_shard_id
 \gset
 SELECT storage, min_value, max_value FROM pgs_distribution_metadata.shard
 WHERE id = :new_shard_id;
 
 -- add a placement and manually inspect row
-SELECT insert_healthy_local_shard_placement_row(:new_shard_id) AS new_placement_id
+SELECT create_healthy_local_shard_placement_row(:new_shard_id) AS new_placement_id
 \gset
 SELECT * FROM pgs_distribution_metadata.shard_placement WHERE id = :new_placement_id;
 

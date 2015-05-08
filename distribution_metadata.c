@@ -291,7 +291,7 @@ LoadShardPlacementList(int64 shardId)
 /*
  * PartitionColumn looks up the column used to partition a given distributed
  * table and returns a reference to a Var representing that column. If no entry
- * can be found using the provided identifer, this function throws an error.
+ * can be found using the provided identifier, this function throws an error.
  */
 Var *
 PartitionColumn(Oid distributedTableId)
@@ -505,6 +505,10 @@ ColumnNameToColumn(Oid relationId, char *columnName)
  * TupleToShardPlacement populates a ShardInterval using values from a row of
  * the shard configuration table and returns a pointer to that struct. The
  * input tuple must not contain any NULLs.
+ *
+ * Because the partition type and column must be known in order to interpret
+ * the min/max values of a shard interval, the provided HeapTuple must contain
+ * these fields. This is easily accomplished by JOINing to the partition table.
  */
 static ShardInterval *
 TupleToShardInterval(HeapTuple heapTuple, TupleDesc tupleDescriptor)
@@ -592,8 +596,8 @@ TupleToShardPlacement(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 
 
 /*
- * InsertPartitionRow opens the partition metadata table and inserts a new row
- * with the given values.
+ * InsertPartitionRow inserts a new row into the partition table using the
+ * supplied values.
  */
 void
 InsertPartitionRow(Oid distributedTableId, char partitionType, text *partitionKeyText)
@@ -624,9 +628,9 @@ InsertPartitionRow(Oid distributedTableId, char partitionType, text *partitionKe
 
 
 /*
- * CreateShardRow opens the shard metadata table and inserts a new row with
- * the given values into that table. Note that we allow the user to pass in
- * null min/max values.
+ * CreateShardRow creates a row in the shard table using the supplied values
+ * and returns the primary key of that new row. Note that we allow the user to
+ * pass in null min/max values.
  */
 int64
 CreateShardRow(Oid distributedTableId, char shardStorage, text *shardMinValue,
@@ -679,8 +683,8 @@ CreateShardRow(Oid distributedTableId, char shardStorage, text *shardMinValue,
 
 
 /*
- * InsertShardPlacementRow opens the shard placement metadata table and inserts
- * a row with the given values into the table.
+ * CreateShardPlacementRow creates a row in the shard placement table using the
+ * supplied values and returns the primary key of that new row.
  */
 int64
 CreateShardPlacementRow(uint64 shardId, ShardState shardState, char *nodeName,
@@ -760,6 +764,11 @@ DeleteShardPlacementRow(uint64 shardPlacementId)
 }
 
 
+/*
+ * UpdateShardPlacementRowState sets the shard state of the row identified by
+ * the provided shard placement identifier, erroring out if it cannot find such
+ * a row.
+ */
 void
 UpdateShardPlacementRowState(int64 shardPlacementId, ShardState newState)
 {
