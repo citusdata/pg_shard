@@ -411,9 +411,7 @@ DistributedTablesExist(void)
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args("SELECT NULL "
-									  "FROM pgs_distribution_metadata.partition", 0,
-									  NULL, NULL, NULL, false, 1);
+	spiStatus = SPI_exec("SELECT NULL FROM pgs_distribution_metadata.partition", 1);
 	Assert(spiStatus == SPI_OK_SELECT);
 
 	distributedTablesExist = (SPI_processed > 0);
