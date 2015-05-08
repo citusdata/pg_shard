@@ -42,6 +42,11 @@ CREATE FUNCTION delete_shard_placement_row(bigint)
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 
+CREATE FUNCTION update_shard_placement_row_state(bigint, int)
+	RETURNS void
+	AS 'pg_shard'
+	LANGUAGE C STRICT;
+
 CREATE FUNCTION acquire_shared_shard_lock(bigint)
 	RETURNS void
 	AS 'pg_shard'
@@ -150,6 +155,11 @@ WHERE id = :new_shard_id;
 SELECT create_healthy_local_shard_placement_row(:new_shard_id) AS new_placement_id
 \gset
 SELECT * FROM pgs_distribution_metadata.shard_placement WHERE id = :new_placement_id;
+
+-- mark it as unhealthy and inspect
+SELECT update_shard_placement_row_state(:new_placement_id, 3);
+SELECT shard_state FROM pgs_distribution_metadata.shard_placement
+WHERE id = :new_placement_id;
 
 -- remove it and verify it is gone
 SELECT delete_shard_placement_row(:new_placement_id);

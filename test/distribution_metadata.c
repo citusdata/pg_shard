@@ -40,6 +40,7 @@ PG_FUNCTION_INFO_V1(insert_hash_partition_row);
 PG_FUNCTION_INFO_V1(create_monolithic_shard_row);
 PG_FUNCTION_INFO_V1(create_healthy_local_shard_placement_row);
 PG_FUNCTION_INFO_V1(delete_shard_placement_row);
+PG_FUNCTION_INFO_V1(update_shard_placement_row_state);
 PG_FUNCTION_INFO_V1(acquire_shared_shard_lock);
 
 
@@ -246,6 +247,22 @@ delete_shard_placement_row(PG_FUNCTION_ARGS)
 	uint64 shardPlacementId = (uint64) PG_GETARG_INT64(0);
 
 	DeleteShardPlacementRow(shardPlacementId);
+
+	PG_RETURN_VOID();
+}
+
+
+/*
+ * update_shard_placement_row_state sets the state of the placement with the
+ * specified ID.
+ */
+Datum
+update_shard_placement_row_state(PG_FUNCTION_ARGS)
+{
+	uint64 shardPlacementId = (uint64) PG_GETARG_INT64(0);
+	ShardState shardState = (ShardState) PG_GETARG_INT32(1);
+
+	UpdateShardPlacementRowState(shardPlacementId, shardState);
 
 	PG_RETURN_VOID();
 }
