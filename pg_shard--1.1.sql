@@ -41,6 +41,12 @@ CREATE SCHEMA pgs_distribution_metadata
 	CREATE SEQUENCE shard_id_sequence MINVALUE 10000 NO CYCLE
 	CREATE SEQUENCE shard_placement_id_sequence NO CYCLE;
 
+-- associate sequences with their columns
+ALTER SEQUENCE pgs_distribution_metadata.shard_id_sequence
+OWNED BY pgs_distribution_metadata.shard.id;
+ALTER SEQUENCE pgs_distribution_metadata.shard_placement_id_sequence
+OWNED BY pgs_distribution_metadata.shard_placement.id;
+
 -- mark each of the above as config tables to have pg_dump preserve them
 SELECT pg_catalog.pg_extension_config_dump(
 	'pgs_distribution_metadata.shard', '');
