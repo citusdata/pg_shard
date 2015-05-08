@@ -36,6 +36,10 @@ PG_FUNCTION_INFO_V1(load_shard_id_array);
 PG_FUNCTION_INFO_V1(load_shard_interval_array);
 PG_FUNCTION_INFO_V1(load_shard_placement_array);
 PG_FUNCTION_INFO_V1(partition_column_id);
+PG_FUNCTION_INFO_V1(partition_type);
+PG_FUNCTION_INFO_V1(is_distributed_table);
+PG_FUNCTION_INFO_V1(distributed_tables_exist);
+PG_FUNCTION_INFO_V1(column_name_to_column_id);
 PG_FUNCTION_INFO_V1(insert_hash_partition_row);
 PG_FUNCTION_INFO_V1(create_monolithic_shard_row);
 PG_FUNCTION_INFO_V1(create_healthy_local_shard_placement_row);
@@ -179,6 +183,56 @@ partition_column_id(PG_FUNCTION_ARGS)
 	Var *partitionColumn = PartitionColumn(distributedTableId);
 
 	PG_RETURN_INT16((int16) partitionColumn->varattno);
+}
+
+
+/*
+ * partition_column_id simply finds a distributed table using the provided Oid
+ * and returns the column_id of its partition column. If the specified table is
+ * not distributed, this function raises an error instead.
+ */
+Datum
+partition_type(PG_FUNCTION_ARGS)
+{
+	Oid distributedTableId = PG_GETARG_OID(0);
+	char partitionType = PartitionType(distributedTableId);
+
+	PG_RETURN_CHAR(partitionType);
+}
+
+
+/*
+ * partition_column_id simply finds a distributed table using the provided Oid
+ * and returns the column_id of its partition column. If the specified table is
+ * not distributed, this function raises an error instead.
+ */
+Datum
+is_distributed_table(PG_FUNCTION_ARGS)
+{
+	Oid distributedTableId = PG_GETARG_OID(0);
+	bool isDistributedTable = IsDistributedTable(distributedTableId);
+
+	PG_RETURN_BOOL(isDistributedTable);
+}
+
+
+Datum
+distributed_tables_exist(PG_FUNCTION_ARGS __attribute__((unused)))
+{
+	bool distributedTablesExist = DistributedTablesExist();
+
+	PG_RETURN_BOOL(distributedTablesExist);
+}
+
+
+Datum
+column_name_to_column_id(PG_FUNCTION_ARGS)
+{
+	Oid distributedTableId = PG_GETARG_OID(0);
+	char *columnName = PG_GETARG_CSTRING(1);
+	Var *column = ColumnNameToColumn(distributedTableId, columnName);
+
+	PG_RETURN_INT16((int16) column->varattno);
 }
 
 

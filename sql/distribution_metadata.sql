@@ -21,7 +21,27 @@ CREATE FUNCTION partition_column_id(regclass)
 	RETURNS smallint
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
-	
+
+CREATE FUNCTION partition_type(regclass)
+	RETURNS "char"
+	AS 'pg_shard'
+	LANGUAGE C STRICT;
+
+CREATE FUNCTION is_distributed_table(regclass)
+	RETURNS boolean
+	AS 'pg_shard'
+	LANGUAGE C STRICT;
+
+CREATE FUNCTION distributed_tables_exist()
+	RETURNS boolean
+	AS 'pg_shard'
+	LANGUAGE C STRICT;
+
+CREATE FUNCTION column_name_to_column_id(regclass, cstring)
+	RETURNS smallint
+	AS 'pg_shard'
+	LANGUAGE C STRICT;
+
 CREATE FUNCTION insert_hash_partition_row(regclass, text)
 	RETURNS void
 	AS 'pg_shard'
@@ -117,16 +137,31 @@ SELECT load_shard_placement_array(6, false);
 -- should see column id of 'name'
 SELECT partition_column_id('events');
 
--- system columns should raise an error
-BEGIN;
-	UPDATE pgs_distribution_metadata.partition SET key = 'ctid'
-	WHERE relation_id = 'events'::regclass;
-
-	SELECT partition_column_id('events');
-COMMIT;
-
 -- should see error (catalog is not distributed)
 SELECT partition_column_id('pg_type');
+
+-- should see hash partition type and fail for non-distributed tables
+SELECT partition_type('events');
+SELECT partition_type('pg_type');
+
+-- should see true for events, false for others
+SELECT is_distributed_table('events');
+SELECT is_distributed_table('pg_type');
+SELECT is_distributed_table('pgs_distribution_metadata.shard');
+
+-- should see that we have distributed tables
+SELECT distributed_tables_exist();
+
+-- or maybe that we don't
+BEGIN;
+	DELETE FROM pgs_distribution_metadata.partition;
+	SELECT distributed_tables_exist();
+ROLLBACK;
+
+-- test underlying column name-id translation
+SELECT column_name_to_column_id('events', 'name');
+SELECT column_name_to_column_id('events', 'ctid');
+SELECT column_name_to_column_id('events', 'non_existent');
 
 -- drop shard rows (must drop placements first)
 DELETE FROM pgs_distribution_metadata.shard_placement
