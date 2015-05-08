@@ -119,7 +119,7 @@ LoadShardIntervalList(Oid distributedTableId)
 	Datum argValues[] = { ObjectIdGetDatum(distributedTableId) };
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 	int spiStatus = 0;
-	MemoryContext upperContext = CurrentMemoryContext;
+	MemoryContext upperContext = CurrentMemoryContext, oldContext = NULL;
 
 	SPI_connect();
 
@@ -130,23 +130,19 @@ LoadShardIntervalList(Oid distributedTableId)
 									  "ON s.relation_id = p.relation_id "
 									  "WHERE s.relation_id = $1", argCount, argTypes,
 									  argValues, NULL, false, 0);
+	Assert(spiStatus == SPI_OK_SELECT);
 
-	if (spiStatus == SPI_OK_SELECT && SPI_tuptable != NULL)
+	oldContext = MemoryContextSwitchTo(upperContext);
+
+	for (uint32 rowNumber = 0; rowNumber < SPI_processed; rowNumber++)
 	{
-		SPITupleTable *tupleTable = SPI_tuptable;
-		TupleDesc tupleDescriptor = tupleTable->tupdesc;
-		MemoryContext oldContext = MemoryContextSwitchTo(upperContext);
-
-		for (uint32 rowNumber = 0; rowNumber < SPI_processed; rowNumber++)
-		{
-			HeapTuple heapTuple = tupleTable->vals[rowNumber];
-			ShardInterval *shardInterval = TupleToShardInterval(heapTuple,
-																tupleDescriptor);
-			shardIntervalList = lappend(shardIntervalList, shardInterval);
-		}
-
-		MemoryContextSwitchTo(oldContext);
+		HeapTuple heapTuple = SPI_tuptable->vals[rowNumber];
+		ShardInterval *shardInterval = TupleToShardInterval(heapTuple,
+		                                                    SPI_tuptable->tupdesc);
+		shardIntervalList = lappend(shardIntervalList, shardInterval);
 	}
+
+	MemoryContextSwitchTo(oldContext);
 
 	SPI_finish();
 
@@ -167,7 +163,7 @@ LoadShardInterval(int64 shardId)
 	Datum argValues[] = { Int64GetDatum(shardId) };
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 	int spiStatus = 0;
-	MemoryContext upperContext = CurrentMemoryContext;
+	MemoryContext upperContext = CurrentMemoryContext, oldContext = NULL;
 
 	SPI_connect();
 
@@ -178,28 +174,20 @@ LoadShardInterval(int64 shardId)
 									  "ON s.relation_id = p.relation_id "
 									  "WHERE s.id = $1", argCount, argTypes,
 									  argValues, NULL, false, 1);
+	Assert(spiStatus == SPI_OK_SELECT);
 
-	if (spiStatus == SPI_OK_SELECT && SPI_tuptable != NULL)
+	if (SPI_processed != 1)
 	{
-		if (SPI_processed == 1)
-		{
-			SPITupleTable *tupleTable = SPI_tuptable;
-			TupleDesc tupleDescriptor = tupleTable->tupdesc;
-			HeapTuple heapTuple = tupleTable->vals[0];
-
-			MemoryContext oldContext = MemoryContextSwitchTo(upperContext);
-
-			shardInterval = TupleToShardInterval(heapTuple, tupleDescriptor);
-
-			MemoryContextSwitchTo(oldContext);
-		}
-		else
-		{
-			ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
-							errmsg("shard with ID " INT64_FORMAT " does not exist",
-								   shardId)));
-		}
+		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+						errmsg("shard with ID " INT64_FORMAT " does not exist",
+							   shardId)));
 	}
+
+	oldContext = MemoryContextSwitchTo(upperContext);
+
+	shardInterval = TupleToShardInterval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc);
+
+	MemoryContextSwitchTo(oldContext);
 
 	SPI_finish();
 
@@ -245,7 +233,7 @@ LoadShardPlacementList(int64 shardId)
 	Datum argValues[] = { Int64GetDatum(shardId) };
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 	int spiStatus = 0;
-	MemoryContext upperContext = CurrentMemoryContext;
+	MemoryContext upperContext = CurrentMemoryContext, oldContext = NULL;
 
 	SPI_connect();
 
@@ -256,23 +244,19 @@ LoadShardPlacementList(int64 shardId)
 									  argCount, argTypes,
 									  argValues,
 									  NULL, false, 0);
+	Assert(spiStatus == SPI_OK_SELECT);
 
-	if (spiStatus == SPI_OK_SELECT && SPI_tuptable != NULL)
+	oldContext = MemoryContextSwitchTo(upperContext);
+
+	for (uint32 rowNumber = 0; rowNumber < SPI_processed; rowNumber++)
 	{
-		SPITupleTable *tupleTable = SPI_tuptable;
-		TupleDesc tupleDescriptor = tupleTable->tupdesc;
-		MemoryContext oldContext = MemoryContextSwitchTo(upperContext);
-
-		for (uint32 rowNumber = 0; rowNumber < SPI_processed; rowNumber++)
-		{
-			HeapTuple heapTuple = tupleTable->vals[rowNumber];
-			ShardPlacement *shardPlacement = TupleToShardPlacement(heapTuple,
-																   tupleDescriptor);
-			shardPlacementList = lappend(shardPlacementList, shardPlacement);
-		}
-
-		MemoryContextSwitchTo(oldContext);
+		HeapTuple heapTuple = SPI_tuptable->vals[rowNumber];
+		ShardPlacement *shardPlacement = TupleToShardPlacement(heapTuple,
+		                                                       SPI_tuptable->tupdesc);
+		shardPlacementList = lappend(shardPlacementList, shardPlacement);
 	}
+
+	MemoryContextSwitchTo(oldContext);
 
 	SPI_finish();
 
@@ -301,7 +285,10 @@ PartitionColumn(Oid distributedTableId)
 	Datum argValues[] = { ObjectIdGetDatum(distributedTableId) };
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 	int spiStatus = 0;
-	MemoryContext upperContext = CurrentMemoryContext;
+	MemoryContext upperContext = CurrentMemoryContext, oldContext = NULL;
+	bool isNull = false;
+	Datum keyDatum = 0;
+	char *partitionColumnName = NULL;
 
 	SPI_connect();
 
@@ -309,33 +296,24 @@ PartitionColumn(Oid distributedTableId)
 									  "FROM pgs_distribution_metadata.partition "
 									  "WHERE relation_id = $1", argCount, argTypes,
 									  argValues, NULL, false, 1);
+	Assert(spiStatus == SPI_OK_SELECT);
 
-	if (spiStatus == SPI_OK_SELECT && SPI_tuptable != NULL)
+	if (SPI_processed != 1)
 	{
-		if (SPI_processed == 1)
-		{
-			SPITupleTable *tupleTable = SPI_tuptable;
-			TupleDesc tupleDescriptor = tupleTable->tupdesc;
-			HeapTuple heapTuple = tupleTable->vals[0];
-			bool isNull = false;
+		char *relationName = get_rel_name(distributedTableId);
 
-			Datum keyDatum = SPI_getbinval(heapTuple, tupleDescriptor, 1, &isNull);
-			MemoryContext oldContext = MemoryContextSwitchTo(upperContext);
-			char *partitionColumnName = TextDatumGetCString(keyDatum);
-
-			partitionColumn = ColumnNameToColumn(distributedTableId, partitionColumnName);
-
-			MemoryContextSwitchTo(oldContext);
-		}
-		else
-		{
-			char *relationName = get_rel_name(distributedTableId);
-
-			ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
-							errmsg("no partition column is defined for relation \"%s\"",
-								   relationName)));
-		}
+		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+						errmsg("no partition column is defined for relation \"%s\"",
+							   relationName)));
 	}
+
+	keyDatum = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isNull);
+	oldContext = MemoryContextSwitchTo(upperContext);
+	partitionColumnName = TextDatumGetCString(keyDatum);
+
+	partitionColumn = ColumnNameToColumn(distributedTableId, partitionColumnName);
+
+	MemoryContextSwitchTo(oldContext);
 
 	SPI_finish();
 
@@ -356,6 +334,8 @@ PartitionType(Oid distributedTableId)
 	Datum argValues[] = { ObjectIdGetDatum(distributedTableId) };
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 	int spiStatus = 0;
+	bool isNull = false;
+	Datum partitionTypeDatum = 0;
 
 	SPI_connect();
 
@@ -363,29 +343,20 @@ PartitionType(Oid distributedTableId)
 									  "FROM pgs_distribution_metadata.partition "
 									  "WHERE relation_id = $1", argCount, argTypes,
 									  argValues, NULL, false, 1);
+	Assert(spiStatus == SPI_OK_SELECT);
 
-	if (spiStatus == SPI_OK_SELECT && SPI_tuptable != NULL)
+	if (SPI_processed != 1)
 	{
-		if (SPI_processed == 1)
-		{
-			SPITupleTable *tupleTable = SPI_tuptable;
-			TupleDesc tupleDescriptor = tupleTable->tupdesc;
-			HeapTuple heapTuple = tupleTable->vals[0];
-			bool isNull = false;
+		char *relationName = get_rel_name(distributedTableId);
 
-			Datum partitionTypeDatum = SPI_getbinval(heapTuple, tupleDescriptor, 1,
-													 &isNull);
-			partitionType = DatumGetChar(partitionTypeDatum);
-		}
-		else
-		{
-			char *relationName = get_rel_name(distributedTableId);
-
-			ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
-							errmsg("no partition column is defined for relation \"%s\"",
-								   relationName)));
-		}
+		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+						errmsg("no partition column is defined for relation \"%s\"",
+							   relationName)));
 	}
+
+	partitionTypeDatum = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1,
+	                                   &isNull);
+	partitionType = DatumGetChar(partitionTypeDatum);
 
 	SPI_finish();
 
@@ -418,11 +389,9 @@ IsDistributedTable(Oid tableId)
 									  "FROM pgs_distribution_metadata.partition "
 									  "WHERE relation_id = $1", argCount, argTypes,
 									  argValues, NULL, false, 1);
+	Assert(spiStatus == SPI_OK_SELECT);
 
-	if (spiStatus == SPI_OK_SELECT && SPI_tuptable != NULL)
-	{
-		isDistributedTable = (SPI_processed == 1);
-	}
+	isDistributedTable = (SPI_processed == 1);
 
 	SPI_finish();
 
@@ -445,11 +414,9 @@ DistributedTablesExist(void)
 	spiStatus = SPI_execute_with_args("SELECT NULL "
 									  "FROM pgs_distribution_metadata.partition", 0,
 									  NULL, NULL, NULL, false, 1);
+	Assert(spiStatus == SPI_OK_SELECT);
 
-	if (spiStatus == SPI_OK_SELECT && SPI_tuptable != NULL)
-	{
-		distributedTablesExist = (SPI_processed > 0);
-	}
+	distributedTablesExist = (SPI_processed > 0);
 
 	SPI_finish();
 
@@ -617,11 +584,7 @@ InsertPartitionRow(Oid distributedTableId, char partitionType, text *partitionKe
 									  "(relation_id, partition_method, key) "
 									  "VALUES ($1, $2, $3)", argCount, argTypes,
 									  argValues, NULL, false, 0);
-
-	if (spiStatus != SPI_OK_INSERT)
-	{
-		ereport(ERROR, (errmsg("failed to insert row")));
-	}
+	Assert(spiStatus == SPI_OK_INSERT);
 
 	SPI_finish();
 }
@@ -647,6 +610,8 @@ CreateShardRow(Oid distributedTableId, char shardStorage, text *shardMinValue,
 	char nulls[] = { ' ', ' ', ' ', ' ' };
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 	int spiStatus = 0;
+	bool isNull = false;
+	Datum shardIdDatum = 0;
 
 	SPI_connect();
 
@@ -660,21 +625,11 @@ CreateShardRow(Oid distributedTableId, char shardStorage, text *shardMinValue,
 									  "(relation_id, storage, min_value, max_value) "
 									  "VALUES ($1, $2, $3, $4) RETURNING id", argCount,
 									  argTypes, argValues, nulls, false, 1);
+	Assert(spiStatus == SPI_OK_INSERT_RETURNING);
 
-	if (spiStatus == SPI_OK_INSERT_RETURNING && SPI_tuptable != NULL)
-	{
-		SPITupleTable *tupleTable = SPI_tuptable;
-		TupleDesc tupleDescriptor = tupleTable->tupdesc;
-		HeapTuple heapTuple = tupleTable->vals[0];
-		bool isNull = false;
-
-		Datum shardIdDatum = SPI_getbinval(heapTuple, tupleDescriptor, 1, &isNull);
-		newShardId = DatumGetInt64(shardIdDatum);
-	}
-	else
-	{
-		ereport(ERROR, (errmsg("failed to insert row")));
-	}
+	shardIdDatum = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1,
+	                             &isNull);
+	newShardId = DatumGetInt64(shardIdDatum);
 
 	SPI_finish();
 
@@ -700,6 +655,8 @@ CreateShardPlacementRow(uint64 shardId, ShardState shardState, char *nodeName,
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 	int spiStatus = 0;
+	bool isNull = false;
+	Datum placementIdDatum = 0;
 
 	SPI_connect();
 
@@ -708,21 +665,11 @@ CreateShardPlacementRow(uint64 shardId, ShardState shardState, char *nodeName,
 									  "(shard_id, shard_state, node_name, node_port) "
 									  "VALUES ($1, $2, $3, $4) RETURNING id", argCount,
 									  argTypes, argValues, NULL, false, 1);
+	Assert(spiStatus == SPI_OK_INSERT_RETURNING);
 
-	if (spiStatus == SPI_OK_INSERT_RETURNING && SPI_tuptable != NULL)
-	{
-		SPITupleTable *tupleTable = SPI_tuptable;
-		TupleDesc tupleDescriptor = tupleTable->tupdesc;
-		HeapTuple heapTuple = tupleTable->vals[0];
-		bool isNull = false;
-
-		Datum placementIdDatum = SPI_getbinval(heapTuple, tupleDescriptor, 1, &isNull);
-		newShardPlacementId = DatumGetInt64(placementIdDatum);
-	}
-	else
-	{
-		ereport(ERROR, (errmsg("failed to insert row")));
-	}
+	placementIdDatum = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1,
+	                                 &isNull);
+	newShardPlacementId = DatumGetInt64(placementIdDatum);
 
 	SPI_finish();
 
@@ -748,12 +695,9 @@ DeleteShardPlacementRow(uint64 shardPlacementId)
 									  "pgs_distribution_metadata.shard_placement "
 									  "WHERE id = $1", argCount, argTypes, argValues,
 									  NULL, false, 0);
+	Assert(spiStatus == SPI_OK_DELETE);
 
-	if (spiStatus != SPI_OK_DELETE)
-	{
-		ereport(ERROR, (errmsg("failed to insert row")));
-	}
-	else if (SPI_processed != 1)
+	if (SPI_processed != 1)
 	{
 		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
 						errmsg("shard placement with ID " INT64_FORMAT " does not exist",
@@ -785,12 +729,9 @@ UpdateShardPlacementRowState(int64 shardPlacementId, ShardState newState)
 	spiStatus = SPI_execute_with_args("UPDATE pgs_distribution_metadata.shard_placement "
 									  "SET shard_state = $2 WHERE id = $1",
 									  argCount, argTypes, argValues, NULL, false, 1);
+	Assert(spiStatus == SPI_OK_UPDATE);
 
-	if (spiStatus != SPI_OK_UPDATE)
-	{
-		ereport(ERROR, (errmsg("failed to update placement state")));
-	}
-	else if (SPI_processed != 1)
+	if (SPI_processed != 1)
 	{
 		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
 						errmsg("shard placement with ID " INT64_FORMAT " does not exist",
