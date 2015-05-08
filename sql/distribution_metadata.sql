@@ -117,6 +117,14 @@ SELECT load_shard_placement_array(6, false);
 -- should see column id of 'name'
 SELECT partition_column_id('events');
 
+-- system columns should raise an error
+BEGIN;
+	UPDATE pgs_distribution_metadata.partition SET key = 'ctid'
+	WHERE relation_id = 'events'::regclass;
+
+	SELECT partition_column_id('events');
+COMMIT;
+
 -- should see error (catalog is not distributed)
 SELECT partition_column_id('pg_type');
 

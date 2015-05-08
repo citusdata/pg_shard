@@ -134,6 +134,13 @@ SELECT partition_column_id('events');
                    2
 (1 row)
 
+-- system columns should raise an error
+BEGIN;
+	UPDATE pgs_distribution_metadata.partition SET key = 'ctid'
+	WHERE relation_id = 'events'::regclass;
+	SELECT partition_column_id('events');
+ERROR:  column "ctid" of relation "events" is a system column
+COMMIT;
 -- should see error (catalog is not distributed)
 SELECT partition_column_id('pg_type');
 ERROR:  no partition column is defined for relation "pg_type"
