@@ -99,19 +99,19 @@ load_shard_id_array(PG_FUNCTION_ARGS)
 /*
  * load_shard_interval_array loads a shard interval using a provided identifier
  * and returns a two-element array consisting of min/max values contained in
- * that shard interval (currently always integer values). If no such interval
- * can be found, this function raises an error instead.
+ * that shard interval. If no such interval can be found, this function raises
+ * an error instead.
  */
 Datum
 load_shard_interval_array(PG_FUNCTION_ARGS)
 {
 	int64 shardId = PG_GETARG_INT64(0);
+	Oid expectedType = get_fn_expr_argtype(fcinfo->flinfo, 1);
 	ShardInterval *shardInterval = LoadShardInterval(shardId);
 	Datum shardIntervalArray[] = { shardInterval->minValue, shardInterval->maxValue };
 	ArrayType *shardIntervalArrayType = NULL;
 
-	/* for now we expect value type to always be integer (hash output) */
-	Assert(shardInterval->valueTypeId == INT4OID);
+	Assert(expectedType == shardInterval->valueTypeId);
 
 	shardIntervalArrayType = DatumArrayToArrayType(shardIntervalArray, 2,
 												   shardInterval->valueTypeId);
@@ -187,9 +187,9 @@ partition_column_id(PG_FUNCTION_ARGS)
 
 
 /*
- * partition_column_id simply finds a distributed table using the provided Oid
- * and returns the column_id of its partition column. If the specified table is
- * not distributed, this function raises an error instead.
+ * partition_type simply finds a distributed table using the provided Oid and
+ * returns the type of partitioning in use by that table. If the specified
+ * table is not distributed, this function raises an error instead.
  */
 Datum
 partition_type(PG_FUNCTION_ARGS)
@@ -202,9 +202,8 @@ partition_type(PG_FUNCTION_ARGS)
 
 
 /*
- * partition_column_id simply finds a distributed table using the provided Oid
- * and returns the column_id of its partition column. If the specified table is
- * not distributed, this function raises an error instead.
+ * is_distributed_table simply returns whether a given table is distributed. No
+ * errors, just a boolean.
  */
 Datum
 is_distributed_table(PG_FUNCTION_ARGS)
@@ -216,6 +215,10 @@ is_distributed_table(PG_FUNCTION_ARGS)
 }
 
 
+/*
+ * distributed_tables_exist returns whether pg_shard knows of any distributed
+ * tables whatsoever.
+ */
 Datum
 distributed_tables_exist(PG_FUNCTION_ARGS __attribute__((unused)))
 {
@@ -225,6 +228,12 @@ distributed_tables_exist(PG_FUNCTION_ARGS __attribute__((unused)))
 }
 
 
+/*
+ * column_name_to_column_id takes a relation identifier and a name of a column
+ * in that relation and returns the index of that column in the relation. If
+ * the provided name is a system column or no column at all, this function will
+ * throw an error instead.
+ */
 Datum
 column_name_to_column_id(PG_FUNCTION_ARGS)
 {

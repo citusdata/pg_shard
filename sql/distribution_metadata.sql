@@ -7,8 +7,8 @@ CREATE FUNCTION load_shard_id_array(regclass, bool)
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 
-CREATE FUNCTION load_shard_interval_array(bigint)
-	RETURNS integer[]
+CREATE FUNCTION load_shard_interval_array(bigint, anyelement)
+	RETURNS anyarray
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 
@@ -120,10 +120,23 @@ SELECT load_shard_id_array('events', true);
 SELECT load_shard_id_array('pg_type', false);
 
 -- should see array with first shard range
-SELECT load_shard_interval_array(1);
+SELECT load_shard_interval_array(1, 0);
+
+-- should even work for range-partitioned shards
+BEGIN;
+	UPDATE pgs_distribution_metadata.shard SET
+		min_value = 'Aardvark',
+		max_value = 'Zebra'
+	WHERE id = 1;
+
+	UPDATE pgs_distribution_metadata.partition SET partition_method = 'r'
+	WHERE relation_id = 'events'::regclass;
+
+	SELECT load_shard_interval_array(1, ''::text);
+ROLLBACK;
 
 -- should see error for non-existent shard
-SELECT load_shard_interval_array(5);
+SELECT load_shard_interval_array(5, 0);
 
 -- should see two placements
 SELECT load_shard_placement_array(2, false);
