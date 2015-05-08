@@ -230,6 +230,11 @@ WHERE id = :new_placement_id;
      0
 (1 row)
 
+-- deleting or updating a non-existent row should fail
+SELECT delete_shard_placement_row(:new_placement_id);
+ERROR:  shard placement with ID 1 does not exist
+SELECT update_shard_placement_row_state(:new_placement_id, 3);
+ERROR:  shard placement with ID 1 does not exist
 -- now we'll even test our lock methods...
 -- use transaction to bound how long we hold the lock
 BEGIN;

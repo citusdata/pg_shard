@@ -174,6 +174,10 @@ SELECT delete_shard_placement_row(:new_placement_id);
 SELECT COUNT(*) FROM pgs_distribution_metadata.shard_placement
 WHERE id = :new_placement_id;
 
+-- deleting or updating a non-existent row should fail
+SELECT delete_shard_placement_row(:new_placement_id);
+SELECT update_shard_placement_row_state(:new_placement_id, 3);
+
 -- now we'll even test our lock methods...
 
 -- use transaction to bound how long we hold the lock
