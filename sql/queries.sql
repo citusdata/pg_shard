@@ -140,6 +140,15 @@ SELECT title, authors.name FROM authors, articles WHERE authors.id = articles.au
 -- joins are not supported in FROM clause
 SELECT * FROM  (articles INNER JOIN authors ON articles.id = authors.id);
 
+-- test CitusDB code path (this will error out in normal PostgreSQL)
+SELECT sync_table_metadata_to_citus('articles');
+
+-- with normal PostgreSQL, expect error about CitusDB being missing
+-- with CitusDB, expect an error about JOINing local table with distributed
+SET pg_shard.use_citusdb_select_logic TO true;
+SELECT title, authors.name FROM authors, articles WHERE authors.id = articles.author_id;
+SET pg_shard.use_citusdb_select_logic TO false;
+
 -- test cross-shard queries
 SELECT COUNT(*) FROM articles;
 
