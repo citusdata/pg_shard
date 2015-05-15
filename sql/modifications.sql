@@ -124,6 +124,9 @@ SELECT kind, limit_price FROM limit_orders WHERE id = 246;
 -- commands with no constraints on the partition key are not supported
 UPDATE limit_orders SET limit_price = 0.00;
 
+-- attempting to change the partition key is unsupported
+UPDATE limit_orders SET id = 0 WHERE id = 246;
+
 -- UPDATEs with a FROM clause are unsupported
 UPDATE limit_orders SET limit_price = 0.00 FROM bidders
 					WHERE limit_orders.id = 246 AND
