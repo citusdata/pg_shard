@@ -92,6 +92,8 @@ bool LogDistributedStatements = false;
 /* planner functions forward declarations */
 static PlannedStmt * PgShardPlanner(Query *parse, int cursorOptions,
 									ParamListInfo boundParams);
+static bool GroupedByColumn(List *groupClauseList, List *targetList, Var *column);
+static bool SafeToPushDownGroupBy(Query *localQuery, Var *partitionColumn);
 static PlannerType DeterminePlannerType(Query *query);
 static void ErrorIfQueryNotSupported(Query *queryTree);
 static Oid ExtractFirstDistributedTableId(Query *query);
@@ -265,6 +267,8 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			List *queryRestrictList = QueryRestrictList(distributedQuery);
 			List *remoteRestrictList = NIL;
 			List *localRestrictList = NIL;
+			bool safeToPushDownGroupBy = false;
+			Var *partitionColumn = NULL;
 
 			/* partition restrictions into remote and local lists */
 			ClassifyRestrictions(queryRestrictList, &remoteRestrictList,
@@ -276,6 +280,16 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 													   localRestrictList);
 			localQuery = BuildLocalQuery(query, localRestrictList);
 
+			distributedTableId = ExtractFirstDistributedTableId(distributedQuery);
+			partitionColumn = PartitionColumn(distributedTableId);
+
+			safeToPushDownGroupBy = SafeToPushDownGroupBy(localQuery, partitionColumn);
+			if (safeToPushDownGroupBy)
+			{
+
+
+			}
+
 			/*
 			 * Force a sequential scan as we change the underlying table to
 			 * point to our intermediate temporary table which contains the
@@ -284,7 +298,6 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			plannedStatement = PlanSequentialScan(localQuery, cursorOptions, boundParams);
 
 			/* construct a CreateStmt to clone the existing table */
-			distributedTableId = ExtractFirstDistributedTableId(distributedQuery);
 			createTemporaryTableStmt = CreateTemporaryTableLikeStmt(distributedTableId);
 		}
 
@@ -328,6 +341,55 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 
 	return plannedStatement;
 }
+
+
+/*
+ * biraz sacma olmus parametre ikilisi. Once local query almisiz sonra distributedId
+ * */
+static bool
+SafeToPushDownGroupBy(Query *localQuery, Var *partitionColumn)
+{
+	List *groupClauseList = localQuery->groupClause;
+	List *targetList = localQuery->targetList;
+	bool pushDownGroupBy = false;
+
+	pushDownGroupBy = GroupedByColumn(groupClauseList, targetList, partitionColumn);
+
+	return pushDownGroupBy;
+}
+
+
+/*
+ * GroupedByColumn walks over group clauses in the given list, and checks if any
+ * of the group clauses is on the given column.
+ */
+static bool
+GroupedByColumn(List *groupClauseList, List *targetList, Var *column)
+{
+	bool groupedByColumn = false;
+	ListCell *groupClauseCell = NULL;
+
+	foreach(groupClauseCell, groupClauseList)
+	{
+		SortGroupClause *groupClause = (SortGroupClause *) lfirst(groupClauseCell);
+		TargetEntry *groupTargetEntry = get_sortgroupclause_tle(groupClause, targetList);
+
+		Expr *groupExpression = (Expr *) groupTargetEntry->expr;
+		if (IsA(groupExpression, Var))
+		{
+			Var *groupColumn = (Var *) groupExpression;
+			if (groupColumn->varno == column->varno &&
+				groupColumn->varattno == column->varattno)
+			{
+				groupedByColumn = true;
+				break;
+			}
+		}
+	}
+
+	return groupedByColumn;
+}
+
 
 
 /*
