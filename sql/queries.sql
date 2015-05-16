@@ -159,6 +159,24 @@ SELECT author_id, sum(word_count) AS corpus_size FROM articles
 	ORDER BY sum(word_count) DESC
 	LIMIT 5;
 
+-- cross-shard queries on a foreign table should fail
+-- we'll just point the article shards to a foreign table
+BEGIN;
+	CREATE FOREIGN TABLE foreign_articles (author_id bigint) SERVER fake_fdw_server;
+
+	UPDATE pgs_distribution_metadata.partition
+	SET relation_id='foreign_articles'::regclass
+	WHERE relation_id='articles'::regclass;
+
+	UPDATE pgs_distribution_metadata.shard
+	SET relation_id='foreign_articles'::regclass
+	WHERE relation_id='articles'::regclass;
+
+	SET pg_shard.log_distributed_statements = on;
+
+	SELECT COUNT(*) FROM foreign_articles;
+ROLLBACK;
+
 -- verify pg_shard produces correct remote SQL using logging flag
 SET pg_shard.log_distributed_statements = on;
 SET client_min_messages = log;

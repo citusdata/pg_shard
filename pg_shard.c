@@ -841,7 +841,7 @@ PlanSequentialScan(Query *query, int cursorOptions, ParamListInfo boundParams)
 			{
 				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 								errmsg("multi-shard SELECTs from foreign tables are "
-									   "unsupported ")));
+									   "unsupported")));
 			}
 		}
 	}
