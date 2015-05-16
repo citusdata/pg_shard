@@ -58,6 +58,7 @@
 #include "optimizer/cost.h"
 #include "optimizer/planner.h"
 #include "optimizer/var.h"
+#include "optimizer/tlist.h"
 #include "parser/analyze.h"
 #include "parser/parse_node.h"
 #include "parser/parsetree.h"
@@ -93,6 +94,9 @@ bool LogDistributedStatements = false;
 static PlannedStmt * PgShardPlanner(Query *parse, int cursorOptions,
 									ParamListInfo boundParams);
 static bool GroupedByColumn(List *groupClauseList, List *targetList, Var *column);
+static Query * LocalQueryDirectPushDown(Query *query);
+static Query * DistributedQueryDirectPushDown(Query *distributedQuery,
+		                                      Query *localQuery);
 static bool SafeToPushDownGroupBy(Query *localQuery, Var *partitionColumn);
 static PlannerType DeterminePlannerType(Query *query);
 static void ErrorIfQueryNotSupported(Query *queryTree);
@@ -113,6 +117,7 @@ static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
 static List * QueryFromList(List *rangeTableList);
 static List * TargetEntryList(List *expressionList);
 static CreateStmt * CreateTemporaryTableLikeStmt(Oid sourceRelationId);
+static CreateStmt * CreateAggregatedTableStmt(Query *query);
 static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalList);
 
 /* executor functions forward declarations */
@@ -236,6 +241,8 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 		List *queryShardList = NIL;
 		bool selectFromMultipleShards = false;
 		CreateStmt *createTemporaryTableStmt = NULL;
+		bool safeToPushDownGroupBy = false;
+		Query * localQuery = NULL;
 
 		/* call standard planner first to have Query transformations performed */
 		plannedStatement = standard_planner(distributedQuery, cursorOptions,
@@ -263,11 +270,9 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 		if (selectFromMultipleShards)
 		{
 			Oid distributedTableId = InvalidOid;
-			Query *localQuery = NULL;
 			List *queryRestrictList = QueryRestrictList(distributedQuery);
 			List *remoteRestrictList = NIL;
 			List *localRestrictList = NIL;
-			bool safeToPushDownGroupBy = false;
 			Var *partitionColumn = NULL;
 
 			/* partition restrictions into remote and local lists */
@@ -286,8 +291,16 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			safeToPushDownGroupBy = SafeToPushDownGroupBy(localQuery, partitionColumn);
 			if (safeToPushDownGroupBy)
 			{
+				distributedQuery = DistributedQueryDirectPushDown(distributedQuery,
+																  localQuery);
+				localQuery = LocalQueryDirectPushDown(localQuery);
+				createTemporaryTableStmt = CreateAggregatedTableStmt(localQuery);
 
-
+			}
+			else
+			{
+				/* construct a CreateStmt to clone the existing table */
+				createTemporaryTableStmt = CreateTemporaryTableLikeStmt(distributedTableId);
 			}
 
 			/*
@@ -297,14 +310,18 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			 */
 			plannedStatement = PlanSequentialScan(localQuery, cursorOptions, boundParams);
 
-			/* construct a CreateStmt to clone the existing table */
-			createTemporaryTableStmt = CreateTemporaryTableLikeStmt(distributedTableId);
 		}
+
 
 		distributedPlan = BuildDistributedPlan(distributedQuery, queryShardList);
 		distributedPlan->originalPlan = plannedStatement->planTree;
 		distributedPlan->selectFromMultipleShards = selectFromMultipleShards;
 		distributedPlan->createTemporaryTableStmt = createTemporaryTableStmt;
+
+		if (safeToPushDownGroupBy)
+		{
+			distributedPlan->targetList = localQuery->targetList;
+		}
 
 		plannedStatement->planTree = (Plan *) distributedPlan;
 	}
@@ -390,6 +407,60 @@ GroupedByColumn(List *groupClauseList, List *targetList, Var *column)
 	return groupedByColumn;
 }
 
+
+/*
+ * Replace localQuery to SELECT * FROM aggragetedtable WHERE TRUE
+ *
+ */
+static Query *
+LocalQueryDirectPushDown(Query *localQuery)
+{
+	Query *aggregatedLocalQuery = copyObject(localQuery);
+	AttrNumber attributeNumber = 1;
+	List *localQueryTargetList = localQuery->targetList;
+	Index tableOrder = 1;
+	ListCell *targetListCell = NULL;
+	List *aggregatedQuerytargetEntryList = NIL;
+
+	foreach(targetListCell, localQueryTargetList)
+	{
+		TargetEntry *targetListEntry = (TargetEntry *) lfirst(targetListCell);
+		TargetEntry *aggregatedQueryTargetEntry = NULL;
+		Var *targetVar = makeVarFromTargetEntry(tableOrder, targetListEntry);
+
+		aggregatedQueryTargetEntry = makeTargetEntry((Expr *)targetVar, attributeNumber, NULL, false);
+		++attributeNumber;
+
+		aggregatedQuerytargetEntryList = lappend(aggregatedQuerytargetEntryList,
+												 aggregatedQueryTargetEntry);
+	}
+
+	aggregatedLocalQuery->targetList = aggregatedQuerytargetEntryList;
+
+	aggregatedLocalQuery->hasAggs = false;
+	aggregatedLocalQuery->groupClause = NIL;
+	aggregatedLocalQuery->havingQual = NULL;
+
+	return aggregatedLocalQuery;
+}
+
+
+/*
+ * Replcae Distributed Query
+ */
+static Query *
+DistributedQueryDirectPushDown(Query *distributedQuery, Query *localQuery)
+{
+	Query *aggregatedDistributedQuery = copyObject(distributedQuery);
+
+	/* boyle direkt yapamayabiliriz, dikkat */
+	aggregatedDistributedQuery->targetList = list_copy(localQuery->targetList);
+	aggregatedDistributedQuery->groupClause = list_copy(localQuery->groupClause);
+	aggregatedDistributedQuery->havingQual = copyObject(localQuery->havingQual);
+	aggregatedDistributedQuery->hasAggs = true;
+
+	return aggregatedDistributedQuery;
+}
 
 
 /*
@@ -1069,6 +1140,84 @@ TargetEntryList(List *expressionList)
 	}
 
 	return targetEntryList;
+}
+
+
+/*
+ * Create temp table when aggreagation is pushed down to the workers.
+ */
+static CreateStmt *
+CreateAggregatedTableStmt(Query *query)
+{
+	static unsigned long temporaryTableId = 0;
+	List *aggragtedColumnList = NIL;
+	CreateStmt *createStatement = makeNode(CreateStmt);
+	StringInfo tableName = NULL;
+	RangeVar *relation = NULL;
+	ListCell *projectClauseCell = NULL;
+	int columnCount = 0;
+
+
+	PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
+	PVCPlaceHolderBehavior placeHolderBehavior = PVC_INCLUDE_PLACEHOLDERS; //what to do with it??
+	/* as well as any used in projections (GROUP BY, etc.) */
+	List *projectColumnList = pull_var_clause((Node *) query->targetList, aggregateBehavior,
+											 placeHolderBehavior);
+
+
+	createStatement->inhRelations = NIL;
+	createStatement->constraints = NIL;
+	createStatement->options = NIL;
+	createStatement->oncommit = ONCOMMIT_NOOP;
+	createStatement->tablespacename = NULL;
+	createStatement->if_not_exists = false;
+
+	/* create a unique name for the table */
+	tableName = makeStringInfo();
+	appendStringInfo(tableName, "%s_%d_%lu", TEMPORARY_TABLE_PREFIX, MyProcPid,
+					 temporaryTableId);
+	temporaryTableId++;
+
+	relation = makeRangeVar(NULL, tableName->data, -1);
+	relation->relpersistence = RELPERSISTENCE_TEMP;
+
+	foreach(projectClauseCell, projectColumnList)
+	{
+		Expr *groupExpression = (Expr *) lfirst(projectClauseCell);
+		if (IsA(groupExpression, Var))
+		{
+			Var *projectColumn = (Var *) groupExpression;
+			StringInfo columnName = makeStringInfo();
+			ColumnDef *columnDefinition = makeNode(ColumnDef);
+
+			appendStringInfo(columnName, "%s", "expval_");
+			appendStringInfo(columnName, "%d", columnCount);
+
+			++columnCount;
+			columnDefinition->colname = columnName->data;
+			columnDefinition->typeName = makeTypeNameFromOid(projectColumn->vartype,
+															 projectColumn->vartypmod);
+
+			columnDefinition->inhcount = 1;
+			columnDefinition->is_not_null = false;
+			columnDefinition->is_from_type = false;
+			columnDefinition->storage = 0;
+			columnDefinition->raw_default = NULL;
+			columnDefinition->cooked_default = NULL;
+			columnDefinition->collClause = NULL;
+			columnDefinition->collOid = projectColumn->varcollid;
+			columnDefinition->constraints = NIL;
+			columnDefinition->is_local = true;
+
+			aggragtedColumnList = lappend(aggragtedColumnList, columnDefinition);
+		}
+	}
+
+	createStatement->tableElts = aggragtedColumnList;
+	createStatement->relation = relation;
+
+
+	return createStatement;
 }
 
 
