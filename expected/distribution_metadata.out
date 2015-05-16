@@ -247,8 +247,15 @@ SELECT COUNT(*) FROM pg_locks WHERE locktype = 'advisory' AND objid = 5;
      0
 (1 row)
 
--- finally, check that having distributed tables prevent dropping the extension 
+-- finally, check that having distributed tables prevent dropping the extension
 DROP EXTENSION pg_shard;
 ERROR:  cannot drop extension pg_shard because other objects depend on it
 DETAIL:  Existing distributed tables depend on extension pg_shard
 HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+-- prevent actual drop using transaction
+BEGIN;
+-- the above should fail but we can force a drop with CASCADE
+DROP EXTENSION pg_shard CASCADE;
+NOTICE:  shards remain on worker nodes
+DETAIL:  Shards created by the extension are not removed by DROP EXTENSION.
+ROLLBACK;
