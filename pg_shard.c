@@ -97,7 +97,7 @@ static bool GroupedByColumn(List *groupClauseList, List *targetList, Var *column
 static Query * LocalQueryDirectPushDown(Query *query);
 static Query * DistributedQueryDirectPushDown(Query *distributedQuery,
 		                                      Query *localQuery);
-static bool SafeToPushDownGroupBy(Query *localQuery, Var *partitionColumn);
+static bool SafeToPushDownGroupBy(Query *localQuery, Oid tableId);
 static PlannerType DeterminePlannerType(Query *query);
 static void ErrorIfQueryNotSupported(Query *queryTree);
 static Oid ExtractFirstDistributedTableId(Query *query);
@@ -286,16 +286,14 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			localQuery = BuildLocalQuery(query, localRestrictList);
 
 			distributedTableId = ExtractFirstDistributedTableId(distributedQuery);
-			partitionColumn = PartitionColumn(distributedTableId);
 
-			safeToPushDownGroupBy = SafeToPushDownGroupBy(localQuery, partitionColumn);
+			safeToPushDownGroupBy = SafeToPushDownGroupBy(localQuery, distributedTableId);
 			if (safeToPushDownGroupBy)
 			{
 				distributedQuery = DistributedQueryDirectPushDown(distributedQuery,
 																  localQuery);
 				localQuery = LocalQueryDirectPushDown(localQuery);
 				createTemporaryTableStmt = CreateAggregatedTableStmt(localQuery);
-
 			}
 			else
 			{
@@ -320,8 +318,12 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 
 		if (safeToPushDownGroupBy)
 		{
-			distributedPlan->targetList = localQuery->targetList;
+			MemoryContext oldContext = MemoryContextSwitchTo(TopMemoryContext);
+			distributedPlan->targetList = list_copy(localQuery->targetList);
+			MemoryContextSwitchTo(oldContext);
+
 		}
+
 
 		plannedStatement->planTree = (Plan *) distributedPlan;
 	}
@@ -359,16 +361,25 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 	return plannedStatement;
 }
 
-
 /*
  * biraz sacma olmus parametre ikilisi. Once local query almisiz sonra distributedId
  * */
 static bool
-SafeToPushDownGroupBy(Query *localQuery, Var *partitionColumn)
+SafeToPushDownGroupBy(Query *localQuery, Oid tableId)
 {
 	List *groupClauseList = localQuery->groupClause;
 	List *targetList = localQuery->targetList;
 	bool pushDownGroupBy = false;
+	Var *partitionColumn = PartitionColumn(tableId);
+	char *finalAttributeName =  get_attname(tableId, list_length(targetList));
+
+	/*
+	 * Explain wierd limitation
+	 */
+	if (finalAttributeName == NULL)
+	{
+		return false;
+	}
 
 	pushDownGroupBy = GroupedByColumn(groupClauseList, targetList, partitionColumn);
 
@@ -417,10 +428,11 @@ LocalQueryDirectPushDown(Query *localQuery)
 {
 	Query *aggregatedLocalQuery = copyObject(localQuery);
 	AttrNumber attributeNumber = 1;
-	List *localQueryTargetList = localQuery->targetList;
+	List *localQueryTargetList = aggregatedLocalQuery->targetList;
 	Index tableOrder = 1;
 	ListCell *targetListCell = NULL;
 	List *aggregatedQuerytargetEntryList = NIL;
+
 
 	foreach(targetListCell, localQueryTargetList)
 	{
@@ -428,15 +440,26 @@ LocalQueryDirectPushDown(Query *localQuery)
 		TargetEntry *aggregatedQueryTargetEntry = NULL;
 		Var *targetVar = makeVarFromTargetEntry(tableOrder, targetListEntry);
 
-		aggregatedQueryTargetEntry = makeTargetEntry((Expr *)targetVar, attributeNumber, NULL, false);
-		++attributeNumber;
+		aggregatedQueryTargetEntry = makeTargetEntry((Expr *)targetVar, attributeNumber, targetListEntry->resname, targetListEntry->resjunk);
 
-		aggregatedQuerytargetEntryList = lappend(aggregatedQuerytargetEntryList,
-												 aggregatedQueryTargetEntry);
+		/* GROUP BY / ORDER BY columns*/
+		if (targetListEntry->ressortgroupref != 0)
+		{
+			aggregatedQueryTargetEntry->ressortgroupref = targetListEntry->ressortgroupref;
+		}
+
+		/* Bunun sebebi GROUP BY/ORDER BY automatic olarak targetlistte cikiyor, cikmasini engelle */
+		if (targetListEntry->resjunk == false)
+		{
+
+			aggregatedQuerytargetEntryList = lappend(aggregatedQuerytargetEntryList,
+													 aggregatedQueryTargetEntry);
+			++attributeNumber;
+		}
 	}
 
-	aggregatedLocalQuery->targetList = aggregatedQuerytargetEntryList;
 
+	aggregatedLocalQuery->targetList = aggregatedQuerytargetEntryList;
 	aggregatedLocalQuery->hasAggs = false;
 	aggregatedLocalQuery->groupClause = NIL;
 	aggregatedLocalQuery->havingQual = NULL;
@@ -451,6 +474,8 @@ LocalQueryDirectPushDown(Query *localQuery)
 static Query *
 DistributedQueryDirectPushDown(Query *distributedQuery, Query *localQuery)
 {
+	MemoryContext oldContext = MemoryContextSwitchTo(TopMemoryContext);
+
 	Query *aggregatedDistributedQuery = copyObject(distributedQuery);
 
 	/* boyle direkt yapamayabiliriz, dikkat */
@@ -458,6 +483,7 @@ DistributedQueryDirectPushDown(Query *distributedQuery, Query *localQuery)
 	aggregatedDistributedQuery->groupClause = list_copy(localQuery->groupClause);
 	aggregatedDistributedQuery->havingQual = copyObject(localQuery->havingQual);
 	aggregatedDistributedQuery->hasAggs = true;
+	MemoryContextSwitchTo(oldContext);
 
 	return aggregatedDistributedQuery;
 }
@@ -1149,17 +1175,19 @@ TargetEntryList(List *expressionList)
 static CreateStmt *
 CreateAggregatedTableStmt(Query *query)
 {
-	static unsigned long temporaryTableId = 0;
 	List *aggragtedColumnList = NIL;
 	CreateStmt *createStatement = makeNode(CreateStmt);
 	StringInfo tableName = NULL;
 	RangeVar *relation = NULL;
 	ListCell *projectClauseCell = NULL;
-	int columnCount = 0;
+	unsigned int columnCount = 0;
+	char *temporaryTableColumnPrefix = "temp_column_";
+	static unsigned long temporaryTableId = 0;
 
 
 	PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
 	PVCPlaceHolderBehavior placeHolderBehavior = PVC_INCLUDE_PLACEHOLDERS; //what to do with it??
+
 	/* as well as any used in projections (GROUP BY, etc.) */
 	List *projectColumnList = pull_var_clause((Node *) query->targetList, aggregateBehavior,
 											 placeHolderBehavior);
@@ -1168,7 +1196,7 @@ CreateAggregatedTableStmt(Query *query)
 	createStatement->inhRelations = NIL;
 	createStatement->constraints = NIL;
 	createStatement->options = NIL;
-	createStatement->oncommit = ONCOMMIT_NOOP;
+	createStatement->oncommit = ONCOMMIT_DROP;
 	createStatement->tablespacename = NULL;
 	createStatement->if_not_exists = false;
 
@@ -1189,8 +1217,7 @@ CreateAggregatedTableStmt(Query *query)
 			Var *projectColumn = (Var *) groupExpression;
 			StringInfo columnName = makeStringInfo();
 			ColumnDef *columnDefinition = makeNode(ColumnDef);
-
-			appendStringInfo(columnName, "%s", "expval_");
+			appendStringInfo(columnName, "%s", temporaryTableColumnPrefix);
 			appendStringInfo(columnName, "%d", columnCount);
 
 			++columnCount;
