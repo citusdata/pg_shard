@@ -116,9 +116,10 @@ static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
 static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
 static List * QueryFromList(List *rangeTableList);
 static List * TargetEntryList(List *expressionList);
-static CreateStmt * CreateTemporaryTable(Query *localQuery, Query *distributedQuery, bool pushDownGroupBy);
+static CreateStmt * CreateTemporaryTable(Query *localQuery, Query *distributedQuery,
+										 bool pushDownAggregates);
 static CreateStmt * CreateTemporaryTableLikeStmt(Oid sourceRelationId);
-static CreateStmt * CreateAggregatedTableStmt(Query *query);
+static CreateStmt * CreateTemporaryAggregatedTableStmt(Query *query);
 static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalList);
 
 /* executor functions forward declarations */
@@ -238,11 +239,12 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 	if (plannerType == PLANNER_TYPE_PG_SHARD)
 	{
 		DistributedPlan *distributedPlan = NULL;
+		List *distributedPlanTargetList = NIL;
 		Query *distributedQuery = copyObject(query);
 		List *queryShardList = NIL;
 		bool selectFromMultipleShards = false;
 		CreateStmt *createTemporaryTableStmt = NULL;
-		bool safeToPushDownGroupBy = false;
+		bool safeToPushDownAggregates = false;
 		Query * localQuery = NULL;
 
 		/* call standard planner first to have Query transformations performed */
@@ -286,19 +288,23 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 													   localRestrictList);
 			localQuery = BuildLocalQuery(query, localRestrictList);
 
+			distributedPlanTargetList = distributedQuery->targetList;
+			distributedTableId = ExtractFirstDistributedTableId(distributedQuery);
 
-			safeToPushDownGroupBy = SafeToPushDownGroupBy(localQuery, distributedTableId);
-			if (safeToPushDownGroupBy)
+			safeToPushDownAggregates = SafeToPushDownGroupBy(localQuery, distributedTableId);
+			if (safeToPushDownAggregates)
 			{
+				/* re-build local and distributed query if we can push down aggregates */
 				distributedQuery = DistributedQueryDirectPushDown(distributedQuery,
 																  localQuery);
 				localQuery = LocalQueryDirectPushDown(localQuery);
-				createTemporaryTableStmt = CreateAggregatedTableStmt(localQuery);
-			}
-			else
-			{
-				/* construct a CreateStmt to clone the existing table */
-				createTemporaryTableStmt = CreateTemporaryTableLikeStmt(distributedTableId);
+
+				/*
+				 * distributedPlanTargetList is used for determining intermediate
+				 * temporary table's tuple descriptor in the executer. So, this
+				 * assignment reflects pushed down aggregates in the distributedPlan.
+				 */
+				distributedPlanTargetList = list_copy(localQuery->targetList);
 			}
 
 			/*
@@ -308,8 +314,12 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			 */
 			plannedStatement = PlanSequentialScan(localQuery, cursorOptions, boundParams);
 
-			//createTemporaryTableStmt = CreateTemporaryTable(localQuery, distributedQuery , safeToPushDownGroupBy);
-
+			createTemporaryTableStmt = CreateTemporaryTable(localQuery, distributedQuery,
+															safeToPushDownAggregates);
+		}
+		else
+		{
+			distributedPlanTargetList = distributedQuery->targetList;
 		}
 
 
@@ -317,13 +327,7 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 		distributedPlan->originalPlan = plannedStatement->planTree;
 		distributedPlan->selectFromMultipleShards = selectFromMultipleShards;
 		distributedPlan->createTemporaryTableStmt = createTemporaryTableStmt;
-
-		if (safeToPushDownGroupBy)
-		{
-			distributedPlan->targetList = list_copy(localQuery->targetList);
-
-		}
-
+		distributedPlan->targetList = distributedPlanTargetList;
 
 		plannedStatement->planTree = (Plan *) distributedPlan;
 	}
@@ -1166,17 +1170,19 @@ TargetEntryList(List *expressionList)
 	return targetEntryList;
 }
 
-
+/*
+ * CreateTemporaryTableLikeStmt returns a CreateStmt node depending on whether the
+ * aggregates in the query can be pushed down to the workers or not.
+ */
 static CreateStmt *
-CreateTemporaryTable(Query *localQuery, Query *distributedQuery, bool pushDownGroupBy)
+CreateTemporaryTable(Query *localQuery, Query *distributedQuery, bool pushDownAggregates)
 {
 	CreateStmt *createStmt = NULL;
 	Oid distributedTableId = ExtractFirstDistributedTableId(distributedQuery);
 
-
-	if (pushDownGroupBy)
+	if (pushDownAggregates)
 	{
-		createStmt = CreateAggregatedTableStmt(localQuery);
+		createStmt = CreateTemporaryAggregatedTableStmt(localQuery);
 	}
 	else
 	{
@@ -1187,44 +1193,33 @@ CreateTemporaryTable(Query *localQuery, Query *distributedQuery, bool pushDownGr
 }
 
 /*
- * Create temp table when aggreagation is pushed down to the workers.
+ * CreateTemporaryAggregatedTableStmt returns a CreateStmt node which will create
+ * a temporary table whose columns are the same as the query parameter's range table
+ * entries that are Var expressions.
  */
 static CreateStmt *
-CreateAggregatedTableStmt(Query *query)
+CreateTemporaryAggregatedTableStmt(Query *query)
 {
+	unsigned int columnCount = 0;
+	char *temporaryTableColumnPrefix = "temp_column_";
+	static unsigned long temporaryTableId = 0;
 	List *aggragtedColumnList = NIL;
 	CreateStmt *createStatement = makeNode(CreateStmt);
 	StringInfo tableName = NULL;
 	RangeVar *relation = NULL;
 	ListCell *projectClauseCell = NULL;
-	unsigned int columnCount = 0;
-	char *temporaryTableColumnPrefix = "temp_column_";
-	static unsigned long temporaryTableId = 0;
-
-
 	PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
-	PVCPlaceHolderBehavior placeHolderBehavior = PVC_INCLUDE_PLACEHOLDERS; //what to do with it??
+	PVCPlaceHolderBehavior placeHolderBehavior = PVC_INCLUDE_PLACEHOLDERS;
 
 	/* as well as any used in projections (GROUP BY, etc.) */
-	List *projectColumnList = pull_var_clause((Node *) query->targetList, aggregateBehavior,
-											 placeHolderBehavior);
-
-
-	createStatement->inhRelations = NIL;
-	createStatement->constraints = NIL;
-	createStatement->options = NIL;
-	createStatement->oncommit = ONCOMMIT_DROP;
-	createStatement->tablespacename = NULL;
-	createStatement->if_not_exists = false;
+	List *projectColumnList = pull_var_clause((Node *) query->targetList,
+											  aggregateBehavior, placeHolderBehavior);
 
 	/* create a unique name for the table */
 	tableName = makeStringInfo();
 	appendStringInfo(tableName, "%s_%d_%lu", TEMPORARY_TABLE_PREFIX, MyProcPid,
 					 temporaryTableId);
 	temporaryTableId++;
-
-	relation = makeRangeVar(NULL, tableName->data, -1);
-	relation->relpersistence = RELPERSISTENCE_TEMP;
 
 	foreach(projectClauseCell, projectColumnList)
 	{
@@ -1237,11 +1232,9 @@ CreateAggregatedTableStmt(Query *query)
 			appendStringInfo(columnName, "%s", temporaryTableColumnPrefix);
 			appendStringInfo(columnName, "%d", columnCount);
 
-			++columnCount;
 			columnDefinition->colname = columnName->data;
 			columnDefinition->typeName = makeTypeNameFromOid(projectColumn->vartype,
 															 projectColumn->vartypmod);
-
 			columnDefinition->inhcount = 1;
 			columnDefinition->is_not_null = false;
 			columnDefinition->is_from_type = false;
@@ -1253,13 +1246,26 @@ CreateAggregatedTableStmt(Query *query)
 			columnDefinition->constraints = NIL;
 			columnDefinition->is_local = true;
 
+			++columnCount;
 			aggragtedColumnList = lappend(aggragtedColumnList, columnDefinition);
+		}
+		else
+		{
+			//should we error out
 		}
 	}
 
+	relation = makeRangeVar(NULL, tableName->data, -1);
+	relation->relpersistence = RELPERSISTENCE_TEMP;
+
+	createStatement->inhRelations = NIL;
+	createStatement->constraints = NIL;
+	createStatement->options = NIL;
+	createStatement->oncommit = ONCOMMIT_DROP;
+	createStatement->tablespacename = NULL;
+	createStatement->if_not_exists = false;
 	createStatement->tableElts = aggragtedColumnList;
 	createStatement->relation = relation;
-
 
 	return createStatement;
 }
@@ -1317,7 +1323,7 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 	List *taskList = NIL;
 	DistributedPlan *distributedPlan = palloc0(sizeof(DistributedPlan));
 	distributedPlan->plan.type = (NodeTag) T_DistributedPlan;
-	distributedPlan->targetList = query->targetList;
+	//distributedPlan->targetList = query->targetList;
 
 	foreach(shardIntervalCell, shardIntervalList)
 	{
@@ -1358,6 +1364,9 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 	}
 
 	distributedPlan->taskList = taskList;
+
+	//distributedPlan->targetList = list_copy(localQuery->targetList);
+
 
 	return distributedPlan;
 }
