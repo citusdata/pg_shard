@@ -94,10 +94,10 @@ bool LogDistributedStatements = false;
 static PlannedStmt * PgShardPlanner(Query *parse, int cursorOptions,
 									ParamListInfo boundParams);
 static bool GroupedByColumn(List *groupClauseList, List *targetList, Var *column);
-static Query * LocalQueryDirectPushDown(Query *query);
-static Query * DistributedQueryDirectPushDown(Query *distributedQuery,
+static Query * RemoveAggregates(Query *query);
+static Query * AggregateDistributedQuery(Query *distributedQuery,
 		                                      Query *localQuery);
-static bool SafeToPushDownGroupBy(Query *localQuery, Oid tableId);
+static bool SafeToPushDownAggregate(Query *localQuery, Oid tableId);
 static PlannerType DeterminePlannerType(Query *query);
 static void ErrorIfQueryNotSupported(Query *queryTree);
 static Oid ExtractFirstDistributedTableId(Query *query);
@@ -239,8 +239,8 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 	if (plannerType == PLANNER_TYPE_PG_SHARD)
 	{
 		DistributedPlan *distributedPlan = NULL;
-		List *distributedPlanTargetList = NIL;
 		Query *distributedQuery = copyObject(query);
+		List *distributedPlanTargetList = distributedQuery->targetList;
 		List *queryShardList = NIL;
 		bool selectFromMultipleShards = false;
 		CreateStmt *createTemporaryTableStmt = NULL;
@@ -291,13 +291,13 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			distributedPlanTargetList = distributedQuery->targetList;
 			distributedTableId = ExtractFirstDistributedTableId(distributedQuery);
 
-			safeToPushDownAggregates = SafeToPushDownGroupBy(localQuery, distributedTableId);
+			safeToPushDownAggregates = SafeToPushDownAggregate(localQuery, distributedTableId);
 			if (safeToPushDownAggregates)
 			{
 				/* re-build local and distributed query if we can push down aggregates */
-				distributedQuery = DistributedQueryDirectPushDown(distributedQuery,
-																  localQuery);
-				localQuery = LocalQueryDirectPushDown(localQuery);
+				distributedQuery = AggregateDistributedQuery(distributedQuery,
+															  localQuery);
+				localQuery = RemoveAggregates(localQuery);
 
 				/*
 				 * distributedPlanTargetList is used for determining intermediate
@@ -317,11 +317,6 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			createTemporaryTableStmt = CreateTemporaryTable(localQuery, distributedQuery,
 															safeToPushDownAggregates);
 		}
-		else
-		{
-			distributedPlanTargetList = distributedQuery->targetList;
-		}
-
 
 		distributedPlan = BuildDistributedPlan(distributedQuery, queryShardList);
 		distributedPlan->originalPlan = plannedStatement->planTree;
@@ -366,28 +361,35 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 }
 
 /*
- * biraz sacma olmus parametre ikilisi. Once local query almisiz sonra distributedId
- * */
+ * SafeToPushDownAggregate returns true if GROUP BY clause includes the partition column.
+ * This function returns false if the total number of aggregated values are greater than
+ * the total number of columns on the distributed table whose Oid is the second parameter
+ * of this function.
+ */
 static bool
-SafeToPushDownGroupBy(Query *localQuery, Oid tableId)
+SafeToPushDownAggregate(Query *localQuery, Oid tableId)
 {
 	List *groupClauseList = localQuery->groupClause;
 	List *targetList = localQuery->targetList;
-	bool pushDownGroupBy = false;
+	bool pushDownAggregates = false;
 	Var *partitionColumn = PartitionColumn(tableId);
 	char *finalAttributeName =  get_attname(tableId, list_length(targetList));
 
 	/*
-	 * Explain wierd limitation
+	 * If this function returns true, standard_planner will be called on localQuery
+	 * at PlanSequentialScan function call. In a sequential scan, there is an implicit
+	 * check that the total number of unique targetList elements cannot be greater than
+	 * the total number of columns in the table. Thus, we do not let sequential scan on
+	 * such cases.
 	 */
 	if (finalAttributeName == NULL)
 	{
 		return false;
 	}
 
-	pushDownGroupBy = GroupedByColumn(groupClauseList, targetList, partitionColumn);
+	pushDownAggregates = GroupedByColumn(groupClauseList, targetList, partitionColumn);
 
-	return pushDownGroupBy;
+	return pushDownAggregates;
 }
 
 
@@ -424,11 +426,12 @@ GroupedByColumn(List *groupClauseList, List *targetList, Var *column)
 
 
 /*
- * Replace localQuery to SELECT * FROM aggragetedtable WHERE TRUE
- *
+ * RemoveAggregates gets a query which includes aggregations and returns a non-aggregated
+ * query. It converts all range table entries (including AggRefs) to corresponding Vars.
+ * Also, this eliminates GROUP BY/ORDER BY columns that appears on range table entry.
  */
 static Query *
-LocalQueryDirectPushDown(Query *localQuery)
+RemoveAggregates(Query *localQuery)
 {
 	Query *aggregatedLocalQuery = copyObject(localQuery);
 	AttrNumber attributeNumber = 1;
@@ -437,27 +440,32 @@ LocalQueryDirectPushDown(Query *localQuery)
 	ListCell *targetListCell = NULL;
 	List *aggregatedQuerytargetEntryList = NIL;
 
-
 	foreach(targetListCell, localQueryTargetList)
 	{
 		TargetEntry *targetListEntry = (TargetEntry *) lfirst(targetListCell);
-		TargetEntry *aggregatedQueryTargetEntry = NULL;
+		TargetEntry *aggregatedTargetEntry = NULL;
 		Var *targetVar = makeVarFromTargetEntry(tableOrder, targetListEntry);
 
-		aggregatedQueryTargetEntry = makeTargetEntry((Expr *)targetVar, attributeNumber, targetListEntry->resname, targetListEntry->resjunk);
+		aggregatedTargetEntry = makeTargetEntry((Expr *)targetVar, attributeNumber,
+											    targetListEntry->resname,
+											    targetListEntry->resjunk);
 
-		/* GROUP BY / ORDER BY columns*/
+		/* ressortgroupref must be updated for ORDER BY columns */
 		if (targetListEntry->ressortgroupref != 0)
 		{
-			aggregatedQueryTargetEntry->ressortgroupref = targetListEntry->ressortgroupref;
+			aggregatedTargetEntry->ressortgroupref = targetListEntry->ressortgroupref;
 		}
 
-		/* Bunun sebebi GROUP BY/ORDER BY automatic olarak targetlistte cikiyor, cikmasini engelle */
+		/*
+		 * Columns which appear on GROUP BY/ORDER BY statements show up in the
+		 * targetList. We discard these columns from the aggregated query's
+		 * target list.
+		 */
 		if (targetListEntry->resjunk == false)
 		{
 
 			aggregatedQuerytargetEntryList = lappend(aggregatedQuerytargetEntryList,
-													 aggregatedQueryTargetEntry);
+													 aggregatedTargetEntry);
 			++attributeNumber;
 		}
 	}
@@ -473,10 +481,12 @@ LocalQueryDirectPushDown(Query *localQuery)
 
 
 /*
- * Replcae Distributed Query
+ * AggregateDistributedQuery gets local and distributed queries as parameters. Returns
+ * an aggregated distributed query, where aggregation information is possessed by the
+ * local query.
  */
 static Query *
-DistributedQueryDirectPushDown(Query *distributedQuery, Query *localQuery)
+AggregateDistributedQuery(Query *distributedQuery, Query *localQuery)
 {
 
 	Query *aggregatedDistributedQuery = copyObject(distributedQuery);
