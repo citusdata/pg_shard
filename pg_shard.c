@@ -116,6 +116,7 @@ static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
 static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
 static List * QueryFromList(List *rangeTableList);
 static List * TargetEntryList(List *expressionList);
+static CreateStmt * CreateTemporaryTable(Query *localQuery, Query *distributedQuery, bool pushDownGroupBy);
 static CreateStmt * CreateTemporaryTableLikeStmt(Oid sourceRelationId);
 static CreateStmt * CreateAggregatedTableStmt(Query *query);
 static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalList);
@@ -285,7 +286,6 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 													   localRestrictList);
 			localQuery = BuildLocalQuery(query, localRestrictList);
 
-			distributedTableId = ExtractFirstDistributedTableId(distributedQuery);
 
 			safeToPushDownGroupBy = SafeToPushDownGroupBy(localQuery, distributedTableId);
 			if (safeToPushDownGroupBy)
@@ -308,6 +308,8 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			 */
 			plannedStatement = PlanSequentialScan(localQuery, cursorOptions, boundParams);
 
+			//createTemporaryTableStmt = CreateTemporaryTable(localQuery, distributedQuery , safeToPushDownGroupBy);
+
 		}
 
 
@@ -318,9 +320,7 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 
 		if (safeToPushDownGroupBy)
 		{
-			MemoryContext oldContext = MemoryContextSwitchTo(TopMemoryContext);
 			distributedPlan->targetList = list_copy(localQuery->targetList);
-			MemoryContextSwitchTo(oldContext);
 
 		}
 
@@ -474,7 +474,6 @@ LocalQueryDirectPushDown(Query *localQuery)
 static Query *
 DistributedQueryDirectPushDown(Query *distributedQuery, Query *localQuery)
 {
-	MemoryContext oldContext = MemoryContextSwitchTo(TopMemoryContext);
 
 	Query *aggregatedDistributedQuery = copyObject(distributedQuery);
 
@@ -483,7 +482,6 @@ DistributedQueryDirectPushDown(Query *distributedQuery, Query *localQuery)
 	aggregatedDistributedQuery->groupClause = list_copy(localQuery->groupClause);
 	aggregatedDistributedQuery->havingQual = copyObject(localQuery->havingQual);
 	aggregatedDistributedQuery->hasAggs = true;
-	MemoryContextSwitchTo(oldContext);
 
 	return aggregatedDistributedQuery;
 }
@@ -1168,6 +1166,25 @@ TargetEntryList(List *expressionList)
 	return targetEntryList;
 }
 
+
+static CreateStmt *
+CreateTemporaryTable(Query *localQuery, Query *distributedQuery, bool pushDownGroupBy)
+{
+	CreateStmt *createStmt = NULL;
+	Oid distributedTableId = ExtractFirstDistributedTableId(distributedQuery);
+
+
+	if (pushDownGroupBy)
+	{
+		createStmt = CreateAggregatedTableStmt(localQuery);
+	}
+	else
+	{
+		createStmt = CreateTemporaryTableLikeStmt(distributedTableId);
+	}
+
+	return createStmt;
+}
 
 /*
  * Create temp table when aggreagation is pushed down to the workers.
