@@ -119,6 +119,14 @@ LoadShardIntervalList(Oid distributedTableId)
 	Datum argValues[] = { ObjectIdGetDatum(distributedTableId) };
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 	int spiStatus = 0;
+
+	/*
+	 * SPI_connect switches to its own memory context, which is destroyed by
+	 * the call to SPI_finish. SPI_palloc is provided to allocate memory in
+	 * the previous ("upper") context, but that is inadequate when we need to
+	 * call other functions that themselves use the normal palloc (such as
+	 * lappend). So we switch to the upper context ourselves as needed.
+	 */
 	MemoryContext upperContext = CurrentMemoryContext, oldContext = NULL;
 
 	SPI_connect();
@@ -163,8 +171,12 @@ LoadShardInterval(int64 shardId)
 	Datum argValues[] = { Int64GetDatum(shardId) };
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 	int spiStatus = 0;
-	MemoryContext upperContext = CurrentMemoryContext, oldContext = NULL;
 
+	/*
+	 * SPI_connect switches to an SPI-specific MemoryContext. See the comment
+	 * in LoadShardIntervalList for a more extensive explanation.
+	 */
+	MemoryContext upperContext = CurrentMemoryContext, oldContext = NULL;
 	SPI_connect();
 
 	spiStatus = SPI_execute_with_args("SELECT s.id, s.relation_id, s.min_value, "
@@ -233,8 +245,12 @@ LoadShardPlacementList(int64 shardId)
 	Datum argValues[] = { Int64GetDatum(shardId) };
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 	int spiStatus = 0;
-	MemoryContext upperContext = CurrentMemoryContext, oldContext = NULL;
 
+	/*
+	 * SPI_connect switches to an SPI-specific MemoryContext. See the comment
+	 * in LoadShardIntervalList for a more extensive explanation.
+	 */
+	MemoryContext upperContext = CurrentMemoryContext, oldContext = NULL;
 	SPI_connect();
 
 	spiStatus = SPI_execute_with_args("SELECT id, shard_id, shard_state, "
@@ -285,11 +301,15 @@ PartitionColumn(Oid distributedTableId)
 	Datum argValues[] = { ObjectIdGetDatum(distributedTableId) };
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 	int spiStatus = 0;
-	MemoryContext upperContext = CurrentMemoryContext, oldContext = NULL;
 	bool isNull = false;
 	Datum keyDatum = 0;
 	char *partitionColumnName = NULL;
 
+	/*
+	 * SPI_connect switches to an SPI-specific MemoryContext. See the comment
+	 * in LoadShardIntervalList for a more extensive explanation.
+	 */
+	MemoryContext upperContext = CurrentMemoryContext, oldContext = NULL;
 	SPI_connect();
 
 	spiStatus = SPI_execute_with_args("SELECT key "
