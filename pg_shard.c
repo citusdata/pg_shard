@@ -102,13 +102,14 @@ static List * DistributedQueryShardList(Query *query);
 static bool SelectFromMultipleShards(Query *query, List *queryShardList);
 static void ClassifyRestrictions(List *queryRestrictList, List **remoteRestrictList,
 								 List **localRestrictList);
-static Query * RowAndColumnFilterQuery(Query *query, List *remoteRestrictList,
-									   List *localRestrictList,
-									   bool safeToPushDownAggregate);
-static List *
-GenerateTargetList(Query *query, List *localRestrictList, bool safeToPushDownAggregate);
+static Query * BuildDistributedQuery(Query *query, List *remoteRestrictList,
+									 List *localRestrictList,
+									 bool safeToPushDownAggregate);
+static List * BuildDistributedTargetList(Query *query, List *localRestrictList,
+								 	     bool safeToPushDownAggregate);
+static Query * BuildLocalQuery(Query *query, List *localRestrictList,
+							   bool safeToPushDownAggregate);
 static Query * RemoveAggregates(Query *aggregatedQuery);
-static Query * BuildLocalQuery(Query *query, List *localRestrictList);
 static PlannedStmt * PlanSequentialScan(Query *query, int cursorOptions,
 										ParamListInfo boundParams);
 static List * QueryRestrictList(Query *query);
@@ -277,7 +278,6 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			List *localRestrictList = NIL;
 			bool safeToPushDownAggregate = false;
 
-
 			/* partition restrictions into remote and local lists */
 			ClassifyRestrictions(queryRestrictList, &remoteRestrictList,
 								 &localRestrictList);
@@ -286,26 +286,26 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			safeToPushDownAggregate = SafeToPushDownAggregate(distributedQuery,
 															  distributedTableId);
 
-
 			/* build local and distributed query */
-			distributedQuery = RowAndColumnFilterQuery(distributedQuery,
-													   remoteRestrictList,
-													   localRestrictList,
-													   safeToPushDownAggregate);
-			localQuery = BuildLocalQuery(query, localRestrictList);
+			distributedQuery = BuildDistributedQuery(distributedQuery,
+													 remoteRestrictList,
+													 localRestrictList,
+													 safeToPushDownAggregate);
+			localQuery = BuildLocalQuery(query, localRestrictList,
+										 safeToPushDownAggregate);
 
-			distributedPlanTargetList = distributedQuery->targetList;
-
+			/*
+			 * distributedPlanTargetList is used for determining intermediate
+			 * temporary table's tuple descriptor in the executer. So, this assignments
+			 * reflects pushing down aggregates or not on distributedPlan.
+			 */
 			if (safeToPushDownAggregate)
 			{
-				localQuery = RemoveAggregates(localQuery);
-
-				/*
-				 * distributedPlanTargetList is used for determining intermediate
-				 * temporary table's tuple descriptor in the executer. So, this
-				 * assignment reflects pushed down aggregates in the distributedPlan.
-				 */
 				distributedPlanTargetList = list_copy(localQuery->targetList);
+			}
+			else
+			{
+				distributedPlanTargetList = distributedQuery->targetList;
 			}
 
 			/*
@@ -325,7 +325,6 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 		distributedPlan->selectFromMultipleShards = selectFromMultipleShards;
 		distributedPlan->createTemporaryTableStmt = createTemporaryTableStmt;
 		distributedPlan->targetList = distributedPlanTargetList;
-
 
 		plannedStatement->planTree = (Plan *) distributedPlan;
 	}
@@ -816,13 +815,13 @@ ClassifyRestrictions(List *queryRestrictList, List **remoteRestrictList,
 
 
 /*
- * RowAndColumnFilterQuery builds a query which contains the filter clauses from
+ * BuildDistributedQuery builds a query which contains the filter clauses from
  * the original query and also only selects columns needed for the original
  * query. This new query can then be pushed down to the worker nodes.
  */
 static Query *
-RowAndColumnFilterQuery(Query *query, List *remoteRestrictList, List *localRestrictList,
-						bool safeToPushDownAggregate)
+BuildDistributedQuery(Query *query, List *remoteRestrictList, List *localRestrictList,
+					  bool safeToPushDownAggregate)
 {
 	List *rangeTableList = NIL;
 	List *targetList = NIL;
@@ -837,8 +836,8 @@ RowAndColumnFilterQuery(Query *query, List *remoteRestrictList, List *localRestr
 	fromExpr->quals = (Node *) make_ands_explicit((List *) remoteRestrictList);
 	fromExpr->fromlist = QueryFromList(rangeTableList);
 
-	targetList = GenerateTargetList(query, localRestrictList, safeToPushDownAggregate);
-
+	targetList = BuildDistributedTargetList(query, localRestrictList,
+											safeToPushDownAggregate);
 	if (safeToPushDownAggregate)
 	{
 		filterQuery->groupClause = list_copy(query->groupClause);
@@ -855,8 +854,15 @@ RowAndColumnFilterQuery(Query *query, List *remoteRestrictList, List *localRestr
 }
 
 
+/*
+ * BuildDistributedTargetList returns a list of TargetEntry for the distributed query.
+ * If aggregations are pushed down, do not replace AggRefs with Vars in the target list.
+ * Otherwise, replace all target entries with Vars. Also, when aggregates are pushed
+ * down, do not fetch HAVING columns, since they are also pushed down.
+ */
 static List *
-GenerateTargetList(Query *query, List *localRestrictList, bool safeToPushDownAggregate)
+BuildDistributedTargetList(Query *query, List *localRestrictList,
+						   bool safeToPushDownAggregate)
 {
 	List *targetList = NIL;
 	List *whereColumnList = NIL;
@@ -870,12 +876,13 @@ GenerateTargetList(Query *query, List *localRestrictList, bool safeToPushDownAgg
 	if (safeToPushDownAggregate)
 	{
 		List *aggregatedProjectColumnList = query->targetList;
-		List *aggregatedTargetList = list_concat_unique(aggregatedProjectColumnList,
-														whereColumnList);
 		ListCell *targetListCell = NULL;
+		ListCell *columnCell = NULL;
 		Index tableOrder = 1;
 		AttrNumber attributeNumber = 1;
-
+		List *targetEntryWhereColumns = TargetEntryList(whereColumnList);
+		List *aggregatedTargetList = list_concat_unique(aggregatedProjectColumnList,
+														targetEntryWhereColumns);
 
 		foreach(targetListCell, aggregatedTargetList)
 		{
@@ -888,11 +895,14 @@ GenerateTargetList(Query *query, List *localRestrictList, bool safeToPushDownAgg
 			}
 			else
 			{
+				TargetEntry *aggregatedTargetEntry = NULL;
 				Var *targetVar = makeVarFromTargetEntry(tableOrder, targetListEntry);
 
-				TargetEntry *aggregatedTargetEntry = makeTargetEntry((Expr *)targetVar, attributeNumber,
-													    			 targetListEntry->resname,
-																	 targetListEntry->resjunk);
+				aggregatedTargetEntry = makeTargetEntry((Expr *)targetVar,
+														attributeNumber,
+													    targetListEntry->resname,
+														targetListEntry->resjunk);
+
 				targetList = lappend(targetList, aggregatedTargetEntry);
 			}
 			++attributeNumber;
@@ -905,7 +915,6 @@ GenerateTargetList(Query *query, List *localRestrictList, bool safeToPushDownAgg
 		List *requiredColumnList = NIL;
 		ListCell *columnCell = NULL;
 		List *uniqueColumnList = NIL;
-
 
 		/* as well as any used in projections (GROUP BY, etc.) */
 		projectColumnList = pull_var_clause((Node *) query->targetList, aggregateBehavior,
@@ -946,6 +955,30 @@ GenerateTargetList(Query *query, List *localRestrictList, bool safeToPushDownAgg
 	}
 
 	return targetList;
+}
+
+
+/*
+ * BuildLocalQuery returns a copy of query with its quals replaced by those
+ * in localRestrictList. Expects queries with a single entry in their FROM
+ * list.
+ */
+static Query *
+BuildLocalQuery(Query *query, List *localRestrictList, bool safeToPushDownAggregate)
+{
+	Query *localQuery = copyObject(query);
+	FromExpr *joinTree = localQuery->jointree;
+
+	Assert(joinTree != NULL);
+	Assert(list_length(joinTree->fromlist) == 1);
+	joinTree->quals = (Node *) make_ands_explicit((List *) localRestrictList);
+
+	if (safeToPushDownAggregate)
+	{
+		localQuery = RemoveAggregates(localQuery);
+	}
+
+	return localQuery;
 }
 
 
@@ -1001,25 +1034,6 @@ RemoveAggregates(Query *aggregatedQuery)
 	nonAggregatedQuery->havingQual = NULL;
 
 	return nonAggregatedQuery;
-}
-
-
-/*
- * BuildLocalQuery returns a copy of query with its quals replaced by those
- * in localRestrictList. Expects queries with a single entry in their FROM
- * list.
- */
-static Query *
-BuildLocalQuery(Query *query, List *localRestrictList)
-{
-	Query *localQuery = copyObject(query);
-	FromExpr *joinTree = localQuery->jointree;
-
-	Assert(joinTree != NULL);
-	Assert(list_length(joinTree->fromlist) == 1);
-	joinTree->quals = (Node *) make_ands_explicit((List *) localRestrictList);
-
-	return localQuery;
 }
 
 
