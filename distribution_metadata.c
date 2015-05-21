@@ -391,14 +391,18 @@ bool
 IsDistributedTable(Oid tableId)
 {
 	Oid metadataNamespaceOid = get_namespace_oid("pgs_distribution_metadata", false);
-	Oid tableNamespaceOid = get_rel_namespace(tableId);
+	Oid partitionMetadataTableOid = get_relname_relid("partition", metadataNamespaceOid);
 	bool isDistributedTable = false;
 	Oid argTypes[] = { OIDOID };
 	Datum argValues[] = { ObjectIdGetDatum(tableId) };
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 	int spiStatus = 0;
 
-	if (tableNamespaceOid == metadataNamespaceOid)
+	/*
+	 * The query below hits the partition metadata table, so if we don't detect
+	 * that and short-circuit, we'll get infinite recursion in the planner.
+	 */
+	if (tableId == partitionMetadataTableOid)
 	{
 		return false;
 	}
