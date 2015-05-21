@@ -106,7 +106,7 @@ static Query * BuildDistributedQuery(Query *query, List *remoteRestrictList,
 									 List *localRestrictList,
 									 bool safeToPushDownAggregate);
 static List * BuildDistributedTargetList(Query *query, List *localRestrictList,
-								 	     bool safeToPushDownAggregate);
+										 bool safeToPushDownAggregate);
 static Query * BuildLocalQuery(Query *query, List *localRestrictList,
 							   bool safeToPushDownAggregate);
 static Query * RemoveAggregates(Query *aggregatedQuery);
@@ -898,9 +898,9 @@ BuildDistributedTargetList(Query *query, List *localRestrictList,
 				TargetEntry *aggregatedTargetEntry = NULL;
 				Var *targetVar = makeVarFromTargetEntry(tableOrder, targetListEntry);
 
-				aggregatedTargetEntry = makeTargetEntry((Expr *)targetVar,
+				aggregatedTargetEntry = makeTargetEntry((Expr *) targetVar,
 														attributeNumber,
-													    targetListEntry->resname,
+														targetListEntry->resname,
 														targetListEntry->resjunk);
 
 				targetList = lappend(targetList, aggregatedTargetEntry);
@@ -1004,9 +1004,9 @@ RemoveAggregates(Query *aggregatedQuery)
 		TargetEntry *aggregatedTargetEntry = NULL;
 		Var *targetVar = makeVarFromTargetEntry(tableOrder, targetListEntry);
 
-		aggregatedTargetEntry = makeTargetEntry((Expr *)targetVar, attributeNumber,
-											    targetListEntry->resname,
-											    targetListEntry->resjunk);
+		aggregatedTargetEntry = makeTargetEntry((Expr *) targetVar, attributeNumber,
+												targetListEntry->resname,
+												targetListEntry->resjunk);
 
 		/* ressortgroupref must be updated for ORDER BY columns */
 		if (targetListEntry->ressortgroupref != 0)
@@ -1021,7 +1021,6 @@ RemoveAggregates(Query *aggregatedQuery)
 		 */
 		if (targetListEntry->resjunk == false)
 		{
-
 			nonAggregatedTargetList = lappend(nonAggregatedTargetList,
 											  aggregatedTargetEntry);
 			++attributeNumber;
@@ -1225,8 +1224,8 @@ TargetEntryList(List *expressionList)
 	foreach(expressionCell, expressionList)
 	{
 		Expr *expression = (Expr *) lfirst(expressionCell);
-		TargetEntry *targetEntry = makeTargetEntry(expression, -1, NULL, false);
 
+		TargetEntry *targetEntry = makeTargetEntry(expression, -1, NULL, false);
 		targetEntryList = lappend(targetEntryList, targetEntry);
 	}
 
@@ -1255,6 +1254,7 @@ CreateTemporaryTable(Query *localQuery, Query *distributedQuery, bool pushDownAg
 
 	return createStmt;
 }
+
 
 /*
  * CreateTemporaryTableStmtFromQuery returns a CreateStmt node which will create
@@ -1315,7 +1315,6 @@ CreateTemporaryTableStmtFromQuery(Query *query)
 
 		++columnCount;
 		columnList = lappend(columnList, columnDefinition);
-
 	}
 
 	relation = makeRangeVar(NULL, tableName->data, -1);
@@ -1386,7 +1385,6 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 	List *taskList = NIL;
 	DistributedPlan *distributedPlan = palloc0(sizeof(DistributedPlan));
 	distributedPlan->plan.type = (NodeTag) T_DistributedPlan;
-	//distributedPlan->targetList = query->targetList;
 
 	foreach(shardIntervalCell, shardIntervalList)
 	{
