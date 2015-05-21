@@ -1,27 +1,36 @@
 -- ===================================================================
 -- test end-to-end query functionality
 -- ===================================================================
-
 CREATE TABLE articles (
 	id bigint NOT NULL,
 	author_id bigint NOT NULL,
 	title text NOT NULL,
 	word_count integer NOT NULL CHECK (word_count > 0)
 );
-
 -- this table is used in a CTE test
 CREATE TABLE authors ( name text, id bigint );
-
 SELECT master_create_distributed_table('articles', 'author_id');
+ master_create_distributed_table 
+---------------------------------
+ 
+(1 row)
 
 -- test when a table is distributed but no shards created yet
 SELECT count(*) from articles;
-
+ERROR:  could not find any shards for query
+DETAIL:  No shards exist for distributed table "articles".
+HINT:  Run master_create_worker_shards to create shards and try again.
 -- squelch noisy warnings when creating shards
 \set VERBOSITY terse
 SELECT master_create_worker_shards('articles', 2, 1);
-\set VERBOSITY default
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+ master_create_worker_shards 
+-----------------------------
+ 
+(1 row)
 
+\set VERBOSITY default
 -- create a bunch of test data
 INSERT INTO articles VALUES ( 1,  1, 'arsenous', 9572);
 INSERT INTO articles VALUES ( 2,  2, 'abducing', 13642);
@@ -73,37 +82,76 @@ INSERT INTO articles VALUES (47,  7, 'abeyance', 1772);
 INSERT INTO articles VALUES (48,  8, 'alkylic', 18610);
 INSERT INTO articles VALUES (49,  9, 'anyone', 2681);
 INSERT INTO articles VALUES (50, 10, 'anjanette', 19519);
-
 -- first, test zero-shard SELECT, which should return zero rows
 SELECT COUNT(*) FROM articles WHERE author_id = 1 AND author_id = 2;
+ count 
+-------
+     0
+(1 row)
 
 -- zero-shard modifications should be no-ops but not fail
 UPDATE articles SET title = '' WHERE author_id = 1 AND author_id = 2;
 DELETE FROM articles WHERE author_id = 1 AND author_id = 2;
-
 -- single-shard tests
-
 -- test simple select for a single row
 SELECT * FROM articles WHERE author_id = 10 AND id = 50;
+ id | author_id |   title   | word_count 
+----+-----------+-----------+------------
+ 50 |        10 | anjanette |      19519
+(1 row)
 
 -- get all titles by a single author
 SELECT title FROM articles WHERE author_id = 10;
+   title    
+------------
+ aggrandize
+ absentness
+ andelee
+ attemper
+ anjanette
+(5 rows)
 
 -- try ordering them by word count
 SELECT title, word_count FROM articles
 	WHERE author_id = 10
 	ORDER BY word_count DESC NULLS LAST;
+   title    | word_count 
+------------+------------
+ anjanette  |      19519
+ aggrandize |      17277
+ attemper   |      14976
+ andelee    |       6363
+ absentness |       1820
+(5 rows)
 
 -- look at last two articles by an author
 SELECT title, id FROM articles
 	WHERE author_id = 5
 	ORDER BY id
 	LIMIT 2;
+  title  | id 
+---------+----
+ aruru   |  5
+ adversa | 15
+(2 rows)
 
 -- find all articles by two authors in same shard
 SELECT title, author_id FROM articles
 	WHERE author_id = 7 OR author_id = 8
 	ORDER BY author_id ASC, id;
+    title    | author_id 
+-------------+-----------
+ aseptic     |         7
+ auriga      |         7
+ arsenous    |         7
+ archduchies |         7
+ abeyance    |         7
+ agatized    |         8
+ assembly    |         8
+ aerophyte   |         8
+ anatine     |         8
+ alkylic     |         8
+(10 rows)
 
 -- add in some grouping expressions, still on same shard
 SELECT author_id, sum(word_count) AS corpus_size FROM articles
@@ -111,46 +159,67 @@ SELECT author_id, sum(word_count) AS corpus_size FROM articles
 	GROUP BY author_id
 	HAVING sum(word_count) > 40000
 	ORDER BY sum(word_count) DESC;
+ author_id | corpus_size 
+-----------+-------------
+        10 |       59955
+         8 |       55410
+(2 rows)
 
 -- UNION/INTERSECT queries are unsupported
 SELECT * FROM articles WHERE author_id = 10 UNION
 SELECT * FROM articles WHERE author_id = 1; 
-
+ERROR:  cannot perform distributed planning for the given query
+DETAIL:  Subqueries are not supported in distributed queries.
 -- queries using CTEs are unsupported
 WITH long_names AS ( SELECT id FROM authors WHERE char_length(name) > 15 )
 SELECT title FROM articles;
-
+ERROR:  cannot perform distributed planning for the given query
+DETAIL:  Common table expressions are not supported in distributed queries.
 -- queries which involve functions in FROM clause are unsupported.
 SELECT * FROM articles, position('om' in 'Thomas');
-
+ERROR:  cannot perform distributed planning for the given query
+DETAIL:  Functions must not appear in the FROM clause of a distributed query.
 -- subqueries are not supported in WHERE clause
 SELECT * FROM articles WHERE author_id IN (SELECT id FROM authors WHERE name LIKE '%a');
-
+ERROR:  cannot perform distributed planning for the given query
+DETAIL:  Subqueries are not supported in distributed queries.
 -- subqueries are not supported in FROM clause
 SELECT articles.id,test.word_count
 FROM articles, (SELECT id, word_count FROM articles) AS test WHERE test.id = articles.id;
-
+ERROR:  cannot perform distributed planning for the given query
+DETAIL:  Subqueries are not supported in distributed queries.
 -- subqueries are not supported in SELECT clause
 SELECT a.title AS name, (SELECT a2.id FROM authors a2 WHERE a.id = a2.id  LIMIT 1)
 						 AS special_price FROM articles a;
-
+ERROR:  cannot perform distributed planning for the given query
+DETAIL:  Subqueries are not supported in distributed queries.
 -- joins are not supported in WHERE clause
 SELECT title, authors.name FROM authors, articles WHERE authors.id = articles.author_id;
-
+ERROR:  cannot perform distributed planning for the given query
+DETAIL:  Joins are not supported in distributed queries.
 -- joins are not supported in FROM clause
 SELECT * FROM  (articles INNER JOIN authors ON articles.id = authors.id);
-
+ERROR:  cannot perform distributed planning for the given query
+DETAIL:  Joins are not supported in distributed queries.
 -- test CitusDB code path (this will error out in normal PostgreSQL)
 SELECT sync_table_metadata_to_citus('articles');
+ sync_table_metadata_to_citus 
+------------------------------
+ 
+(1 row)
 
 -- with normal PostgreSQL, expect error about CitusDB being missing
 -- with CitusDB, expect an error about JOINing local table with distributed
 SET pg_shard.use_citusdb_select_logic TO true;
 SELECT title, authors.name FROM authors, articles WHERE authors.id = articles.author_id;
+ERROR:  cannot plan queries that include both regular and partitioned relations
 SET pg_shard.use_citusdb_select_logic TO false;
-
 -- test cross-shard queries
 SELECT COUNT(*) FROM articles;
+ count 
+-------
+    50
+(1 row)
 
 -- try query with more SQL features
 SELECT author_id, sum(word_count) AS corpus_size FROM articles
@@ -158,40 +227,61 @@ SELECT author_id, sum(word_count) AS corpus_size FROM articles
 	HAVING sum(word_count) > 25000
 	ORDER BY sum(word_count) DESC
 	LIMIT 5;
+ author_id | corpus_size 
+-----------+-------------
+         4 |       66325
+         2 |       61782
+        10 |       59955
+         8 |       55410
+         6 |       50867
+(5 rows)
 
 -- cross-shard queries on a foreign table should fail
 -- we'll just point the article shards to a foreign table
 BEGIN;
 	CREATE FOREIGN TABLE foreign_articles (author_id bigint) SERVER fake_fdw_server;
-
 	UPDATE pgs_distribution_metadata.partition
 	SET relation_id='foreign_articles'::regclass
 	WHERE relation_id='articles'::regclass;
-
 	UPDATE pgs_distribution_metadata.shard
 	SET relation_id='foreign_articles'::regclass
 	WHERE relation_id='articles'::regclass;
-
 	SET pg_shard.log_distributed_statements = on;
-
 	SELECT COUNT(*) FROM foreign_articles;
+ERROR:  multi-shard SELECTs from foreign tables are unsupported
 ROLLBACK;
-
 -- verify pg_shard produces correct remote SQL using logging flag
 SET pg_shard.log_distributed_statements = on;
 SET client_min_messages = log;
-
 SELECT count(*) FROM articles WHERE word_count > 10000;
+LOG:  distributed statement: SELECT NULL::unknown FROM ONLY articles_10037 WHERE (word_count > 10000)
+LOG:  distributed statement: SELECT NULL::unknown FROM ONLY articles_10036 WHERE (word_count > 10000)
+ count 
+-------
+    23
+(1 row)
 
 SET client_min_messages = DEFAULT;
 SET pg_shard.log_distributed_statements = DEFAULT;
-
 -- use HAVING without its variable in target list
 SELECT author_id FROM articles
 	GROUP BY author_id
 	HAVING sum(word_count) > 50000
 	ORDER BY author_id;
+ author_id 
+-----------
+         2
+         4
+         6
+         8
+        10
+(5 rows)
 
 -- verify temp tables used by cross-shard queries do not persist
 SELECT COUNT(*) FROM pg_class WHERE relname LIKE 'pg_shard_temp_table%' AND
 									relkind = 'r';
+ count 
+-------
+     0
+(1 row)
+

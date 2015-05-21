@@ -20,7 +20,7 @@ before_script: tools/config_and_start_cluster.sh
 script: tools/pg_travis_test.sh
 after_success:
   - sudo chmod 666 *.gcda
-  - coveralls --exclude test --exclude ruleutils_93.c --exclude ruleutils_94.c
+  - coveralls --exclude test --exclude ruleutils_93.c --exclude ruleutils_94.c --gcov-options '\-lp'
 cache:
   directories:
     - $HOME/.cache/pip

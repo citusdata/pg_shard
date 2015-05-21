@@ -30,6 +30,9 @@
 extern ArrayType * DatumArrayToArrayType(Datum *datumArray, int datumCount,
 										 Oid datumTypeId);
 
+/* fake FDW for use in tests */
+extern Datum fake_fdw_handler(PG_FUNCTION_ARGS);
+
 /* function declarations for exercising connection functions */
 extern Datum initialize_remote_temp_table(PG_FUNCTION_ARGS);
 extern Datum count_remote_temp_table_rows(PG_FUNCTION_ARGS);

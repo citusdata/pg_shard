@@ -175,5 +175,11 @@ COMMIT;
 -- lock should be gone now
 SELECT COUNT(*) FROM pg_locks WHERE locktype = 'advisory' AND objid = 5;
 
--- finally, check that having distributed tables prevent dropping the extension 
+-- finally, check that having distributed tables prevent dropping the extension
 DROP EXTENSION pg_shard;
+
+-- prevent actual drop using transaction
+BEGIN;
+-- the above should fail but we can force a drop with CASCADE
+DROP EXTENSION pg_shard CASCADE;
+ROLLBACK;
