@@ -491,7 +491,7 @@ ColumnNameToColumn(Oid relationId, char *columnName)
 
 
 /*
- * TupleToShardPlacement populates a ShardInterval using values from a row of
+ * TupleToShardInterval populates a ShardInterval using values from a row of
  * the shard configuration table and returns a pointer to that struct. The
  * input tuple must not contain any NULLs.
  *
