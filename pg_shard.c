@@ -294,6 +294,8 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 													   safeToPushDownAggregate);
 			localQuery = BuildLocalQuery(query, localRestrictList);
 
+			distributedPlanTargetList = distributedQuery->targetList;
+
 			if (safeToPushDownAggregate)
 			{
 				localQuery = RemoveAggregates(localQuery);
@@ -813,9 +815,6 @@ ClassifyRestrictions(List *queryRestrictList, List **remoteRestrictList,
 }
 
 
-
-
-
 /*
  * RowAndColumnFilterQuery builds a query which contains the filter clauses from
  * the original query and also only selects columns needed for the original
@@ -829,7 +828,6 @@ RowAndColumnFilterQuery(Query *query, List *remoteRestrictList, List *localRestr
 	List *targetList = NIL;
 	FromExpr *fromExpr = NULL;
 	Query *filterQuery = makeNode(Query);
-
 
 	ExtractRangeTableEntryWalker((Node *) query, &rangeTableList);
 	Assert(list_length(rangeTableList) == 1);
@@ -858,15 +856,22 @@ RowAndColumnFilterQuery(Query *query, List *remoteRestrictList, List *localRestr
 
 
 static List *
-GenerateTargetList(Query *query, List *localRestrictList,
-				   bool safeToPushDownAggregate)
+GenerateTargetList(Query *query, List *localRestrictList, bool safeToPushDownAggregate)
 {
 	List *targetList = NIL;
+	List *whereColumnList = NIL;
+	PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
+	PVCPlaceHolderBehavior placeHolderBehavior = PVC_REJECT_PLACEHOLDERS;
+
+	/* must retrieve all columns referenced by local WHERE clauses... */
+	whereColumnList = pull_var_clause((Node *) localRestrictList, aggregateBehavior,
+									  placeHolderBehavior);
 
 	if (safeToPushDownAggregate)
 	{
-
-		List *aggregatedTargetList = query->targetList;
+		List *aggregatedProjectColumnList = query->targetList;
+		List *aggregatedTargetList = list_concat_unique(aggregatedProjectColumnList,
+														whereColumnList);
 		ListCell *targetListCell = NULL;
 		Index tableOrder = 1;
 		AttrNumber attributeNumber = 1;
@@ -886,29 +891,21 @@ GenerateTargetList(Query *query, List *localRestrictList,
 				Var *targetVar = makeVarFromTargetEntry(tableOrder, targetListEntry);
 
 				TargetEntry *aggregatedTargetEntry = makeTargetEntry((Expr *)targetVar, attributeNumber,
-													    targetListEntry->resname,
-													    targetListEntry->resjunk);
+													    			 targetListEntry->resname,
+																	 targetListEntry->resjunk);
 				targetList = lappend(targetList, aggregatedTargetEntry);
-
 			}
-
 			++attributeNumber;
 		}
 	}
 	else
 	{
-		List *whereColumnList = NIL;
 		List *projectColumnList = NIL;
 		List *havingClauseColumnList = NIL;
 		List *requiredColumnList = NIL;
 		ListCell *columnCell = NULL;
 		List *uniqueColumnList = NIL;
-		PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
-		PVCPlaceHolderBehavior placeHolderBehavior = PVC_REJECT_PLACEHOLDERS;
 
-		/* must retrieve all columns referenced by local WHERE clauses... */
-		whereColumnList = pull_var_clause((Node *) localRestrictList, aggregateBehavior,
-										  placeHolderBehavior);
 
 		/* as well as any used in projections (GROUP BY, etc.) */
 		projectColumnList = pull_var_clause((Node *) query->targetList, aggregateBehavior,
@@ -948,7 +945,7 @@ GenerateTargetList(Query *query, List *localRestrictList,
 		targetList = TargetEntryList(uniqueColumnList);
 	}
 
-	return list_copy(targetList);
+	return targetList;
 }
 
 
