@@ -7,7 +7,7 @@
  *
  * Copyright (c) 2014-2015, Citus Data, Inc.
  *
- **-------------------------------------------------------------------------
+ ***-------------------------------------------------------------------------
  */
 
 #include "postgres.h"
@@ -111,6 +111,7 @@ static List * BuildDistributedTargetList(Query *query, List *localRestrictList,
 static Query * BuildLocalQuery(Query *query, List *localRestrictList,
 							   bool safeToPushDownAggregate);
 static Query * RemoveAggregates(Query *aggregatedQuery);
+static Node * NonAggregateExpressionMutator(Node *originalNode, AttrNumber *columnId);
 static PlannedStmt * PlanSequentialScan(Query *query, int cursorOptions,
 										ParamListInfo boundParams);
 static List * QueryRestrictList(Query *query);
@@ -991,53 +992,6 @@ BuildLocalQuery(Query *query, List *localRestrictList, bool safeToPushDownAggreg
 
 
 /*
- * MasterAggregateMutator walks over the original target entry expression, and
- * creates the new expression tree to execute on the master node. The function
- * transforms aggregates, and copies columns; and recurses into the expression
- * mutator function for all other expression types.
- *
- * Please note that the recursive mutator function traverses the expression tree
- * in depth first order. For this function to set attribute numbers correctly,
- * WorkerAggregateWalker() *must* walk over the expression tree in the same
- * depth first order.
- */
-static Node *
-MasterAggregateMutator(Node *originalNode, AttrNumber *columnId)
-{
-	Node *newNode = NULL;
-	if (originalNode == NULL)
-	{
-		return NULL;
-	}
-
-	if (IsA(originalNode, Aggref))
-	{
-		Aggref *originalAggregate = (Aggref *) originalNode;
-		Expr *newExpression = MasterAggregateExpression(originalAggregate, columnId);
-
-		newNode = (Node *) newExpression;
-	}
-	else if (IsA(originalNode, Var))
-	{
-		uint32 masterTableId = 1; /* one table on the master node */
-		Var *newColumn = copyObject(originalNode);
-		newColumn->varno = masterTableId;
-		newColumn->varattno = (*columnId);
-		(*columnId)++;
-
-		newNode = (Node *) newColumn;
-	}
-	else
-	{
-		newNode = expression_tree_mutator(originalNode, MasterAggregateMutator,
-										  (void *) columnId);
-	}
-
-	return newNode;
-}
-
-
-/*
  * RemoveAggregates gets a query which includes aggregations and returns a non-aggregated
  * query. It converts all range table entries (including AggRefs) to corresponding Vars.
  * Also, this function eliminates GROUP BY/ORDER BY columns that appears on range table
@@ -1056,26 +1010,28 @@ RemoveAggregates(Query *aggregatedQuery)
 	foreach(targetListCell, aggregatedTargetList)
 	{
 		TargetEntry *targetListEntry = (TargetEntry *) lfirst(targetListCell);
-		TargetEntry *aggregatedTargetEntry = NULL;
+		TargetEntry *newTargetEntry = NULL;
 
-		if (IsA(targetListEntry->expr, Aggref) || IsA(targetListEntry->expr, Var))
+		if (IsA(targetListEntry->expr, Aggref))
 		{
 			Var *targetVar = makeVarFromTargetEntry(tableOrder, targetListEntry);
 
-			aggregatedTargetEntry = makeTargetEntry((Expr *) targetVar, attributeNumber,
-													targetListEntry->resname,
-													targetListEntry->resjunk);
+			newTargetEntry = makeTargetEntry((Expr *) targetVar,
+													   attributeNumber,
+													   targetListEntry->resname,
+													   targetListEntry->resjunk);
+		}
+		else
+		{
+			targetListEntry->expr = (Expr *) NonAggregateExpressionMutator(
+				(Node *) targetListEntry->expr, &attributeNumber);
+			newTargetEntry = targetListEntry;
 		}
 
 		/* ressortgroupref must be updated for ORDER BY columns */
-		if (aggregatedTargetEntry != NULL && targetListEntry->ressortgroupref != 0)
+		if (newTargetEntry != NULL && targetListEntry->ressortgroupref != 0)
 		{
-			aggregatedTargetEntry->ressortgroupref = targetListEntry->ressortgroupref;
-		}
-
-		if (aggregatedTargetEntry == NULL)
-		{
-			aggregatedTargetEntry = targetListEntry;
+			newTargetEntry->ressortgroupref = targetListEntry->ressortgroupref;
 		}
 
 		/*
@@ -1085,9 +1041,9 @@ RemoveAggregates(Query *aggregatedQuery)
 		 */
 		if (targetListEntry->resjunk == false)
 		{
-			aggregatedTargetEntry->resno = attributeNumber;
+			newTargetEntry->resno = attributeNumber;
 			nonAggregatedTargetList = lappend(nonAggregatedTargetList,
-											  aggregatedTargetEntry);
+											  newTargetEntry);
 			++attributeNumber;
 		}
 	}
@@ -1098,6 +1054,39 @@ RemoveAggregates(Query *aggregatedQuery)
 	nonAggregatedQuery->havingQual = NULL;
 
 	return nonAggregatedQuery;
+}
+
+
+/*
+ * MasterAggregateMutator walks over the original non-aggregate expression,
+ * and recurses into the expression mutator function for all other expression types
+ * to update the varattno of the Vars in the expression.
+ */
+static Node *
+NonAggregateExpressionMutator(Node *originalNode, AttrNumber *columnId)
+{
+	Node *newNode = NULL;
+	if (originalNode == NULL)
+	{
+		return NULL;
+	}
+
+	if (IsA(originalNode, Var))
+	{
+		uint32 masterTableId = 1; /* one table on the master node */
+		Var *newColumn = copyObject(originalNode);
+		newColumn->varno = masterTableId;
+		newColumn->varattno = (*columnId);
+
+		newNode = (Node *) newColumn;
+	}
+	else
+	{
+		newNode = expression_tree_mutator(originalNode, NonAggregateExpressionMutator,
+										  (void *) columnId);
+	}
+
+	return newNode;
 }
 
 
