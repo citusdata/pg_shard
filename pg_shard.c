@@ -7,7 +7,7 @@
  *
  * Copyright (c) 2014-2015, Citus Data, Inc.
  *
- *-------------------------------------------------------------------------
+ **-------------------------------------------------------------------------
  */
 
 #include "postgres.h"
@@ -118,6 +118,7 @@ static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
 static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
 static List * QueryFromList(List *rangeTableList);
 static List * TargetEntryList(List *expressionList);
+static List * VarTypedTargetList(List *targetEntryList);
 static CreateStmt * CreateTemporaryTable(Query *localQuery, Query *distributedQuery,
 										 bool pushDownAggregates);
 static CreateStmt * CreateTemporaryTableStmtFromQuery(Query *query);
@@ -302,7 +303,7 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			 */
 			if (safeToPushDownAggregate)
 			{
-				distributedPlanTargetList = list_copy(localQuery->targetList);
+				distributedPlanTargetList = VarTypedTargetList(localQuery->targetList);
 			}
 			else
 			{
@@ -879,7 +880,6 @@ BuildDistributedTargetList(Query *query, List *localRestrictList,
 		List *aggregatedProjectColumnList = query->targetList;
 		ListCell *targetListCell = NULL;
 		Index tableOrder = 1;
-		AttrNumber attributeNumber = 1;
 		List *targetEntryWhereColumns = TargetEntryList(whereColumnList);
 		List *aggregatedTargetList = list_concat_unique(aggregatedProjectColumnList,
 														targetEntryWhereColumns);
@@ -891,21 +891,29 @@ BuildDistributedTargetList(Query *query, List *localRestrictList,
 
 			if (IsA(targetExpression, Var) || IsA(targetExpression, Aggref))
 			{
-				targetList = lappend(targetList, targetListEntry);
+				targetList = list_append_unique(targetList, targetListEntry);
 			}
 			else
 			{
-				TargetEntry *aggregatedTargetEntry = NULL;
-				Var *targetVar = makeVarFromTargetEntry(tableOrder, targetListEntry);
+				List *targetVarList = pull_var_clause((Node *) targetExpression,
+													  aggregateBehavior,
+													  placeHolderBehavior);
+				ListCell *targetExpressionListCell = NULL;
 
-				aggregatedTargetEntry = makeTargetEntry((Expr *) targetVar,
-														attributeNumber,
-														targetListEntry->resname,
-														targetListEntry->resjunk);
+				foreach(targetExpressionListCell, targetVarList)
+				{
+					/* this is equivalent of pull_var_clause for non agg and var values */
+					TargetEntry *aggregatedTargetEntry = NULL;
+					Var *targetVar = (Var *) lfirst(targetExpressionListCell);
 
-				targetList = lappend(targetList, aggregatedTargetEntry);
+					aggregatedTargetEntry = makeTargetEntry((Expr *) targetVar,
+															-1,
+															targetListEntry->resname,
+															targetListEntry->resjunk);
+
+					targetList = list_append_unique(targetList, aggregatedTargetEntry);
+				}
 			}
-			++attributeNumber;
 		}
 	}
 	else
@@ -983,6 +991,53 @@ BuildLocalQuery(Query *query, List *localRestrictList, bool safeToPushDownAggreg
 
 
 /*
+ * MasterAggregateMutator walks over the original target entry expression, and
+ * creates the new expression tree to execute on the master node. The function
+ * transforms aggregates, and copies columns; and recurses into the expression
+ * mutator function for all other expression types.
+ *
+ * Please note that the recursive mutator function traverses the expression tree
+ * in depth first order. For this function to set attribute numbers correctly,
+ * WorkerAggregateWalker() *must* walk over the expression tree in the same
+ * depth first order.
+ */
+static Node *
+MasterAggregateMutator(Node *originalNode, AttrNumber *columnId)
+{
+	Node *newNode = NULL;
+	if (originalNode == NULL)
+	{
+		return NULL;
+	}
+
+	if (IsA(originalNode, Aggref))
+	{
+		Aggref *originalAggregate = (Aggref *) originalNode;
+		Expr *newExpression = MasterAggregateExpression(originalAggregate, columnId);
+
+		newNode = (Node *) newExpression;
+	}
+	else if (IsA(originalNode, Var))
+	{
+		uint32 masterTableId = 1; /* one table on the master node */
+		Var *newColumn = copyObject(originalNode);
+		newColumn->varno = masterTableId;
+		newColumn->varattno = (*columnId);
+		(*columnId)++;
+
+		newNode = (Node *) newColumn;
+	}
+	else
+	{
+		newNode = expression_tree_mutator(originalNode, MasterAggregateMutator,
+										  (void *) columnId);
+	}
+
+	return newNode;
+}
+
+
+/*
  * RemoveAggregates gets a query which includes aggregations and returns a non-aggregated
  * query. It converts all range table entries (including AggRefs) to corresponding Vars.
  * Also, this function eliminates GROUP BY/ORDER BY columns that appears on range table
@@ -1002,16 +1057,25 @@ RemoveAggregates(Query *aggregatedQuery)
 	{
 		TargetEntry *targetListEntry = (TargetEntry *) lfirst(targetListCell);
 		TargetEntry *aggregatedTargetEntry = NULL;
-		Var *targetVar = makeVarFromTargetEntry(tableOrder, targetListEntry);
 
-		aggregatedTargetEntry = makeTargetEntry((Expr *) targetVar, attributeNumber,
-												targetListEntry->resname,
-												targetListEntry->resjunk);
+		if (IsA(targetListEntry->expr, Aggref) || IsA(targetListEntry->expr, Var))
+		{
+			Var *targetVar = makeVarFromTargetEntry(tableOrder, targetListEntry);
+
+			aggregatedTargetEntry = makeTargetEntry((Expr *) targetVar, attributeNumber,
+													targetListEntry->resname,
+													targetListEntry->resjunk);
+		}
 
 		/* ressortgroupref must be updated for ORDER BY columns */
-		if (targetListEntry->ressortgroupref != 0)
+		if (aggregatedTargetEntry != NULL && targetListEntry->ressortgroupref != 0)
 		{
 			aggregatedTargetEntry->ressortgroupref = targetListEntry->ressortgroupref;
+		}
+
+		if (aggregatedTargetEntry == NULL)
+		{
+			aggregatedTargetEntry = targetListEntry;
 		}
 
 		/*
@@ -1021,13 +1085,14 @@ RemoveAggregates(Query *aggregatedQuery)
 		 */
 		if (targetListEntry->resjunk == false)
 		{
+			aggregatedTargetEntry->resno = attributeNumber;
 			nonAggregatedTargetList = lappend(nonAggregatedTargetList,
 											  aggregatedTargetEntry);
 			++attributeNumber;
 		}
 	}
 
-	nonAggregatedQuery->targetList = nonAggregatedTargetList;
+	nonAggregatedQuery->targetList = list_copy(nonAggregatedTargetList);
 	nonAggregatedQuery->hasAggs = false;
 	nonAggregatedQuery->groupClause = NIL;
 	nonAggregatedQuery->havingQual = NULL;
@@ -1230,6 +1295,36 @@ TargetEntryList(List *expressionList)
 	}
 
 	return targetEntryList;
+}
+
+
+/*
+ * VarTypedTargetList get a target list and creates a new target list entry
+ * whose elements are Var corresponding elements of the input target list.
+ */
+static List *
+VarTypedTargetList(List *targetEntryList)
+{
+	List *smotthedTargetEntryList = NIL;
+	ListCell *targetCell = NULL;
+	Index attributeNumber = 1;
+
+	foreach(targetCell, targetEntryList)
+	{
+		TargetEntry *targetEntry = lfirst(targetCell);
+
+		Var *targetVar = makeVarFromTargetEntry(1, targetEntry);
+		TargetEntry *updatedTargetEntry = makeTargetEntry((Expr *) targetVar,
+														  targetEntry->resno,
+														  targetEntry->resname,
+														  targetEntry->resjunk);
+
+		smotthedTargetEntryList = lappend(smotthedTargetEntryList, updatedTargetEntry);
+		++attributeNumber;
+	}
+
+
+	return smotthedTargetEntryList;
 }
 
 
