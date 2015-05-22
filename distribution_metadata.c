@@ -131,13 +131,8 @@ LoadShardIntervalList(Oid distributedTableId)
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args("SELECT s.id, s.relation_id, s.min_value, "
-									  "s.max_value, p.partition_method, p.key "
-									  "FROM pgs_distribution_metadata.shard AS s "
-									  "JOIN pgs_distribution_metadata.partition AS p "
-									  "ON s.relation_id = p.relation_id "
-									  "WHERE s.relation_id = $1", argCount, argTypes,
-									  argValues, NULL, false, 0);
+	spiStatus = SPI_execute_with_args(SHARD_QUERY_PREFIX " WHERE s.relation_id = $1",
+									  argCount, argTypes, argValues, NULL, false, 0);
 	Assert(spiStatus == SPI_OK_SELECT);
 
 	oldContext = MemoryContextSwitchTo(upperContext);
@@ -179,13 +174,8 @@ LoadShardInterval(int64 shardId)
 	MemoryContext upperContext = CurrentMemoryContext, oldContext = NULL;
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args("SELECT s.id, s.relation_id, s.min_value, "
-									  "s.max_value, p.partition_method, p.key "
-									  "FROM pgs_distribution_metadata.shard AS s "
-									  "JOIN pgs_distribution_metadata.partition AS p "
-									  "ON s.relation_id = p.relation_id "
-									  "WHERE s.id = $1", argCount, argTypes,
-									  argValues, NULL, false, 1);
+	spiStatus = SPI_execute_with_args(SHARD_QUERY_PREFIX " WHERE s.id = $1",
+									  argCount, argTypes, argValues, NULL, false, 1);
 	Assert(spiStatus == SPI_OK_SELECT);
 
 	if (SPI_processed != 1)
@@ -253,13 +243,8 @@ LoadShardPlacementList(int64 shardId)
 	MemoryContext upperContext = CurrentMemoryContext, oldContext = NULL;
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args("SELECT id, shard_id, shard_state, "
-									  "node_name, node_port "
-									  "FROM pgs_distribution_metadata.shard_placement "
-									  "WHERE shard_id = $1",
-									  argCount, argTypes,
-									  argValues,
-									  NULL, false, 0);
+	spiStatus = SPI_execute_with_args(SHARD_PLACEMENT_QUERY, argCount, argTypes,
+									  argValues, NULL, false, 0);
 	Assert(spiStatus == SPI_OK_SELECT);
 
 	oldContext = MemoryContextSwitchTo(upperContext);
@@ -493,11 +478,8 @@ ColumnNameToColumn(Oid relationId, char *columnName)
 /*
  * TupleToShardInterval populates a ShardInterval using values from a row of
  * the shard configuration table and returns a pointer to that struct. The
- * input tuple must not contain any NULLs.
- *
- * Because the partition type and column must be known in order to interpret
- * the min/max values of a shard interval, the provided HeapTuple must contain
- * these fields. This is easily accomplished by JOINing to the partition table.
+ * input tuple must not contain any NULLs and must have identical structure to
+ * rows produced by SHARD_QUERY_PREFIX.
  */
 static ShardInterval *
 TupleToShardInterval(HeapTuple heapTuple, TupleDesc tupleDescriptor)
@@ -509,11 +491,16 @@ TupleToShardInterval(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 	Oid inputFunctionId = InvalidOid;
 	Oid typeIoParam = InvalidOid;
 
-	Datum idDatum = SPI_getbinval(heapTuple, tupleDescriptor, 1, &isNull);
-	Datum relationIdDatum = SPI_getbinval(heapTuple, tupleDescriptor, 2, &isNull);
-	Datum minValueTextDatum = SPI_getbinval(heapTuple, tupleDescriptor, 3, &isNull);
-	Datum maxValueTextDatum = SPI_getbinval(heapTuple, tupleDescriptor, 4, &isNull);
-	Datum partitionTypeDatum = SPI_getbinval(heapTuple, tupleDescriptor, 5, &isNull);
+	Datum idDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+								  TLIST_NUM_SHARD_ID, &isNull);
+	Datum relationIdDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+										  TLIST_NUM_SHARD_RELATION_ID, &isNull);
+	Datum minValueTextDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+											TLIST_NUM_SHARD_MIN_VALUE, &isNull);
+	Datum maxValueTextDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+											TLIST_NUM_SHARD_MAX_VALUE, &isNull);
+	Datum partitionTypeDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+											 TLIST_NUM_SHARD_PARTITION_METHOD, &isNull);
 	char *minValueString = TextDatumGetCString(minValueTextDatum);
 	char *maxValueString = TextDatumGetCString(maxValueTextDatum);
 	Datum minValue = 0;
@@ -529,7 +516,8 @@ TupleToShardInterval(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 	}
 	else
 	{
-		Datum keyDatum = SPI_getbinval(heapTuple, tupleDescriptor, 6, &isNull);
+		Datum keyDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+									   TLIST_NUM_SHARD_KEY, &isNull);
 		char *partitionColumnName = TextDatumGetCString(keyDatum);
 
 		Var *partitionColumn = ColumnNameToColumn(relationId, partitionColumnName);
@@ -559,7 +547,8 @@ TupleToShardInterval(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 /*
  * TupleToShardPlacement populates a ShardPlacement using values from a row of
  * the placements configuration table and returns a pointer to that struct. The
- * input tuple must not contain any NULLs.
+ * input tuple must not contain any NULLs and must have identical structure to
+ * rows produced by SHARD_PLACEMENT_QUERY.
  */
 static ShardPlacement *
 TupleToShardPlacement(HeapTuple heapTuple, TupleDesc tupleDescriptor)
@@ -567,11 +556,16 @@ TupleToShardPlacement(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 	ShardPlacement *shardPlacement = NULL;
 	bool isNull = false;
 
-	Datum idDatum = SPI_getbinval(heapTuple, tupleDescriptor, 1, &isNull);
-	Datum shardIdDatum = SPI_getbinval(heapTuple, tupleDescriptor, 2, &isNull);
-	Datum shardStateDatum = SPI_getbinval(heapTuple, tupleDescriptor, 3, &isNull);
-	Datum nodeNameDatum = SPI_getbinval(heapTuple, tupleDescriptor, 4, &isNull);
-	Datum nodePortDatum = SPI_getbinval(heapTuple, tupleDescriptor, 5, &isNull);
+	Datum idDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+								  TLIST_NUM_SHARD_PLACEMENT_ID, &isNull);
+	Datum shardIdDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+									   TLIST_NUM_SHARD_PLACEMENT_SHARD_ID, &isNull);
+	Datum shardStateDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+										  TLIST_NUM_SHARD_PLACEMENT_SHARD_STATE, &isNull);
+	Datum nodeNameDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+										TLIST_NUM_SHARD_PLACEMENT_NODE_NAME, &isNull);
+	Datum nodePortDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+										TLIST_NUM_SHARD_PLACEMENT_NODE_PORT, &isNull);
 
 	shardPlacement = palloc0(sizeof(ShardPlacement));
 	shardPlacement->id = DatumGetInt64(idDatum);

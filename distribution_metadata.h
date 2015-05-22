@@ -21,9 +21,35 @@
 #include "storage/lock.h"
 
 
+/* query prefix (target list and joins) for shard interval information */
+#define SHARD_QUERY_PREFIX "SELECT s.id, s.relation_id, s.min_value, s.max_value, " \
+						   "p.partition_method, p.key " \
+						   "FROM   pgs_distribution_metadata.shard     AS s " \
+						   "JOIN   pgs_distribution_metadata.partition AS p " \
+						   "ON s.relation_id = p.relation_id"
+
 /* denotes storage type of the underlying shard */
 #define SHARD_STORAGE_TABLE 't'
 #define SHARD_STORAGE_FOREIGN 'f'
+
+/* human-readable names for addressing columns of shard queries */
+#define TLIST_NUM_SHARD_ID 1
+#define TLIST_NUM_SHARD_RELATION_ID 2
+#define TLIST_NUM_SHARD_MIN_VALUE 3
+#define TLIST_NUM_SHARD_MAX_VALUE 4
+#define TLIST_NUM_SHARD_PARTITION_METHOD 5
+#define TLIST_NUM_SHARD_KEY 6
+
+#define SHARD_PLACEMENT_QUERY "SELECT id, shard_id, shard_state, node_name, node_port " \
+							  "FROM pgs_distribution_metadata.shard_placement " \
+							  "WHERE shard_id = $1"
+
+/* human-readable names for addressing columns of shard placement queries */
+#define TLIST_NUM_SHARD_PLACEMENT_ID 1
+#define TLIST_NUM_SHARD_PLACEMENT_SHARD_ID 2
+#define TLIST_NUM_SHARD_PLACEMENT_SHARD_STATE 3
+#define TLIST_NUM_SHARD_PLACEMENT_NODE_NAME 4
+#define TLIST_NUM_SHARD_PLACEMENT_NODE_PORT 5
 
 /* denotes partition type of the distributed table */
 #define HASH_PARTITION_TYPE 'h'
