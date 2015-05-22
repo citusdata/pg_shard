@@ -236,13 +236,10 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 
 	for (shardIndex = 0; shardIndex < shardCount; shardIndex++)
 	{
-		uint64 shardId = NextSequenceId(SHARD_ID_SEQUENCE_NAME);
+		int64 shardId = -1;
 		int32 placementCount = 0;
 		uint32 placementIndex = 0;
 		uint32 roundRobinNodeIndex = shardIndex % workerNodeCount;
-
-		List *extendedDDLCommands = ExtendedDDLCommandList(distributedTableId, shardId,
-														   ddlCommandList);
 
 		/* initialize the hash token space for this shard */
 		text *minHashTokenText = NULL;
@@ -255,6 +252,15 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 		{
 			shardMaxHashToken = INT_MAX;
 		}
+
+		/* insert the shard metadata row along with its min/max values */
+		minHashTokenText = IntegerToText(shardMinHashToken);
+		maxHashTokenText = IntegerToText(shardMaxHashToken);
+		shardId = CreateShardRow(distributedTableId, shardStorageType, minHashTokenText,
+								 maxHashTokenText);
+
+		List *extendedDDLCommands = ExtendedDDLCommandList(distributedTableId, shardId,
+														   ddlCommandList);
 
 		for (placementIndex = 0; placementIndex < placementAttemptCount; placementIndex++)
 		{
@@ -269,13 +275,7 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 													extendedDDLCommands);
 			if (created)
 			{
-				uint64 shardPlacementId = 0;
-				ShardState shardState = STATE_FINALIZED;
-
-
-				shardPlacementId = NextSequenceId(SHARD_PLACEMENT_ID_SEQUENCE_NAME);
-				InsertShardPlacementRow(shardPlacementId, shardId, shardState,
-										nodeName, nodePort);
+				CreateShardPlacementRow(shardId, STATE_FINALIZED, nodeName, nodePort);
 				placementCount++;
 			}
 			else
@@ -298,12 +298,6 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 									  "requested replication factor of %d.",
 									  placementCount, replicationFactor)));
 		}
-
-		/* insert the shard metadata row along with its min/max values */
-		minHashTokenText = IntegerToText(shardMinHashToken);
-		maxHashTokenText = IntegerToText(shardMaxHashToken);
-		InsertShardRow(distributedTableId, shardId, shardStorageType,
-					   minHashTokenText, maxHashTokenText);
 	}
 
 	if (QueryCancelPending)
