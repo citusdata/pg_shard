@@ -1,4 +1,4 @@
-/* pg_shard--1.1.sql */
+/* pg_shard--1.2.sql */
 
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION pg_shard" to load this file. \quit
@@ -43,9 +43,9 @@ CREATE SCHEMA pgs_distribution_metadata
 
 -- associate sequences with their columns
 ALTER SEQUENCE pgs_distribution_metadata.shard_id_sequence
-OWNED BY pgs_distribution_metadata.shard.id;
+	OWNED BY pgs_distribution_metadata.shard.id;
 ALTER SEQUENCE pgs_distribution_metadata.shard_placement_id_sequence
-OWNED BY pgs_distribution_metadata.shard_placement.id;
+	OWNED BY pgs_distribution_metadata.shard_placement.id;
 
 -- mark each of the above as config tables to have pg_dump preserve them
 SELECT pg_catalog.pg_extension_config_dump(

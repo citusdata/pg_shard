@@ -25,7 +25,7 @@ else
 endif
 
 EXTENSION = pg_shard
-DATA = pg_shard--1.1.sql pg_shard--1.0--1.1.sql
+DATA = pg_shard--1.2.sql pg_shard--1.0--1.1.sql pg_shard--1.1--1.2.sql
 SCRIPTS = bin/copy_to_distributed_table
 
 # Default to 5432 if PGPORT is undefined. Replace placeholders in our tests
