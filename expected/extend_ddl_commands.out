@@ -28,9 +28,9 @@ SELECT extend_ddl_command('employees', 12345, 'CREATE TABLE employees (first_nam
 						  'NULL, salary numeric DEFAULT 0.00, start_date timestamp ' ||
 						  'without time zone, resume text, CONSTRAINT sal_check ' ||
 						  'CHECK (salary >= 0.00))');
-                                                                                                         extend_ddl_command                                                                                                         
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- CREATE TABLE employees_12345 (first_name text NOT NULL, last_name text NOT NULL, id bigint NOT NULL, salary numeric DEFAULT 0.00, start_date timestamp without time zone, resume text CONSTRAINT sal_check CHECK (salary >= 0.00))
+                                                                                                          extend_ddl_command                                                                                                          
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ CREATE TABLE employees_12345 (first_name text NOT NULL, last_name text NOT NULL, id bigint NOT NULL, salary numeric DEFAULT 0.00, start_date timestamp without time zone, resume text,  CONSTRAINT sal_check CHECK (salary >= 0.00))
 (1 row)
 
 -- generate a command to alter a column storage on a shard

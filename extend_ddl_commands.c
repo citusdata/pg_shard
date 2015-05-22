@@ -641,7 +641,7 @@ DeparseCreateStmt(CreateStmt *createStmt, Oid masterRelationId)
 							errdetail("Only the CHECK form is supported.")));
 		}
 
-		if (firstConstraintPrinted)
+		if (firstAttributePrinted || firstConstraintPrinted)
 		{
 			appendStringInfoString(deparsedCreate, ", ");
 		}
@@ -684,7 +684,7 @@ DeparseCreateStmt(CreateStmt *createStmt, Oid masterRelationId)
 
 /*
  * TableElementsOfType walks over the table element list and returns only those
- * nodes who's type matches the given node type.
+ * nodes whose type matches the given node type.
  */
 static List *
 TableElementsOfType(List *tableElementList, NodeTag nodeType)
