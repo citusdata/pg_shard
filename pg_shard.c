@@ -58,6 +58,7 @@
 #include "optimizer/cost.h"
 #include "optimizer/planner.h"
 #include "optimizer/var.h"
+#include "optimizer/tlist.h"
 #include "parser/analyze.h"
 #include "parser/parse_node.h"
 #include "parser/parsetree.h"
@@ -877,7 +878,6 @@ BuildDistributedTargetList(Query *query, List *localRestrictList,
 	{
 		List *aggregatedProjectColumnList = query->targetList;
 		ListCell *targetListCell = NULL;
-		ListCell *columnCell = NULL;
 		Index tableOrder = 1;
 		AttrNumber attributeNumber = 1;
 		List *targetEntryWhereColumns = TargetEntryList(whereColumnList);
@@ -887,9 +887,9 @@ BuildDistributedTargetList(Query *query, List *localRestrictList,
 		foreach(targetListCell, aggregatedTargetList)
 		{
 			TargetEntry *targetListEntry = (TargetEntry *) lfirst(targetListCell);
-			Expr *targetExpression = (Expr *) targetListEntry;
+			Expr *targetExpression = (Expr *) targetListEntry->expr;
 
-			if (IsA(targetListEntry->expr, Var) || IsA(targetListEntry->expr, Aggref))
+			if (IsA(targetExpression, Var) || IsA(targetExpression, Aggref))
 			{
 				targetList = lappend(targetList, targetListEntry);
 			}
