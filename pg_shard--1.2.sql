@@ -11,14 +11,13 @@ LANGUAGE C STABLE STRICT;
 
 DO $$
 DECLARE
-	replication_factor integer;
 	use_citus_metadata boolean := false;
 BEGIN
 	BEGIN
-		replication_factor = current_setting('shard_replication_factor')::integer;
-		use_citus_metadata = (replication_factor IS NOT NULL);
+		PERFORM 'pg_catalog.pg_dist_partition'::regclass;
+		use_citus_metadata = true;
 	EXCEPTION
-		WHEN undefined_object THEN
+		WHEN undefined_table THEN
 			use_citus_metadata = false;
 	END;
 
