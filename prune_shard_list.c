@@ -117,7 +117,7 @@ PruneShardList(Oid relationId, List *whereClauseList, List *shardIntervalList)
 		if (shardPruned)
 		{
 			ereport(DEBUG2, (errmsg("predicate pruning for shard with ID "
-									UINT64_FORMAT, shardInterval->id)));
+									INT64_FORMAT, shardInterval->id)));
 		}
 		else
 		{

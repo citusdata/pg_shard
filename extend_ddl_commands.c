@@ -46,9 +46,9 @@
 
 /* local function forward declarations */
 static Node * ParseTreeNode(const char *ddlCommand);
-static void ExtendDDLCommand(Node *parseTree, uint64 shardId);
+static void ExtendDDLCommand(Node *parseTree, int64 shardId);
 static bool TypeAddIndexConstraint(const AlterTableCmd *command);
-static void AppendShardIdToConstraintName(AlterTableCmd *command, uint64 shardId);
+static void AppendShardIdToConstraintName(AlterTableCmd *command, int64 shardId);
 static char * DeparseDDLCommand(Node *ddlCommandNode, Oid masterRelationId);
 static char * DeparseAlterTableStmt(AlterTableStmt *alterTableStmt);
 static char * DeparseIndexConstraint(Constraint *constraint);
@@ -65,7 +65,7 @@ static char * DeparseIndexStmt(IndexStmt *indexStmt, Oid masterRelationId);
  * deparses the extended parse node back into a SQL string.
  */
 List *
-ExtendedDDLCommandList(Oid masterRelationId, uint64 shardId, List *ddlCommandList)
+ExtendedDDLCommandList(Oid masterRelationId, int64 shardId, List *ddlCommandList)
 {
 	List *extendedDDLCommandList = NIL;
 	ListCell *ddlCommandCell = NULL;
@@ -113,7 +113,7 @@ ParseTreeNode(const char *ddlCommand)
  * has the side effect of extending relation names in the parse tree.
  */
 static void
-ExtendDDLCommand(Node *parseTree, uint64 shardId)
+ExtendDDLCommand(Node *parseTree, int64 shardId)
 {
 	NodeTag nodeType = nodeTag(parseTree);
 
@@ -260,7 +260,7 @@ TypeAddIndexConstraint(const AlterTableCmd *command)
  * calling this function.
  */
 static void
-AppendShardIdToConstraintName(AlterTableCmd *command, uint64 shardId)
+AppendShardIdToConstraintName(AlterTableCmd *command, int64 shardId)
 {
 	if (command->subtype == AT_AddConstraint)
 	{
@@ -282,12 +282,12 @@ AppendShardIdToConstraintName(AlterTableCmd *command, uint64 shardId)
  * memory context the name was originally created in.
  */
 void
-AppendShardIdToName(char **name, uint64 shardId)
+AppendShardIdToName(char **name, int64 shardId)
 {
 	char extendedName[NAMEDATALEN];
 	uint32 extendedNameLength = 0;
 
-	snprintf(extendedName, NAMEDATALEN, "%s%c" UINT64_FORMAT,
+	snprintf(extendedName, NAMEDATALEN, "%s%c" INT64_FORMAT,
 			 (*name), SHARD_NAME_SEPARATOR, shardId);
 
 	/*

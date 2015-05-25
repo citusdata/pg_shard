@@ -292,7 +292,7 @@ create_monolithic_shard_row(PG_FUNCTION_ARGS)
 Datum
 create_healthy_local_shard_placement_row(PG_FUNCTION_ARGS)
 {
-	uint64 shardId = (uint64) PG_GETARG_INT64(0);
+	int64 shardId = PG_GETARG_INT64(0);
 	int64 newShardPlacementId = CreateShardPlacementRow(shardId, STATE_FINALIZED,
 														"localhost", 5432);
 
@@ -306,7 +306,7 @@ create_healthy_local_shard_placement_row(PG_FUNCTION_ARGS)
 Datum
 delete_shard_placement_row(PG_FUNCTION_ARGS)
 {
-	uint64 shardPlacementId = (uint64) PG_GETARG_INT64(0);
+	int64 shardPlacementId = PG_GETARG_INT64(0);
 
 	DeleteShardPlacementRow(shardPlacementId);
 
@@ -321,7 +321,7 @@ delete_shard_placement_row(PG_FUNCTION_ARGS)
 Datum
 update_shard_placement_row_state(PG_FUNCTION_ARGS)
 {
-	uint64 shardPlacementId = (uint64) PG_GETARG_INT64(0);
+	int64 shardPlacementId = PG_GETARG_INT64(0);
 	ShardState shardState = (ShardState) PG_GETARG_INT32(1);
 
 	UpdateShardPlacementRowState(shardPlacementId, shardState);
