@@ -299,12 +299,13 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 
 			/*
 			 * distributedPlanTargetList is used for determining intermediate
-			 * temporary table's tuple descriptor in the executer. So, this assignments
-			 * reflects pushing down aggregates or not on distributedPlan.
+			 * temporary table's tuple descriptor in the executer. So, if aggregates
+			 * pushed down, we need to update it to make localQuery to be executed
+			 * on the intermedita table.
 			 */
 			if (safeToPushDownAggregate)
 			{
-				distributedPlanTargetList = VarTypedTargetList(localQuery->targetList);
+				distributedPlanTargetList = list_copy(localQuery->targetList);
 			}
 			else
 			{
@@ -890,7 +891,7 @@ BuildDistributedTargetList(Query *query, List *localRestrictList,
 			TargetEntry *targetListEntry = (TargetEntry *) lfirst(targetListCell);
 			Expr *targetExpression = (Expr *) targetListEntry->expr;
 
-			if (IsA(targetExpression, Var) || IsA(targetExpression, Aggref))
+			if (IsA(targetExpression, Aggref))
 			{
 				targetList = list_append_unique(targetList, targetListEntry);
 			}
@@ -911,6 +912,8 @@ BuildDistributedTargetList(Query *query, List *localRestrictList,
 															-1,
 															targetListEntry->resname,
 															targetListEntry->resjunk);
+					aggregatedTargetEntry->ressortgroupref = targetListEntry->ressortgroupref;
+					aggregatedTargetEntry->resjunk = targetListEntry->resjunk;
 
 					targetList = list_append_unique(targetList, aggregatedTargetEntry);
 				}
@@ -1002,29 +1005,39 @@ RemoveAggregates(Query *aggregatedQuery)
 {
 	Query *nonAggregatedQuery = copyObject(aggregatedQuery);
 	Index tableOrder = 1;
-	AttrNumber attributeNumber = 1;
+	AttrNumber columnId = 1;
 	List *aggregatedTargetList = nonAggregatedQuery->targetList;
 	ListCell *targetListCell = NULL;
 	List *nonAggregatedTargetList = NIL;
+	AttrNumber targetResNo = 1;
 
 	foreach(targetListCell, aggregatedTargetList)
 	{
 		TargetEntry *targetListEntry = (TargetEntry *) lfirst(targetListCell);
 		TargetEntry *newTargetEntry = NULL;
 
+		if (targetListEntry->resjunk == true)
+		{
+			continue;
+		}
+
 		if (IsA(targetListEntry->expr, Aggref))
 		{
 			Var *targetVar = makeVarFromTargetEntry(tableOrder, targetListEntry);
 
 			newTargetEntry = makeTargetEntry((Expr *) targetVar,
-													   attributeNumber,
+													   targetResNo,
 													   targetListEntry->resname,
 													   targetListEntry->resjunk);
+
+			newTargetEntry->expr = (Expr *) NonAggregateExpressionMutator(
+										(Node *) newTargetEntry->expr, &columnId);
+
 		}
 		else
 		{
 			targetListEntry->expr = (Expr *) NonAggregateExpressionMutator(
-				(Node *) targetListEntry->expr, &attributeNumber);
+				(Node *) targetListEntry->expr, &columnId);
 			newTargetEntry = targetListEntry;
 		}
 
@@ -1041,10 +1054,10 @@ RemoveAggregates(Query *aggregatedQuery)
 		 */
 		if (targetListEntry->resjunk == false)
 		{
-			newTargetEntry->resno = attributeNumber;
+			newTargetEntry->resno = targetResNo;
 			nonAggregatedTargetList = lappend(nonAggregatedTargetList,
 											  newTargetEntry);
-			++attributeNumber;
+			++targetResNo;
 		}
 	}
 
@@ -1077,6 +1090,7 @@ NonAggregateExpressionMutator(Node *originalNode, AttrNumber *columnId)
 		Var *newColumn = copyObject(originalNode);
 		newColumn->varno = masterTableId;
 		newColumn->varattno = (*columnId);
+		(*columnId)++;
 
 		newNode = (Node *) newColumn;
 	}
@@ -1294,9 +1308,18 @@ TargetEntryList(List *expressionList)
 static List *
 VarTypedTargetList(List *targetEntryList)
 {
+	//return list_copy(targetEntryList);
 	List *smotthedTargetEntryList = NIL;
 	ListCell *targetCell = NULL;
-	Index attributeNumber = 1;
+
+	PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
+	PVCPlaceHolderBehavior placeHolderBehavior = PVC_RECURSE_PLACEHOLDERS;
+
+	/* as well as any used in projections (GROUP BY, etc.) */
+	List *projectColumnList = pull_var_clause((Node *) targetEntryList,
+											  aggregateBehavior, placeHolderBehavior);
+
+	return TargetEntryList(projectColumnList);
 
 	foreach(targetCell, targetEntryList)
 	{
@@ -1309,7 +1332,6 @@ VarTypedTargetList(List *targetEntryList)
 														  targetEntry->resjunk);
 
 		smotthedTargetEntryList = lappend(smotthedTargetEntryList, updatedTargetEntry);
-		++attributeNumber;
 	}
 
 
