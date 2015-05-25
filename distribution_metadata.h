@@ -14,7 +14,6 @@
 
 #include "postgres.h"
 #include "c.h"
-#include "postgres_ext.h"
 
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"

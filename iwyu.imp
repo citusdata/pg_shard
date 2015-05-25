@@ -1,0 +1,8 @@
+[
+	{ include: [ "<secure/_common.h>", private, "<common.h>", public ] },
+	{ include: [ "<secure/_stdio.h>", private, "<stdio.h>", public ] },
+	{ include: [ "<secure/_string.h>", private, "<string.h>", public ] },
+	{ include: [ "\"pg_config.h\"", private, "\"c.h\"", public ] },
+	{ include: [ "\"pg_config_manual.h\"", private, "\"c.h\"", public ] },
+	{ include: [ "\"postgres_ext.h\"", private, "\"c.h\"", public ] }
+]

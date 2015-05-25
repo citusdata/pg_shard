@@ -13,7 +13,6 @@
 #include "postgres.h"
 #include "fmgr.h"
 #include "miscadmin.h"
-#include "pg_config.h"
 
 #include "distribution_metadata.h"
 

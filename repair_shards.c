@@ -14,7 +14,6 @@
 #include "c.h"
 #include "fmgr.h"
 #include "miscadmin.h"
-#include "postgres_ext.h"
 
 #include "connection.h"
 #include "create_shards.h"

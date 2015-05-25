@@ -12,8 +12,6 @@
 #include "postgres.h" /* IWYU pragma: keep */
 #include "libpq-fe.h"
 #include "miscadmin.h"
-#include "pg_config_manual.h"
-#include "postgres_ext.h"
 
 #include "connection.h"
 

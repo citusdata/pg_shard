@@ -13,7 +13,6 @@
 #include "postgres.h"
 #include "c.h"
 #include "fmgr.h"
-#include "postgres_ext.h"
 
 #include "ddl_commands.h"
 #include "test/test_helper_functions.h" /* IWYU pragma: keep */

@@ -13,7 +13,6 @@
 #include "postgres.h"
 #include "c.h"
 #include "fmgr.h"
-#include "postgres_ext.h"
 
 #include "distribution_metadata.h"
 #include "prune_shard_list.h"

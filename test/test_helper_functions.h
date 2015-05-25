@@ -14,8 +14,8 @@
 #define PG_SHARD_TEST_HELPER_FUNCTIONS_H
 
 #include "postgres.h"
+#include "c.h"
 #include "fmgr.h"
-#include "postgres_ext.h"
 
 #include "utils/array.h"
 

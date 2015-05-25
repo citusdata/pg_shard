@@ -13,9 +13,7 @@
 #include "postgres.h"
 #include "libpq-fe.h"
 #include "miscadmin.h"
-#include "pg_config_manual.h"
 #include "port.h"
-#include "postgres_ext.h"
 
 #include "connection.h"
 #include "create_shards.h"

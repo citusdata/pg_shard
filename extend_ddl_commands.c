@@ -13,9 +13,6 @@
 #include "postgres.h" /* IWYU pragma: keep */
 #include "c.h"
 #include "ddl_commands.h"
-#include "pg_config.h"
-#include "pg_config_manual.h"
-#include "postgres_ext.h"
 
 #include <stdio.h>
 #include <string.h>
