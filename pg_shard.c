@@ -7,7 +7,7 @@
  *
  * Copyright (c) 2014-2015, Citus Data, Inc.
  *
- ***-------------------------------------------------------------------------
+ ****-------------------------------------------------------------------------
  */
 
 #include "postgres.h"
@@ -111,7 +111,7 @@ static List * BuildDistributedTargetList(Query *query, List *localRestrictList,
 static Query * BuildLocalQuery(Query *query, List *localRestrictList,
 							   bool safeToPushDownAggregate);
 static Query * RemoveAggregates(Query *aggregatedQuery);
-static Node * NonAggregateExpressionMutator(Node *originalNode, AttrNumber *columnId);
+static Node * VarNodeMutator(Node *originalNode, AttrNumber *columnId);
 static PlannedStmt * PlanSequentialScan(Query *query, int cursorOptions,
 										ParamListInfo boundParams);
 static List * QueryRestrictList(Query *query);
@@ -119,11 +119,12 @@ static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
 static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
 static List * QueryFromList(List *rangeTableList);
 static List * TargetEntryList(List *expressionList);
-static List * VarTypedTargetList(List *targetEntryList);
+static List * TargetEntryVarList(List *targetEntryList);
 static CreateStmt * CreateTemporaryTable(Query *localQuery, Query *distributedQuery,
 										 bool pushDownAggregates);
 static CreateStmt * CreateTemporaryTableStmtFromQuery(Query *query);
 static CreateStmt * CreateTemporaryTableLikeStmt(Oid sourceRelationId);
+CreateStmt * CreateStatement(RangeVar *relation, List *columnDefinitionList);
 static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalList);
 
 /* executor functions forward declarations */
@@ -300,12 +301,12 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			/*
 			 * distributedPlanTargetList is used for determining intermediate
 			 * temporary table's tuple descriptor in the executer. So, if aggregates
-			 * pushed down, we need to update it to make localQuery to be executed
-			 * on the intermedita table.
+			 * pushed down, we need to update the list to enable localQuery to be
+			 * executed on the intermediate table.
 			 */
 			if (safeToPushDownAggregate)
 			{
-				distributedPlanTargetList = list_copy(localQuery->targetList);
+				distributedPlanTargetList = TargetEntryVarList(localQuery->targetList);
 			}
 			else
 			{
@@ -900,22 +901,22 @@ BuildDistributedTargetList(Query *query, List *localRestrictList,
 				List *targetVarList = pull_var_clause((Node *) targetExpression,
 													  aggregateBehavior,
 													  placeHolderBehavior);
-				ListCell *targetExpressionListCell = NULL;
+				ListCell *targetVarListCell = NULL;
 
-				foreach(targetExpressionListCell, targetVarList)
+				foreach(targetVarListCell, targetVarList)
 				{
-					/* this is equivalent of pull_var_clause for non agg and var values */
-					TargetEntry *aggregatedTargetEntry = NULL;
-					Var *targetVar = (Var *) lfirst(targetExpressionListCell);
+					/* this is equivalent of pulling Vars from non-aggregated expressions */
+					TargetEntry *newTargetEntry = NULL;
+					Var *targetVar = (Var *) lfirst(targetVarListCell);
 
-					aggregatedTargetEntry = makeTargetEntry((Expr *) targetVar,
-															-1,
-															targetListEntry->resname,
-															targetListEntry->resjunk);
-					aggregatedTargetEntry->ressortgroupref = targetListEntry->ressortgroupref;
-					aggregatedTargetEntry->resjunk = targetListEntry->resjunk;
+					newTargetEntry = makeTargetEntry((Expr *) targetVar, -1,
+													 targetListEntry->resname,
+													 targetListEntry->resjunk);
 
-					targetList = list_append_unique(targetList, aggregatedTargetEntry);
+					newTargetEntry->ressortgroupref = targetListEntry->ressortgroupref;
+					newTargetEntry->resjunk = targetListEntry->resjunk;
+
+					targetList = list_append_unique(targetList, newTargetEntry);
 				}
 			}
 		}
@@ -1004,9 +1005,9 @@ static Query *
 RemoveAggregates(Query *aggregatedQuery)
 {
 	Query *nonAggregatedQuery = copyObject(aggregatedQuery);
-	Index tableOrder = 1;
+	Index masterTableId = 1;
 	AttrNumber columnId = 1;
-	List *aggregatedTargetList = nonAggregatedQuery->targetList;
+	List *aggregatedTargetList = aggregatedQuery->targetList;
 	ListCell *targetListCell = NULL;
 	List *nonAggregatedTargetList = NIL;
 	AttrNumber targetResNo = 1;
@@ -1014,51 +1015,41 @@ RemoveAggregates(Query *aggregatedQuery)
 	foreach(targetListCell, aggregatedTargetList)
 	{
 		TargetEntry *targetListEntry = (TargetEntry *) lfirst(targetListCell);
-		TargetEntry *newTargetEntry = NULL;
+		TargetEntry *newTargetEntry = copyObject(targetListEntry);
 
-		if (targetListEntry->resjunk == true)
+		/* eliminate from final target list */
+		if (newTargetEntry->resjunk == true)
 		{
 			continue;
 		}
 
-		if (IsA(targetListEntry->expr, Aggref))
+		/* update target list entries which are Aggrefs */
+		if (IsA(newTargetEntry->expr, Aggref))
 		{
-			Var *targetVar = makeVarFromTargetEntry(tableOrder, targetListEntry);
+			Var *targetVar = makeVarFromTargetEntry(masterTableId, targetListEntry);
 
 			newTargetEntry = makeTargetEntry((Expr *) targetVar,
-													   targetResNo,
-													   targetListEntry->resname,
-													   targetListEntry->resjunk);
-
-			newTargetEntry->expr = (Expr *) NonAggregateExpressionMutator(
-										(Node *) newTargetEntry->expr, &columnId);
-
+											 targetResNo,
+											 targetListEntry->resname,
+											 targetListEntry->resjunk);
 		}
-		else
-		{
-			targetListEntry->expr = (Expr *) NonAggregateExpressionMutator(
-				(Node *) targetListEntry->expr, &columnId);
-			newTargetEntry = targetListEntry;
-		}
+
+		/* update column attribute numbers */
+		newTargetEntry->expr = (Expr *) VarNodeMutator((Node *) newTargetEntry->expr,
+													   &columnId);
 
 		/* ressortgroupref must be updated for ORDER BY columns */
-		if (newTargetEntry != NULL && targetListEntry->ressortgroupref != 0)
-		{
-			newTargetEntry->ressortgroupref = targetListEntry->ressortgroupref;
-		}
+		newTargetEntry->ressortgroupref = targetListEntry->ressortgroupref;
 
 		/*
 		 * Columns which appear on GROUP BY/ORDER BY statements show up in the
 		 * targetList. We discard these columns from the aggregated query's
 		 * target list.
 		 */
-		if (targetListEntry->resjunk == false)
-		{
-			newTargetEntry->resno = targetResNo;
-			nonAggregatedTargetList = lappend(nonAggregatedTargetList,
-											  newTargetEntry);
-			++targetResNo;
-		}
+		newTargetEntry->resno = targetResNo;
+		nonAggregatedTargetList = lappend(nonAggregatedTargetList,
+										  newTargetEntry);
+		++targetResNo;
 	}
 
 	nonAggregatedQuery->targetList = list_copy(nonAggregatedTargetList);
@@ -1071,12 +1062,12 @@ RemoveAggregates(Query *aggregatedQuery)
 
 
 /*
- * MasterAggregateMutator walks over the original non-aggregate expression,
- * and recurses into the expression mutator function for all other expression types
- * to update the varattno of the Vars in the expression.
+ * VarNodeMutator walks over the original expression,  and recurses into
+ * the expression mutator function for all other expression types to update the
+ * varattno of the Vars in the expression.
  */
 static Node *
-NonAggregateExpressionMutator(Node *originalNode, AttrNumber *columnId)
+VarNodeMutator(Node *originalNode, AttrNumber *columnId)
 {
 	Node *newNode = NULL;
 	if (originalNode == NULL)
@@ -1096,7 +1087,7 @@ NonAggregateExpressionMutator(Node *originalNode, AttrNumber *columnId)
 	}
 	else
 	{
-		newNode = expression_tree_mutator(originalNode, NonAggregateExpressionMutator,
+		newNode = expression_tree_mutator(originalNode, VarNodeMutator,
 										  (void *) columnId);
 	}
 
@@ -1302,40 +1293,19 @@ TargetEntryList(List *expressionList)
 
 
 /*
- * VarTypedTargetList get a target list and creates a new target list entry
+ * TargetEntryVarList get a target list and creates a new target list entry
  * whose elements are Var corresponding elements of the input target list.
  */
 static List *
-VarTypedTargetList(List *targetEntryList)
+TargetEntryVarList(List *targetEntryList)
 {
-	//return list_copy(targetEntryList);
-	List *smotthedTargetEntryList = NIL;
-	ListCell *targetCell = NULL;
-
 	PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
 	PVCPlaceHolderBehavior placeHolderBehavior = PVC_RECURSE_PLACEHOLDERS;
 
-	/* as well as any used in projections (GROUP BY, etc.) */
 	List *projectColumnList = pull_var_clause((Node *) targetEntryList,
 											  aggregateBehavior, placeHolderBehavior);
 
 	return TargetEntryList(projectColumnList);
-
-	foreach(targetCell, targetEntryList)
-	{
-		TargetEntry *targetEntry = lfirst(targetCell);
-
-		Var *targetVar = makeVarFromTargetEntry(1, targetEntry);
-		TargetEntry *updatedTargetEntry = makeTargetEntry((Expr *) targetVar,
-														  targetEntry->resno,
-														  targetEntry->resname,
-														  targetEntry->resjunk);
-
-		smotthedTargetEntryList = lappend(smotthedTargetEntryList, updatedTargetEntry);
-	}
-
-
-	return smotthedTargetEntryList;
 }
 
 
@@ -1364,8 +1334,7 @@ CreateTemporaryTable(Query *localQuery, Query *distributedQuery, bool pushDownAg
 
 /*
  * CreateTemporaryTableStmtFromQuery returns a CreateStmt node which will create
- * a temporary table whose columns are the same as the query parameter's range table
- * entries.
+ * a temporary table whose columns are equivalent to the target list.
  */
 static CreateStmt *
 CreateTemporaryTableStmtFromQuery(Query *query)
@@ -1373,17 +1342,14 @@ CreateTemporaryTableStmtFromQuery(Query *query)
 	unsigned int columnCount = 0;
 	char *temporaryTableColumnPrefix = "temp_column_";
 	static unsigned long temporaryTableId = 0;
-	List *columnList = NIL;
-	CreateStmt *createStatement = makeNode(CreateStmt);
+	List *columnDefinitionList = NIL;
+	CreateStmt *createStatement = NULL;
 	StringInfo tableName = NULL;
 	RangeVar *relation = NULL;
-	ListCell *projectColumnCell = NULL;
 	PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
 	PVCPlaceHolderBehavior placeHolderBehavior = PVC_RECURSE_PLACEHOLDERS;
-
-	/* as well as any used in projections (GROUP BY, etc.) */
-	List *projectColumnList = pull_var_clause((Node *) query->targetList,
-											  aggregateBehavior, placeHolderBehavior);
+	List *projectColumnList = NIL;
+	ListCell *projectColumnListCell = NULL;
 
 	/* create a unique name for the table */
 	tableName = makeStringInfo();
@@ -1391,17 +1357,16 @@ CreateTemporaryTableStmtFromQuery(Query *query)
 					 temporaryTableId);
 	temporaryTableId++;
 
-	foreach(projectColumnCell, projectColumnList)
+	projectColumnList = pull_var_clause((Node *) query->targetList, aggregateBehavior,
+									    placeHolderBehavior);
+
+	foreach(projectColumnListCell, projectColumnList)
 	{
-		Expr *projectColumnExpression = (Expr *) lfirst(projectColumnCell);
-		Var *projectColumn = NULL;
+		Var *projectColumn = (Var *) lfirst(projectColumnListCell);
 		ColumnDef *columnDefinition = makeNode(ColumnDef);
 		StringInfo columnName = makeStringInfo();
 
-		Assert(IsA(projectColumnExpression, Var));
-
-		projectColumn = (Var *) projectColumnExpression;
-
+		/* create unique column name */
 		appendStringInfo(columnName, "%s", temporaryTableColumnPrefix);
 		appendStringInfo(columnName, "%d", columnCount);
 
@@ -1419,21 +1384,35 @@ CreateTemporaryTableStmtFromQuery(Query *query)
 		columnDefinition->constraints = NIL;
 		columnDefinition->is_local = true;
 
+		columnDefinitionList = lappend(columnDefinitionList, columnDefinition);
 		++columnCount;
-		columnList = lappend(columnList, columnDefinition);
 	}
 
 	relation = makeRangeVar(NULL, tableName->data, -1);
 	relation->relpersistence = RELPERSISTENCE_TEMP;
 
+	createStatement = CreateStatement(relation, columnDefinitionList);
+
+	return createStatement;
+}
+
+
+/*
+ * CreateStatement creates and initializes a simple table create statement that
+ * only has column definitions.
+ */
+CreateStmt *
+CreateStatement(RangeVar *relation, List *columnDefinitionList)
+{
+	CreateStmt *createStatement = makeNode(CreateStmt);
+	createStatement->relation = relation;
+	createStatement->tableElts = columnDefinitionList;
 	createStatement->inhRelations = NIL;
 	createStatement->constraints = NIL;
 	createStatement->options = NIL;
-	createStatement->oncommit = ONCOMMIT_DROP;
+	createStatement->oncommit = ONCOMMIT_NOOP;
 	createStatement->tablespacename = NULL;
 	createStatement->if_not_exists = false;
-	createStatement->tableElts = columnList;
-	createStatement->relation = relation;
 
 	return createStatement;
 }
