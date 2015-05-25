@@ -118,7 +118,7 @@ LoadShardIntervalList(Oid distributedTableId)
 	Oid argTypes[] = { OIDOID };
 	Datum argValues[] = { ObjectIdGetDatum(distributedTableId) };
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
 
 	/*
 	 * SPI_connect switches to its own memory context, which is destroyed by
@@ -165,7 +165,7 @@ LoadShardInterval(int64 shardId)
 	Oid argTypes[] = { INT8OID };
 	Datum argValues[] = { Int64GetDatum(shardId) };
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
 
 	/*
 	 * SPI_connect switches to an SPI-specific MemoryContext. See the comment
@@ -234,7 +234,7 @@ LoadShardPlacementList(int64 shardId)
 	Oid argTypes[] = { INT8OID };
 	Datum argValues[] = { Int64GetDatum(shardId) };
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
 
 	/*
 	 * SPI_connect switches to an SPI-specific MemoryContext. See the comment
@@ -285,7 +285,7 @@ PartitionColumn(Oid distributedTableId)
 	Oid argTypes[] = { OIDOID };
 	Datum argValues[] = { ObjectIdGetDatum(distributedTableId) };
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
 	bool isNull = false;
 	Datum keyDatum = 0;
 	char *partitionColumnName = NULL;
@@ -338,7 +338,7 @@ PartitionType(Oid distributedTableId)
 	Oid argTypes[] = { OIDOID };
 	Datum argValues[] = { ObjectIdGetDatum(distributedTableId) };
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
 	bool isNull = false;
 	Datum partitionTypeDatum = 0;
 
@@ -381,7 +381,7 @@ IsDistributedTable(Oid tableId)
 	Oid argTypes[] = { OIDOID };
 	Datum argValues[] = { ObjectIdGetDatum(tableId) };
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
 
 	/*
 	 * The query below hits the partition metadata table, so if we don't detect
@@ -416,7 +416,7 @@ bool
 DistributedTablesExist(void)
 {
 	bool distributedTablesExist = false;
-	int spiStatus = 0;
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
 
 	SPI_connect();
 
@@ -592,7 +592,7 @@ InsertPartitionRow(Oid distributedTableId, char partitionType, text *partitionKe
 		PointerGetDatum(partitionKeyText)
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
 
 	SPI_connect();
 
@@ -624,7 +624,7 @@ CreateShardRow(Oid distributedTableId, char shardStorage, text *shardMinValue,
 		PointerGetDatum(shardMaxValue)
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
 	bool isNull = false;
 	Datum shardIdDatum = 0;
 
@@ -663,7 +663,7 @@ CreateShardPlacementRow(uint64 shardId, ShardState shardState, char *nodeName,
 		Int32GetDatum(nodePort)
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
 	bool isNull = false;
 	Datum placementIdDatum = 0;
 
@@ -696,7 +696,7 @@ DeleteShardPlacementRow(uint64 shardPlacementId)
 	Oid argTypes[] = { INT8OID };
 	Datum argValues[] = { Int64GetDatum(shardPlacementId) };
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
 
 	SPI_connect();
 
@@ -731,7 +731,7 @@ UpdateShardPlacementRowState(int64 shardPlacementId, ShardState newState)
 		Int32GetDatum((int32) newState)
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
 
 	SPI_connect();
 

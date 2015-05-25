@@ -236,6 +236,7 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 
 	for (shardIndex = 0; shardIndex < shardCount; shardIndex++)
 	{
+		List *extendedDDLCommands = NIL;
 		int64 shardId = -1;
 		int32 placementCount = 0;
 		uint32 placementIndex = 0;
@@ -259,8 +260,8 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 		shardId = CreateShardRow(distributedTableId, shardStorageType, minHashTokenText,
 								 maxHashTokenText);
 
-		List *extendedDDLCommands = ExtendedDDLCommandList(distributedTableId, shardId,
-														   ddlCommandList);
+		extendedDDLCommands = ExtendedDDLCommandList(distributedTableId, shardId,
+													 ddlCommandList);
 
 		for (placementIndex = 0; placementIndex < placementAttemptCount; placementIndex++)
 		{

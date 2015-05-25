@@ -106,7 +106,7 @@ Datum
 load_shard_interval_array(PG_FUNCTION_ARGS)
 {
 	int64 shardId = PG_GETARG_INT64(0);
-	Oid expectedType = get_fn_expr_argtype(fcinfo->flinfo, 1);
+	Oid expectedType PG_USED_FOR_ASSERTS_ONLY = get_fn_expr_argtype(fcinfo->flinfo, 1);
 	ShardInterval *shardInterval = LoadShardInterval(shardId);
 	Datum shardIntervalArray[] = { shardInterval->minValue, shardInterval->maxValue };
 	ArrayType *shardIntervalArrayType = NULL;
