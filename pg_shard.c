@@ -1069,7 +1069,11 @@ RemoveAggregates(Query *aggregatedQuery)
 		TargetEntry *targetListEntry = (TargetEntry *) lfirst(targetListCell);
 		TargetEntry *newTargetEntry = copyObject(targetListEntry);
 
-		/* eliminate from final target list */
+		/*
+		 * Columns which appear on GROUP BY/ORDER BY statements show up in the
+		 * targetList. We discard these columns from the aggregated query's
+		 * final target list.
+		 */
 		if (newTargetEntry->resjunk == true)
 		{
 			continue;
@@ -1093,11 +1097,6 @@ RemoveAggregates(Query *aggregatedQuery)
 		/* ressortgroupref must be updated for ORDER BY columns */
 		newTargetEntry->ressortgroupref = targetListEntry->ressortgroupref;
 
-		/*
-		 * Columns which appear on GROUP BY/ORDER BY statements show up in the
-		 * targetList. We discard these columns from the aggregated query's
-		 * target list.
-		 */
 		newTargetEntry->resno = targetResNo;
 		nonAggregatedTargetList = lappend(nonAggregatedTargetList,
 										  newTargetEntry);
@@ -1353,11 +1352,14 @@ TargetEntryVarList(List *targetEntryList)
 {
 	PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
 	PVCPlaceHolderBehavior placeHolderBehavior = PVC_RECURSE_PLACEHOLDERS;
+	List *projectColumnList = NIL;
+	List *newTargetEntryList = NIL;
 
-	List *projectColumnList = pull_var_clause((Node *) targetEntryList,
-											  aggregateBehavior, placeHolderBehavior);
+	projectColumnList = pull_var_clause((Node *) targetEntryList,
+												  aggregateBehavior, placeHolderBehavior);
+	newTargetEntryList = TargetEntryList(projectColumnList);
 
-	return TargetEntryList(projectColumnList);
+	return newTargetEntryList;
 }
 
 
