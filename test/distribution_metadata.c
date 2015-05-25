@@ -21,7 +21,10 @@
 #include <stdint.h>
 
 #include "catalog/pg_type.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
 #include "executor/spi.h"
+#pragma GCC diagnostic pop
 #include "lib/stringinfo.h"
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
