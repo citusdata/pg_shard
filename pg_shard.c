@@ -7,7 +7,7 @@
  *
  * Copyright (c) 2014-2015, Citus Data, Inc.
  *
- ****-------------------------------------------------------------------------
+ *****-------------------------------------------------------------------------
  */
 
 #include "postgres.h"
@@ -891,10 +891,10 @@ BuildDistributedTargetList(Query *query, List *localRestrictList,
 
 
 /*
-* BuildAggregatedDistributedTargetList returns a list of TargetEntry for the
-* distributed query when aggregates are pushed down. This function leaves
-* AggRefs as it is in the target list. Also, WHERE clause columns pushed down.
-*/
+ * BuildAggregatedDistributedTargetList returns a list of TargetEntry for the
+ * distributed query when aggregates are pushed down. This function leaves
+ * AggRefs as it is in the target list. Also, WHERE clause columns pushed down.
+ */
 static List *
 BuildAggregatedDistributedTargetList(Query *query, List *localRestrictList)
 {
@@ -907,7 +907,7 @@ BuildAggregatedDistributedTargetList(Query *query, List *localRestrictList)
 
 	/* must retrieve all columns referenced by local WHERE clauses... */
 	List *whereColumnList = pull_var_clause((Node *) localRestrictList, aggregateBehavior,
-									  	    placeHolderBehavior);
+											placeHolderBehavior);
 	List *whereTargetList = TargetEntryList(whereColumnList);
 
 	/* add WHERE clause list */
@@ -964,10 +964,10 @@ BuildAggregatedDistributedTargetList(Query *query, List *localRestrictList)
 
 
 /*
-* BuildNonAggregatedDistributedTargetList returns a list of TargetEntry for the
-* distributed query when aggregates are not pushed down. This function replaces all
-* target entries with Vars. Also, WHERE and HAVING clauses columns pushed down.
-*/
+ * BuildNonAggregatedDistributedTargetList returns a list of TargetEntry for the
+ * distributed query when aggregates are not pushed down. This function replaces all
+ * target entries with Vars. Also, WHERE and HAVING clauses columns pushed down.
+ */
 static List *
 BuildNonAggregatedDistributedTargetList(Query *query, List *localRestrictList)
 {
@@ -984,9 +984,11 @@ BuildNonAggregatedDistributedTargetList(Query *query, List *localRestrictList)
 	/* as well as any used in projections (GROUP BY, etc.) */
 	projectColumnList = pull_var_clause((Node *) query->targetList, aggregateBehavior,
 										placeHolderBehavior);
+
 	/* must retrieve all columns referenced by local WHERE clauses... */
 	whereColumnList = pull_var_clause((Node *) localRestrictList, aggregateBehavior,
 									  placeHolderBehavior);
+
 	/* finally, need those used in any HAVING quals */
 	havingClauseColumnList = pull_var_clause(query->havingQual, aggregateBehavior,
 											 placeHolderBehavior);
@@ -1022,6 +1024,7 @@ BuildNonAggregatedDistributedTargetList(Query *query, List *localRestrictList)
 
 	return targetList;
 }
+
 
 /*
  * BuildLocalQuery returns a copy of query with its quals replaced by those
@@ -1356,7 +1359,7 @@ TargetEntryVarList(List *targetEntryList)
 	List *newTargetEntryList = NIL;
 
 	projectColumnList = pull_var_clause((Node *) targetEntryList,
-												  aggregateBehavior, placeHolderBehavior);
+										aggregateBehavior, placeHolderBehavior);
 	newTargetEntryList = TargetEntryList(projectColumnList);
 
 	return newTargetEntryList;
@@ -1412,7 +1415,7 @@ CreateTemporaryTableStmtFromQuery(Query *query)
 	temporaryTableId++;
 
 	projectColumnList = pull_var_clause((Node *) query->targetList, aggregateBehavior,
-									    placeHolderBehavior);
+										placeHolderBehavior);
 
 	foreach(projectColumnListCell, projectColumnList)
 	{
