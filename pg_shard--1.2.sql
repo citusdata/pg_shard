@@ -224,7 +224,11 @@ AS $sync_table_metadata_to_citus$
 	DECLARE
 		table_relation_id CONSTANT oid NOT NULL := table_name::regclass::oid;
 		dummy_shard_length CONSTANT bigint := 0;
+		warning_msg CONSTANT text := 'sync_table_metadata_to_citus is deprecated and ' ||
+									 'will be removed in a future version';
 	BEGIN
+		RAISE WARNING '%', warning_msg;
+
 		-- grab lock to ensure single writer for upsert
 		LOCK TABLE pg_dist_shard_placement IN EXCLUSIVE MODE;
 

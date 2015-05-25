@@ -86,6 +86,7 @@ CREATE TABLE pg_dist_shard_placement (
 ) WITH OIDS;
 -- sync metadata and verify it has transferred
 SELECT sync_table_metadata_to_citus('set_of_ids');
+WARNING:  sync_table_metadata_to_citus is deprecated and will be removed in a future version
  sync_table_metadata_to_citus 
 ------------------------------
  
@@ -124,6 +125,7 @@ ORDER BY nodename;
 
 -- subsequent sync should have no effect
 SELECT sync_table_metadata_to_citus('set_of_ids');
+WARNING:  sync_table_metadata_to_citus is deprecated and will be removed in a future version
  sync_table_metadata_to_citus 
 ------------------------------
  
@@ -170,6 +172,7 @@ VALUES
 	(105, 'cluster-worker-05', 5436, 1, :finalized);
 -- write latest changes to CitusDB tables
 SELECT sync_table_metadata_to_citus('set_of_ids');
+WARNING:  sync_table_metadata_to_citus is deprecated and will be removed in a future version
  sync_table_metadata_to_citus 
 ------------------------------
  
