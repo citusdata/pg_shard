@@ -108,6 +108,10 @@ static Query * BuildDistributedQuery(Query *query, List *remoteRestrictList,
 									 bool safeToPushDownAggregate);
 static List * BuildDistributedTargetList(Query *query, List *localRestrictList,
 										 bool safeToPushDownAggregate);
+static List * BuildAggregatedDistributedTargetList(Query *query,
+												   List *localRestrictList);
+static List * BuildNonAggregatedDistributedTargetList(Query *query,
+													  List *localRestrictList);
 static Query * BuildLocalQuery(Query *query, List *localRestrictList,
 							   bool safeToPushDownAggregate);
 static Query * RemoveAggregates(Query *aggregatedQuery);
@@ -861,6 +865,7 @@ BuildDistributedQuery(Query *query, List *remoteRestrictList, List *localRestric
 
 /*
  * BuildDistributedTargetList returns a list of TargetEntry for the distributed query.
+ * Returned list depends on whethe aggregates are pushed down to the workers or not.
  * If aggregations are pushed down, do not replace AggRefs with Vars in the target list.
  * Otherwise, replace all target entries with Vars. Also, when aggregates are pushed
  * down, do not fetch HAVING columns, since they are also pushed down.
@@ -870,106 +875,153 @@ BuildDistributedTargetList(Query *query, List *localRestrictList,
 						   bool safeToPushDownAggregate)
 {
 	List *targetList = NIL;
-	List *whereColumnList = NIL;
-	PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
-	PVCPlaceHolderBehavior placeHolderBehavior = PVC_REJECT_PLACEHOLDERS;
 
-	/* must retrieve all columns referenced by local WHERE clauses... */
-	whereColumnList = pull_var_clause((Node *) localRestrictList, aggregateBehavior,
-									  placeHolderBehavior);
 
 	if (safeToPushDownAggregate)
 	{
-		List *aggregatedProjectColumnList = query->targetList;
-		ListCell *targetListCell = NULL;
-		Index tableOrder = 1;
-		List *targetEntryWhereColumns = TargetEntryList(whereColumnList);
-		List *aggregatedTargetList = list_concat_unique(aggregatedProjectColumnList,
-														targetEntryWhereColumns);
-
-		foreach(targetListCell, aggregatedTargetList)
-		{
-			TargetEntry *targetListEntry = (TargetEntry *) lfirst(targetListCell);
-			Expr *targetExpression = (Expr *) targetListEntry->expr;
-
-			if (IsA(targetExpression, Aggref))
-			{
-				targetList = list_append_unique(targetList, targetListEntry);
-			}
-			else
-			{
-				List *targetVarList = pull_var_clause((Node *) targetExpression,
-													  aggregateBehavior,
-													  placeHolderBehavior);
-				ListCell *targetVarListCell = NULL;
-
-				foreach(targetVarListCell, targetVarList)
-				{
-					/* this is equivalent of pulling Vars from non-aggregated expressions */
-					TargetEntry *newTargetEntry = NULL;
-					Var *targetVar = (Var *) lfirst(targetVarListCell);
-
-					newTargetEntry = makeTargetEntry((Expr *) targetVar, -1,
-													 targetListEntry->resname,
-													 targetListEntry->resjunk);
-
-					newTargetEntry->ressortgroupref = targetListEntry->ressortgroupref;
-					newTargetEntry->resjunk = targetListEntry->resjunk;
-
-					targetList = list_append_unique(targetList, newTargetEntry);
-				}
-			}
-		}
+		targetList = BuildAggregatedDistributedTargetList(query, localRestrictList);
 	}
 	else
 	{
-		List *projectColumnList = NIL;
-		List *havingClauseColumnList = NIL;
-		List *requiredColumnList = NIL;
-		ListCell *columnCell = NULL;
-		List *uniqueColumnList = NIL;
-
-		/* as well as any used in projections (GROUP BY, etc.) */
-		projectColumnList = pull_var_clause((Node *) query->targetList, aggregateBehavior,
-											placeHolderBehavior);
-
-		/* finally, need those used in any HAVING quals */
-		havingClauseColumnList = pull_var_clause(query->havingQual, aggregateBehavior,
-												 placeHolderBehavior);
-
-		/* put them together to get list of required columns for query */
-		requiredColumnList = list_concat(requiredColumnList, whereColumnList);
-		requiredColumnList = list_concat(requiredColumnList, projectColumnList);
-		requiredColumnList = list_concat(requiredColumnList, havingClauseColumnList);
-
-		/* ensure there are no duplicates in the list  */
-		foreach(columnCell, requiredColumnList)
-		{
-			Var *column = (Var *) lfirst(columnCell);
-
-			uniqueColumnList = list_append_unique(uniqueColumnList, column);
-		}
-
-		/*
-		 * If we still have no columns, possible in a query like "SELECT count(*)",
-		 * add a NULL constant. This constant results in "SELECT NULL FROM ...".
-		 * postgres_fdw generates a similar string when no columns are selected.
-		 */
-		if (uniqueColumnList == NIL)
-		{
-			/* values for NULL const taken from parse_node.c */
-			Const *nullConst = makeConst(UNKNOWNOID, -1, InvalidOid, -2,
-										 (Datum) 0, true, false);
-
-			uniqueColumnList = lappend(uniqueColumnList, nullConst);
-		}
-
-		targetList = TargetEntryList(uniqueColumnList);
+		targetList = BuildNonAggregatedDistributedTargetList(query, localRestrictList);
 	}
 
 	return targetList;
 }
 
+
+/*
+* BuildAggregatedDistributedTargetList returns a list of TargetEntry for the
+* distributed query when aggregates are pushed down. This function leaves
+* AggRefs as it is in the target list. Also, WHERE clause columns pushed down.
+*/
+static List *
+BuildAggregatedDistributedTargetList(Query *query, List *localRestrictList)
+{
+	List *targetList = query->targetList;
+	List *newTargetList = NIL;
+	List *uniqueVarTargetList = NIL;
+	ListCell *targetListCell = NULL;
+	PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
+	PVCPlaceHolderBehavior placeHolderBehavior = PVC_REJECT_PLACEHOLDERS;
+
+	/* must retrieve all columns referenced by local WHERE clauses... */
+	List *whereColumnList = pull_var_clause((Node *) localRestrictList, aggregateBehavior,
+									  	    placeHolderBehavior);
+	List *whereTargetList = TargetEntryList(whereColumnList);
+
+	/* add WHERE clause list */
+	targetList = list_concat(targetList, whereTargetList);
+
+	foreach(targetListCell, targetList)
+	{
+		TargetEntry *targetListEntry = (TargetEntry *) lfirst(targetListCell);
+		Expr *targetExpression = (Expr *) targetListEntry->expr;
+		TargetEntry *newTargetEntry = NULL;
+
+		if (IsA(targetExpression, Aggref))
+		{
+			newTargetEntry = copyObject(targetListEntry);
+			newTargetList = lappend(newTargetList, newTargetEntry);
+		}
+		else
+		{
+			List *targetVarList = pull_var_clause((Node *) targetExpression,
+												  aggregateBehavior,
+												  placeHolderBehavior);
+			ListCell *targetVarListCell = NULL;
+
+			foreach(targetVarListCell, targetVarList)
+			{
+				/* this is equivalent of pulling Vars from non-aggregated expressions */
+				Var *targetVar = (Var *) lfirst(targetVarListCell);
+				bool targetVarExists = list_member(uniqueVarTargetList, targetVar);
+				bool sortOrGroupReference = targetListEntry->ressortgroupref;
+
+				if (targetVarExists && !sortOrGroupReference)
+				{
+					continue;
+				}
+				else
+				{
+					uniqueVarTargetList = list_append_unique(uniqueVarTargetList,
+															 targetVar);
+				}
+
+				newTargetEntry = makeTargetEntry((Expr *) targetVar, -1,
+												 targetListEntry->resname,
+												 targetListEntry->resjunk);
+
+				newTargetEntry->ressortgroupref = targetListEntry->ressortgroupref;
+
+				newTargetList = lappend(newTargetList, newTargetEntry);
+			}
+		}
+	}
+
+	return newTargetList;
+}
+
+
+/*
+* BuildNonAggregatedDistributedTargetList returns a list of TargetEntry for the
+* distributed query when aggregates are not pushed down. This function replaces all
+* target entries with Vars. Also, WHERE and HAVING clauses columns pushed down.
+*/
+static List *
+BuildNonAggregatedDistributedTargetList(Query *query, List *localRestrictList)
+{
+	List *projectColumnList = NIL;
+	List *havingClauseColumnList = NIL;
+	List *whereColumnList = NIL;
+	List *requiredColumnList = NIL;
+	ListCell *columnCell = NULL;
+	List *uniqueColumnList = NIL;
+	List *targetList = NIL;
+	PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
+	PVCPlaceHolderBehavior placeHolderBehavior = PVC_REJECT_PLACEHOLDERS;
+
+	/* as well as any used in projections (GROUP BY, etc.) */
+	projectColumnList = pull_var_clause((Node *) query->targetList, aggregateBehavior,
+										placeHolderBehavior);
+	/* must retrieve all columns referenced by local WHERE clauses... */
+	whereColumnList = pull_var_clause((Node *) localRestrictList, aggregateBehavior,
+									  placeHolderBehavior);
+	/* finally, need those used in any HAVING quals */
+	havingClauseColumnList = pull_var_clause(query->havingQual, aggregateBehavior,
+											 placeHolderBehavior);
+
+	/* put them together to get list of required columns for query */
+	requiredColumnList = list_concat(requiredColumnList, whereColumnList);
+	requiredColumnList = list_concat(requiredColumnList, projectColumnList);
+	requiredColumnList = list_concat(requiredColumnList, havingClauseColumnList);
+
+	/* ensure there are no duplicates in the list  */
+	foreach(columnCell, requiredColumnList)
+	{
+		Var *column = (Var *) lfirst(columnCell);
+
+		uniqueColumnList = list_append_unique(uniqueColumnList, column);
+	}
+
+	/*
+	 * If we still have no columns, possible in a query like "SELECT count(*)",
+	 * add a NULL constant. This constant results in "SELECT NULL FROM ...".
+	 * postgres_fdw generates a similar string when no columns are selected.
+	 */
+	if (uniqueColumnList == NIL)
+	{
+		/* values for NULL const taken from parse_node.c */
+		Const *nullConst = makeConst(UNKNOWNOID, -1, InvalidOid, -2,
+									 (Datum) 0, true, false);
+
+		uniqueColumnList = lappend(uniqueColumnList, nullConst);
+	}
+
+	targetList = TargetEntryList(uniqueColumnList);
+
+	return targetList;
+}
 
 /*
  * BuildLocalQuery returns a copy of query with its quals replaced by those
@@ -1410,7 +1462,7 @@ CreateStatement(RangeVar *relation, List *columnDefinitionList)
 	createStatement->inhRelations = NIL;
 	createStatement->constraints = NIL;
 	createStatement->options = NIL;
-	createStatement->oncommit = ONCOMMIT_NOOP;
+	createStatement->oncommit = ONCOMMIT_DROP;
 	createStatement->tablespacename = NULL;
 	createStatement->if_not_exists = false;
 
