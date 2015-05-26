@@ -209,6 +209,12 @@ SELECT author_id, count(*) FROM articles
 	GROUP BY author_id
 	ORDER BY author_id;
 
+-- GROUP BY on partition column where total number of projections are more than column count
+-- In this case, we do not push down GROUP BY
+SELECT author_id, count(*), sum(author_id), avg(author_id), max(author_id)  FROM articles
+	GROUP BY author_id
+	ORDER BY author_id;
+
 -- a query with HAVING and GROUP BY on partition column
 SELECT author_id, count(*) as cnt FROM articles
 	GROUP BY author_id
