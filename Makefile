@@ -15,7 +15,7 @@ TESTS = $(wildcard test/sql/*.sql)
 REGRESS = $(patsubst test/sql/%.sql,%,$(TESTS))
 REGRESS_OPTS = --inputdir=test --outputdir=test --load-language=plpgsql
 
-PG_CPPFLAGS = -std=c99 -Wall -Wextra -Werror -Wno-unused-parameter -I$(libpq_srcdir)
+PG_CPPFLAGS = -std=c99 -Wall -Wextra -Werror -Wno-unused-parameter -Iinclude -I$(libpq_srcdir)
 
 # The launcher regression flag lets us specify a special wrapper to handle
 # testing rather than psql directly. Our wrapper swaps in a known worker list.

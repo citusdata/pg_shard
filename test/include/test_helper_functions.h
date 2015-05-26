@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * test/test_helper_functions.h
+ * test/include/test_helper_functions.h
  *
  * Declarations for public functions and types related to unit testing
  * functionality.

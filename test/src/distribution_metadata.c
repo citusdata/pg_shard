@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * test/distribution_metadata.c
+ * test/src/distribution_metadata.c
  *
  * This file contains functions to exercise distributed table metadata
  * functionality within pg_shard.

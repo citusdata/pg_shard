@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * test/create_shards.c
+ * test/src/create_shards.c
  *
  * This file contains functions to exercise shard creation functionality
  * within pg_shard.
