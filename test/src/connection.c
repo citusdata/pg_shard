@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * test/connection.c
+ * test/src/connection.c
  *
  * This file contains functions to exercise pg_shard's connection hash
  * functionality for purposes of unit testing.

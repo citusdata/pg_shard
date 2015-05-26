@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * test/test_helper_functions.c
+ * test/src/test_helper_functions.c
  *
  * This file contains helper functions used in many pg_shard tests.
  *

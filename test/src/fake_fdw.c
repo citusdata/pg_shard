@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * test/fake_fdw.c
+ * test/src/fake_fdw.c
  *
  * This file contains a barebones FDW implementation, suitable for use in
  * test code. Inspired by Andrew Dunstan's blackhole_fdw.

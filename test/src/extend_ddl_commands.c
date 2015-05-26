@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * test/extend_ddl_commands.c
+ * test/src/extend_ddl_commands.c
  *
  * This file contains functions to exercise DDL extension functionality
  * within pg_shard.

@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * test/generate_ddl_commands.c
+ * test/src/generate_ddl_commands.c
  *
  * This file contains functions to exercise DDL generation functionality
  * within pg_shard.
