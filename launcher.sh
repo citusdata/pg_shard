@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# make bash behave
+set -euo pipefail
+IFS=$'\n\t'
+
 PGPORT=${PGPORT:-5432}
 PSQL=$1
 DATADIR=`$PSQL -p$PGPORT -AtXc 'SHOW data_directory' postgres`
