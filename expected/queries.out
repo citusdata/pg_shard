@@ -365,19 +365,19 @@ LOG:  distributed statement: SELECT author_id, count(*) AS cnt FROM ONLY article
 
 		
 -- a query with WHERE, function call with const value and GROUP BY on partition column
-SELECT author_id, double_single_int(author_id::int + 15) FROM articles
+SELECT author_id, double_single_int(15) FROM articles
 	WHERE author_id > 5
 	GROUP BY author_id
 	ORDER BY author_id DESC;
-LOG:  distributed statement: SELECT author_id, author_id AS double_single_int, author_id AS double_single_int FROM ONLY articles_10036 WHERE (author_id > 5) GROUP BY author_id
-LOG:  distributed statement: SELECT author_id, author_id AS double_single_int, author_id AS double_single_int FROM ONLY articles_10037 WHERE (author_id > 5) GROUP BY author_id
+LOG:  distributed statement: SELECT author_id FROM ONLY articles_10036 WHERE (author_id > 5) GROUP BY author_id
+LOG:  distributed statement: SELECT author_id FROM ONLY articles_10037 WHERE (author_id > 5) GROUP BY author_id
  author_id | double_single_int 
 -----------+-------------------
-        10 |               625
-         9 |               576
-         8 |               529
-         7 |               484
-         6 |               441
+        10 |               225
+         9 |               225
+         8 |               225
+         7 |               225
+         6 |               225
 (5 rows)
 
 		

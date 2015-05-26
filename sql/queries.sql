@@ -224,7 +224,7 @@ SELECT author_id, count(*) as cnt FROM articles
 	ORDER BY author_id DESC;
 		
 -- a query with WHERE, function call with const value and GROUP BY on partition column
-SELECT author_id, double_single_int(author_id::int + 15) FROM articles
+SELECT author_id, double_single_int(15) FROM articles
 	WHERE author_id > 5
 	GROUP BY author_id
 	ORDER BY author_id DESC;
