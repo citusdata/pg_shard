@@ -114,6 +114,7 @@ static Query * BuildLocalQuery(Query *query, List *localRestrictList,
 							   bool safeToPushDownAggregate);
 static Query * RemoveAggregates(Query *aggregatedQuery);
 static Node * VarNodeMutator(Node *originalNode, AttrNumber *columnId);
+static bool ContainsAggref(Node *originalNode);
 static PlannedStmt * PlanSequentialScan(Query *query, int cursorOptions,
 										ParamListInfo boundParams);
 static List * QueryRestrictList(Query *query);
@@ -916,7 +917,7 @@ BuildAggregatedDistributedTargetList(Query *query, List *localRestrictList)
 		Expr *targetExpression = (Expr *) targetListEntry->expr;
 		TargetEntry *newTargetEntry = NULL;
 
-		if (IsA(targetExpression, Aggref))
+		if (ContainsAggref((Node *) targetExpression))
 		{
 			newTargetEntry = copyObject(targetListEntry);
 			newTargetList = lappend(newTargetList, newTargetEntry);
@@ -1067,8 +1068,8 @@ RemoveAggregates(Query *aggregatedQuery)
 			continue;
 		}
 
-		/* update target list entries which are Aggrefs */
-		if (IsA(newTargetEntry->expr, Aggref))
+		/* update target list entries which include Aggrefs */
+		if (ContainsAggref((Node *) newTargetEntry->expr))
 		{
 			Var *targetVar = makeVarFromTargetEntry(masterTableId, targetListEntry);
 
@@ -1131,6 +1132,35 @@ VarNodeMutator(Node *originalNode, AttrNumber *columnId)
 	}
 
 	return newNode;
+}
+
+
+/*
+ * ContainsAggref returns true if originalNode includes any Aggrefs.
+ * The function walks over the original expression, and recurses into
+ * all nodes in the input node.
+ */
+static bool
+ContainsAggref(Node *originalNode)
+{
+	bool contains = false;
+
+	if (originalNode == NULL)
+	{
+		return false;
+	}
+
+	if (IsA(originalNode, Aggref))
+	{
+		contains = true;
+	}
+	else
+	{
+		contains = expression_tree_walker(originalNode, ContainsAggref,
+										  (void *) NULL);
+	}
+
+	return contains;
 }
 
 

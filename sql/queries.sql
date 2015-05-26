@@ -177,8 +177,8 @@ SET client_min_messages = log;
 SELECT count(*) FROM articles WHERE word_count > 10000;
 
 -- function for tests
-CREATE OR REPLACE FUNCTION sum_to_ints(int,int) RETURNS int
-    AS $$ SELECT $1 *+$2 $$
+CREATE OR REPLACE FUNCTION sum_two_ints(int,int) RETURNS int
+    AS $$ SELECT $1 + $2 $$
     LANGUAGE SQL IMMUTABLE;
 
 -- function for tests
@@ -209,16 +209,11 @@ SELECT author_id, count(*) FROM articles
 	GROUP BY author_id
 	ORDER BY author_id;
 
--- GROUP BY on partition column where total number of projections are more than column count
--- In this case, we do not push down GROUP BY
-SELECT author_id, count(*), sum(author_id), avg(author_id), max(author_id)  FROM articles
-	GROUP BY author_id
-	ORDER BY author_id;
-
 -- a query with HAVING and GROUP BY on partition column
-SELECT author_id, count(*) as cnt FROM articles
+-- project column includes an aggregate in an operator expression 
+SELECT author_id, (count(*) + author_id) as cnt FROM articles
 	GROUP BY author_id
-	HAVING  count(*) > 4
+	HAVING (count(*) + author_id) > 4
 	ORDER BY author_id;
 
 -- a query with WHERE, HAVING and GROUP BY on partition column
@@ -229,24 +224,30 @@ SELECT author_id, count(*) as cnt FROM articles
 	ORDER BY author_id DESC;
 		
 -- a query with WHERE, function call with const value and GROUP BY on partition column
-SELECT author_id,  double_single_int((author_id::int + 15)) FROM articles
+SELECT author_id, double_single_int(author_id::int + 15) FROM articles
 	WHERE author_id > 5
 	GROUP BY author_id
 	ORDER BY author_id DESC;
 		
 -- a query with WHERE, LIMIT, HAVING, function call on data and GROUP BY on partition column
-SELECT author_id, count(*) as cnt, sum_to_ints(7, author_id::int ) as summed_value FROM articles
+SELECT author_id, count(*) as cnt, sum_two_ints(7, author_id::int) as summed_value FROM articles
 	WHERE author_id < 9
 	GROUP BY author_id
-	ORDER BY  sum_to_ints(7, author_id::int ) DESC
+	ORDER BY sum_two_ints(7, author_id::int) DESC
 	LIMIT 3;
 	
 -- a query with WHERE, HAVING, function call on data and GROUP BY on two columns including partition column
-SELECT author_id,  word_count, count(*) as cnt FROM articles
+SELECT author_id, word_count, count(*) as cnt FROM articles
 	WHERE author_id > 8 AND word_count > 8000
 	GROUP BY author_id, word_count
-	ORDER BY count(*)  DESC;	
+	ORDER BY word_count DESC;	
 	
+-- GROUP BY on partition column where total number of projections are more than column count
+-- In this case, we do not push down GROUP BY
+SELECT author_id, count(*), sum(author_id), avg(author_id), max(author_id) FROM articles
+	GROUP BY author_id
+	ORDER BY author_id;
+
 SET client_min_messages = DEFAULT;
 SET pg_shard.log_distributed_statements = DEFAULT;
 
