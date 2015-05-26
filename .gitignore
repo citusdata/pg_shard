@@ -46,7 +46,10 @@
 # = Project-Specific =
 # ====================
 
-!/expected/*.out
+# regression test output
+regression.diffs
+regression.out
+test/results/
 
-# header dependency information
-/.deps
+# keep expected output files
+!/test/expected/*.out
