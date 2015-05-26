@@ -7,9 +7,7 @@
 #-------------------------------------------------------------------------
 
 MODULE_big = pg_shard
-OBJS = connection.o create_shards.o citus_metadata_sync.o distribution_metadata.o \
-	   extend_ddl_commands.o generate_ddl_commands.o pg_shard.o prune_shard_list.o \
-	   repair_shards.o ruleutils.o
+OBJS = $(patsubst %.c,%.o,$(wildcard *.c))
 
 PG_CPPFLAGS = -std=c99 -Wall -Wextra -Werror -Wno-unused-parameter -I$(libpq_srcdir)
 
@@ -65,19 +63,9 @@ ifndef MAJORVERSION
     MAJORVERSION := $(basename $(VERSION))
 endif
 
-# Determine whether to use 9.3- or 9.4-derived ruleutils
-ifneq (,$(findstring $(MAJORVERSION), 9.3))
-	RULEUTILS_IMPL := ruleutils_93.c
-endif
-ifneq (,$(findstring $(MAJORVERSION), 9.4))
-	RULEUTILS_IMPL := ruleutils_94.c
-endif
+PG93 = $(shell echo $(MAJORVERSION) | grep -qE "8\.|9\.[012]" && echo no || echo yes)
 
-# If neither 9.3 nor 9.4 was detected, abort
-ifeq (,$(RULEUTILS_IMPL))
+# if using a version older than PostgreSQL 9.3, abort
+ifeq ($(PG93),no)
     $(error PostgreSQL 9.3 or 9.4 is required to compile this extension)
 endif
-
-# Same as implicit %.o rule, except building ruleutils.o from -93/94
-ruleutils.o: $(RULEUTILS_IMPL)
-	$(COMPILE.c) $(OUTPUT_OPTION) $<
