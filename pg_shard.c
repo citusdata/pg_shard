@@ -898,7 +898,6 @@ BuildAggregatedDistributedTargetList(Query *query, List *localRestrictList)
 {
 	List *targetList = query->targetList;
 	List *newTargetList = NIL;
-	List *uniqueVarTargetList = NIL;
 	ListCell *targetListCell = NULL;
 	PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
 	PVCPlaceHolderBehavior placeHolderBehavior = PVC_REJECT_PLACEHOLDERS;
@@ -933,18 +932,6 @@ BuildAggregatedDistributedTargetList(Query *query, List *localRestrictList)
 			{
 				/* this is equivalent of pulling Vars from non-aggregated expressions */
 				Var *targetVar = (Var *) lfirst(targetVarListCell);
-				bool targetVarExists = list_member(uniqueVarTargetList, targetVar);
-				bool sortOrGroupReference = targetListEntry->ressortgroupref;
-
-				if (targetVarExists && !sortOrGroupReference)
-				{
-					continue;
-				}
-				else
-				{
-					uniqueVarTargetList = list_append_unique(uniqueVarTargetList,
-															 targetVar);
-				}
 
 				newTargetEntry = makeTargetEntry((Expr *) targetVar, -1,
 												 targetListEntry->resname,
