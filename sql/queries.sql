@@ -152,13 +152,6 @@ SET pg_shard.use_citusdb_select_logic TO false;
 -- test cross-shard queries
 SELECT COUNT(*) FROM articles;
 
--- try query with more SQL features
-SELECT author_id, sum(word_count) AS corpus_size FROM articles
-	GROUP BY author_id
-	HAVING sum(word_count) > 25000
-	ORDER BY sum(word_count) DESC
-	LIMIT 5;
-
 -- cross-shard queries on a foreign table should fail
 -- we'll just point the article shards to a foreign table
 BEGIN;
@@ -183,14 +176,73 @@ SET client_min_messages = log;
 
 SELECT count(*) FROM articles WHERE word_count > 10000;
 
-SET client_min_messages = DEFAULT;
-SET pg_shard.log_distributed_statements = DEFAULT;
+-- function for tests
+CREATE OR REPLACE FUNCTION sum_to_ints(int,int) RETURNS int
+    AS $$ SELECT $1 *+$2 $$
+    LANGUAGE SQL IMMUTABLE;
 
--- use HAVING without its variable in target list
+-- function for tests
+CREATE OR REPLACE FUNCTION double_single_int(int) RETURNS int
+    AS $$ SELECT $1 * $1 $$
+    LANGUAGE SQL IMMUTABLE;
+
+-- use HAVING without its variable in target list when GROUP BY non-partition column
+SELECT title FROM articles
+	GROUP BY title
+	HAVING sum(word_count) > 18000
+	ORDER BY title;
+
+-- try query with more SQL features when GROUP BY non-partition column
+SELECT title, sum(word_count) AS corpus_size FROM articles
+	GROUP BY title
+	HAVING sum(word_count) > 2000
+	ORDER BY sum(word_count) DESC
+	LIMIT 5;
+
+-- a simple query with GROUP BY on partition column
 SELECT author_id FROM articles
 	GROUP BY author_id
-	HAVING sum(word_count) > 50000
 	ORDER BY author_id;
+
+-- an aggregate query with GROUP BY on partition column
+SELECT author_id, count(*) FROM articles
+	GROUP BY author_id
+	ORDER BY author_id;
+
+-- a query with HAVING and GROUP BY on partition column
+SELECT author_id, count(*) as cnt FROM articles
+	GROUP BY author_id
+	HAVING  count(*) > 4
+	ORDER BY author_id;
+
+-- a query with WHERE, HAVING and GROUP BY on partition column
+SELECT author_id, count(*) as cnt FROM articles
+	WHERE author_id > 8
+	GROUP BY author_id
+	HAVING count(*) >= 5
+	ORDER BY author_id DESC;
+		
+-- a query with WHERE, function call with const value and GROUP BY on partition column
+SELECT author_id,  double_single_int((author_id::int + 15)) FROM articles
+	WHERE author_id > 5
+	GROUP BY author_id
+	ORDER BY author_id DESC;
+		
+-- a query with WHERE, LIMIT, HAVING, function call on data and GROUP BY on partition column
+SELECT author_id, count(*) as cnt, sum_to_ints(7, author_id::int ) as summed_value FROM articles
+	WHERE author_id < 9
+	GROUP BY author_id
+	ORDER BY  sum_to_ints(7, author_id::int ) DESC
+	LIMIT 3;
+	
+-- a query with WHERE, HAVING, function call on data and GROUP BY on two columns including partition column
+SELECT author_id,  word_count, count(*) as cnt FROM articles
+	WHERE author_id > 8 AND word_count > 8000
+	GROUP BY author_id, word_count
+	ORDER BY count(*)  DESC;	
+	
+SET client_min_messages = DEFAULT;
+SET pg_shard.log_distributed_statements = DEFAULT;
 
 -- verify temp tables used by cross-shard queries do not persist
 SELECT COUNT(*) FROM pg_class WHERE relname LIKE 'pg_shard_temp_table%' AND
