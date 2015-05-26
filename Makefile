@@ -11,8 +11,15 @@ EXTVERSION = $(shell grep default_version $(EXTENSION).control | sed -e "s/defau
 
 MODULE_big = ${EXTENSION}
 OBJS = $(patsubst %.c,%.o,$(wildcard *.c))
+TESTS = $(wildcard test/sql/*.sql)
+REGRESS = $(patsubst test/sql/%.sql,%,$(TESTS))
+REGRESS_OPTS = --inputdir=test --outputdir=test --load-language=plpgsql
 
 PG_CPPFLAGS = -std=c99 -Wall -Wextra -Werror -I$(libpq_srcdir)
+
+# The launcher regression flag lets us specify a special wrapper to handle
+# testing rather than psql directly. Our wrapper swaps in a known worker list.
+REGRESS_OPTS += --launcher=./launcher.sh
 
 # pg_shard and CitusDB have several functions that share the same name. When we
 # link pg_shard against CitusDB on Linux, the loader resolves to the CitusDB
@@ -27,16 +34,6 @@ endif
 
 DATA = pg_shard--1.2.sql pg_shard--1.0--1.1.sql pg_shard--1.1--1.2.sql
 SCRIPTS = bin/copy_to_distributed_table
-
-REGRESS = init connection distribution_metadata extend_ddl_commands \
-		  generate_ddl_commands create_shards prune_shard_list repair_shards \
-		  modifications queries utilities citus_metadata_sync create_insert_proxy
-
-# The launcher regression flag lets us specify a special wrapper to handle
-# testing rather than psql directly. Our wrapper swaps in a known worker list.
-REGRESS_OPTS = --launcher=./launcher.sh
-
-EXTRA_CLEAN += ${REGRESS_PREP}
 
 ifeq ($(enable_coverage),yes)
 	PG_CPPFLAGS += --coverage
