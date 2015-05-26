@@ -6,7 +6,10 @@
 #
 #-------------------------------------------------------------------------
 
-MODULE_big = pg_shard
+EXTENSION = $(shell grep -m 1 '"name":' META.json | sed -e 's/[[:space:]]*"name":[[:space:]]*"\([^"]*\)",/\1/')
+EXTVERSION = $(shell grep default_version $(EXTENSION).control | sed -e "s/default_version[[:space:]]*=[[:space:]]*'\([^']*\)'/\1/")
+
+MODULE_big = ${EXTENSION}
 OBJS = $(patsubst %.c,%.o,$(wildcard *.c))
 
 PG_CPPFLAGS = -std=c99 -Wall -Wextra -Werror -Wno-unused-parameter -I$(libpq_srcdir)
@@ -22,7 +25,6 @@ else
 	SHLIB_LINK = $(libpq)
 endif
 
-EXTENSION = pg_shard
 DATA = pg_shard--1.2.sql pg_shard--1.0--1.1.sql pg_shard--1.1--1.2.sql
 SCRIPTS = bin/copy_to_distributed_table
 
