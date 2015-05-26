@@ -112,8 +112,13 @@ SELECT master_create_worker_shards('table_to_distribute', 16, 1);
 -- test list sorting
 SELECT sort_names('sumedh', 'jason', 'ozgun');
 
+-- squelch WARNINGs that contain worker_port
+SET client_min_messages TO ERROR;
+
 -- test remote command execution
-SELECT create_table_then_fail('localhost', $PGPORT);
+SELECT create_table_then_fail('localhost', :worker_port);
+
+SET client_min_messages TO DEFAULT;
 
 SELECT COUNT(*) FROM pg_class WHERE relname LIKE 'throwaway%' AND relkind = 'r';
 

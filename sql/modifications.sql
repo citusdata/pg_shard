@@ -37,6 +37,9 @@ SELECT COUNT(*) FROM limit_orders WHERE id = 430;
 -- INSERT without partition key
 INSERT INTO limit_orders DEFAULT VALUES;
 
+-- squelch WARNINGs that contain worker_port
+SET client_min_messages TO ERROR;
+
 -- INSERT violating NOT NULL constraint
 INSERT INTO limit_orders VALUES (NULL, 'T', 975234, DEFAULT);
 
@@ -46,6 +49,8 @@ INSERT INTO limit_orders VALUES (18811, 'BUD', 14962, '2014-04-05 08:32:16', 'se
 
 -- INSERT violating primary key constraint
 INSERT INTO limit_orders VALUES (32743, 'LUV', 5994, '2001-04-16 03:37:28', 'buy', 0.58);
+
+SET client_min_messages TO DEFAULT;
 
 -- commands with non-constant partition values are unsupported
 INSERT INTO limit_orders VALUES (random() * 100, 'ORCL', 152, '2011-08-25 11:50:45',

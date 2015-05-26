@@ -21,16 +21,16 @@ VALUES
 INSERT INTO pgs_distribution_metadata.shard_placement
 	(id, node_name, node_port, shard_id, shard_state)
 VALUES
-	(200, 'localhost', $PGPORT, 20, 1),
-	(201, '127.0.0.1', $PGPORT, 20, 3),
-	(202, 'dummyhost', $PGPORT, 20, 1),
-	(203, 'otherhost', $PGPORT, 20, 3);
+	(200, 'localhost', :worker_port, 20, 1),
+	(201, '127.0.0.1', :worker_port, 20, 3),
+	(202, 'dummyhost', :worker_port, 20, 1),
+	(203, 'otherhost', :worker_port, 20, 3);
 
 -- first, test input checking by trying to copy into a finalized placement
-SELECT master_copy_shard_placement(20, 'localhost', $PGPORT, 'dummyhost', $PGPORT);
+SELECT master_copy_shard_placement(20, 'localhost', :worker_port, 'dummyhost', :worker_port);
 
 -- also try to copy from an inactive placement
-SELECT master_copy_shard_placement(20, 'otherhost', $PGPORT, '127.0.0.1', $PGPORT);
+SELECT master_copy_shard_placement(20, 'otherhost', :worker_port, '127.0.0.1', :worker_port);
 
 -- next, create an empty "shard" for the table
 CREATE TABLE customer_engagements_20 ( LIKE customer_engagements );
@@ -42,7 +42,7 @@ SELECT 'customer_engagements_20'::regclass::oid AS shardoid;
 \o
 
 -- "copy" this shard from localhost to 127.0.0.1
-SELECT master_copy_shard_placement(20, 'localhost', $PGPORT, '127.0.0.1', $PGPORT);
+SELECT master_copy_shard_placement(20, 'localhost', :worker_port, '127.0.0.1', :worker_port);
 
 -- the table was recreated, so capture the new object identifier
 \o /dev/null
@@ -72,8 +72,8 @@ VALUES
 INSERT INTO pgs_distribution_metadata.shard_placement
 	(id, node_name, node_port, shard_id, shard_state)
 VALUES
-	(300, 'localhost', $PGPORT, 30, 1),
-	(301, '127.0.0.1', $PGPORT, 30, 3);
+	(300, 'localhost', :worker_port, 30, 1),
+	(301, '127.0.0.1', :worker_port, 30, 3);
 
 CREATE FOREIGN TABLE remote_engagements_30 (
 	id integer,
@@ -82,7 +82,7 @@ CREATE FOREIGN TABLE remote_engagements_30 (
 ) SERVER fake_fdw_server;
 
 -- oops! we don't support repairing shards backed by foreign tables
-SELECT master_copy_shard_placement(30, 'localhost', $PGPORT, '127.0.0.1', $PGPORT);
+SELECT master_copy_shard_placement(30, 'localhost', :worker_port, '127.0.0.1', :worker_port);
 
 -- At this point, we've tested recreating a shard's table, but haven't seen
 -- whether the rows themselves are correctly copied. We'll insert a few rows
@@ -91,7 +91,7 @@ SELECT master_copy_shard_placement(30, 'localhost', $PGPORT, '127.0.0.1', $PGPOR
 INSERT INTO customer_engagements_20 DEFAULT VALUES;
 
 -- call the copy UDF directly to just copy the rows without recreating table
-SELECT worker_copy_shard_placement('customer_engagements_20', 'localhost', $PGPORT);
+SELECT worker_copy_shard_placement('customer_engagements_20', 'localhost', :worker_port);
 
 -- should expect twice as many rows as we put in
 SELECT COUNT(*) FROM customer_engagements_20;

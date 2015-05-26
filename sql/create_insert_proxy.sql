@@ -44,7 +44,7 @@ CREATE TABLE insert_target (
 	data text NOT NULL DEFAULT 'lorem ipsum'
 );
 
--- squelch WARNINGs that contain PGPORT to avoid needing tmpl file
+-- squelch WARNINGs that contain worker_port
 SET client_min_messages TO ERROR;
 
 SELECT master_create_distributed_table('insert_target', 'id');
