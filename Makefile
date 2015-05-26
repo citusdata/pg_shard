@@ -11,7 +11,7 @@ OBJS = connection.o create_shards.o citus_metadata_sync.o distribution_metadata.
 	   extend_ddl_commands.o generate_ddl_commands.o pg_shard.o prune_shard_list.o \
 	   repair_shards.o ruleutils.o
 
-PG_CPPFLAGS = -std=c99 -Wall -Wextra -I$(libpq_srcdir)
+PG_CPPFLAGS = -std=c99 -Wall -Wextra -Werror -I$(libpq_srcdir)
 
 # pg_shard and CitusDB have several functions that share the same name. When we
 # link pg_shard against CitusDB on Linux, the loader resolves to the CitusDB
@@ -25,7 +25,7 @@ else
 endif
 
 EXTENSION = pg_shard
-DATA = pg_shard--1.1.sql pg_shard--1.0--1.1.sql
+DATA = pg_shard--1.2.sql pg_shard--1.0--1.1.sql pg_shard--1.1--1.2.sql
 SCRIPTS = bin/copy_to_distributed_table
 
 # Default to 5432 if PGPORT is undefined. Replace placeholders in our tests

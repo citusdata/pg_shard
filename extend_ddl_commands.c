@@ -13,9 +13,6 @@
 #include "postgres.h" /* IWYU pragma: keep */
 #include "c.h"
 #include "ddl_commands.h"
-#include "pg_config.h"
-#include "pg_config_manual.h"
-#include "postgres_ext.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -641,7 +638,7 @@ DeparseCreateStmt(CreateStmt *createStmt, Oid masterRelationId)
 							errdetail("Only the CHECK form is supported.")));
 		}
 
-		if (firstConstraintPrinted)
+		if (firstAttributePrinted || firstConstraintPrinted)
 		{
 			appendStringInfoString(deparsedCreate, ", ");
 		}
@@ -684,7 +681,7 @@ DeparseCreateStmt(CreateStmt *createStmt, Oid masterRelationId)
 
 /*
  * TableElementsOfType walks over the table element list and returns only those
- * nodes who's type matches the given node type.
+ * nodes whose type matches the given node type.
  */
 static List *
 TableElementsOfType(List *tableElementList, NodeTag nodeType)

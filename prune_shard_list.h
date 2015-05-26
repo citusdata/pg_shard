@@ -14,7 +14,6 @@
 #define PG_SHARD_PRUNE_SHARD_LIST_H
 
 #include "c.h"
-#include "postgres_ext.h"
 
 #include "access/attnum.h"
 #include "nodes/pg_list.h"

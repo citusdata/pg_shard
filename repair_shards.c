@@ -14,7 +14,6 @@
 #include "c.h"
 #include "fmgr.h"
 #include "miscadmin.h"
-#include "postgres_ext.h"
 
 #include "connection.h"
 #include "create_shards.h"
@@ -137,10 +136,7 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 	}
 
 	/* the placement is repaired, so return to finalized state */
-	DeleteShardPlacementRow(targetPlacement->id);
-	InsertShardPlacementRow(targetPlacement->id, targetPlacement->shardId,
-							STATE_FINALIZED, targetPlacement->nodeName,
-							targetPlacement->nodePort);
+	UpdateShardPlacementRowState(targetPlacement->id, STATE_FINALIZED);
 
 	RESUME_INTERRUPTS();
 

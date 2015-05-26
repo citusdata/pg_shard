@@ -203,16 +203,16 @@ ERROR:  cannot perform distributed planning for the given query
 DETAIL:  Joins are not supported in distributed queries.
 -- test CitusDB code path (this will error out in normal PostgreSQL)
 SELECT sync_table_metadata_to_citus('articles');
-ERROR:  relation "pg_dist_shard_placement" does not exist
-CONTEXT:  SQL statement "LOCK TABLE pg_dist_shard_placement IN EXCLUSIVE MODE"
-PL/pgSQL function sync_table_metadata_to_citus(text) line 7 at SQL statement
+ sync_table_metadata_to_citus 
+------------------------------
+ 
+(1 row)
+
 -- with normal PostgreSQL, expect error about CitusDB being missing
 -- with CitusDB, expect an error about JOINing local table with distributed
 SET pg_shard.use_citusdb_select_logic TO true;
 SELECT title, authors.name FROM authors, articles WHERE authors.id = articles.author_id;
-ERROR:  could not plan SELECT query
-DETAIL:  Configured to use CitusDB's SELECT logic, but CitusDB is not installed.
-HINT:  Install CitusDB or set the "use_citusdb_select_logic" configuration parameter to "false".
+ERROR:  cannot plan queries that include both regular and partitioned relations
 SET pg_shard.use_citusdb_select_logic TO false;
 -- test cross-shard queries
 SELECT COUNT(*) FROM articles;

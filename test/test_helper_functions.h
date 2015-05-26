@@ -14,8 +14,8 @@
 #define PG_SHARD_TEST_HELPER_FUNCTIONS_H
 
 #include "postgres.h"
+#include "c.h"
 #include "fmgr.h"
-#include "postgres_ext.h"
 
 #include "utils/array.h"
 
@@ -30,6 +30,9 @@
 extern ArrayType * DatumArrayToArrayType(Datum *datumArray, int datumCount,
 										 Oid datumTypeId);
 
+/* fake FDW for use in tests */
+extern Datum fake_fdw_handler(PG_FUNCTION_ARGS);
+
 /* function declarations for exercising connection functions */
 extern Datum initialize_remote_temp_table(PG_FUNCTION_ARGS);
 extern Datum count_remote_temp_table_rows(PG_FUNCTION_ARGS);
@@ -40,10 +43,15 @@ extern Datum load_shard_id_array(PG_FUNCTION_ARGS);
 extern Datum load_shard_interval_array(PG_FUNCTION_ARGS);
 extern Datum load_shard_placement_array(PG_FUNCTION_ARGS);
 extern Datum partition_column_id(PG_FUNCTION_ARGS);
+extern Datum partition_type(PG_FUNCTION_ARGS);
+extern Datum is_distributed_table(PG_FUNCTION_ARGS);
+extern Datum distributed_tables_exist(PG_FUNCTION_ARGS);
+extern Datum column_name_to_column_id(PG_FUNCTION_ARGS);
 extern Datum insert_hash_partition_row(PG_FUNCTION_ARGS);
-extern Datum insert_monolithic_shard_row(PG_FUNCTION_ARGS);
-extern Datum insert_healthy_local_shard_placement_row(PG_FUNCTION_ARGS);
+extern Datum create_monolithic_shard_row(PG_FUNCTION_ARGS);
+extern Datum create_healthy_local_shard_placement_row(PG_FUNCTION_ARGS);
 extern Datum delete_shard_placement_row(PG_FUNCTION_ARGS);
+extern Datum update_shard_placement_row_state(PG_FUNCTION_ARGS);
 extern Datum next_shard_id(PG_FUNCTION_ARGS);
 extern Datum acquire_shared_shard_lock(PG_FUNCTION_ARGS);
 

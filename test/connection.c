@@ -14,7 +14,6 @@
 #include "c.h"
 #include "fmgr.h"
 #include "libpq-fe.h"
-#include "postgres_ext.h"
 
 #include "connection.h"
 #include "test/test_helper_functions.h"

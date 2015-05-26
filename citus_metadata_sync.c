@@ -12,7 +12,6 @@
 
 #include "postgres.h"
 #include "c.h"
-#include "postgres_ext.h"
 
 #include "citus_metadata_sync.h"
 #include "distribution_metadata.h"

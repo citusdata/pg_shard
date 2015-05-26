@@ -13,7 +13,6 @@
 #include "postgres.h"
 #include "c.h"
 #include "fmgr.h"
-#include "postgres_ext.h"
 
 #include "distribution_metadata.h"
 #include "test/test_helper_functions.h" /* IWYU pragma: keep */
@@ -36,11 +35,15 @@ PG_FUNCTION_INFO_V1(load_shard_id_array);
 PG_FUNCTION_INFO_V1(load_shard_interval_array);
 PG_FUNCTION_INFO_V1(load_shard_placement_array);
 PG_FUNCTION_INFO_V1(partition_column_id);
+PG_FUNCTION_INFO_V1(partition_type);
+PG_FUNCTION_INFO_V1(is_distributed_table);
+PG_FUNCTION_INFO_V1(distributed_tables_exist);
+PG_FUNCTION_INFO_V1(column_name_to_column_id);
 PG_FUNCTION_INFO_V1(insert_hash_partition_row);
-PG_FUNCTION_INFO_V1(insert_monolithic_shard_row);
-PG_FUNCTION_INFO_V1(insert_healthy_local_shard_placement_row);
+PG_FUNCTION_INFO_V1(create_monolithic_shard_row);
+PG_FUNCTION_INFO_V1(create_healthy_local_shard_placement_row);
 PG_FUNCTION_INFO_V1(delete_shard_placement_row);
-PG_FUNCTION_INFO_V1(next_shard_id);
+PG_FUNCTION_INFO_V1(update_shard_placement_row_state);
 PG_FUNCTION_INFO_V1(acquire_shared_shard_lock);
 
 
@@ -95,19 +98,19 @@ load_shard_id_array(PG_FUNCTION_ARGS)
 /*
  * load_shard_interval_array loads a shard interval using a provided identifier
  * and returns a two-element array consisting of min/max values contained in
- * that shard interval (currently always integer values). If no such interval
- * can be found, this function raises an error instead.
+ * that shard interval. If no such interval can be found, this function raises
+ * an error instead.
  */
 Datum
 load_shard_interval_array(PG_FUNCTION_ARGS)
 {
 	int64 shardId = PG_GETARG_INT64(0);
+	Oid expectedType PG_USED_FOR_ASSERTS_ONLY = get_fn_expr_argtype(fcinfo->flinfo, 1);
 	ShardInterval *shardInterval = LoadShardInterval(shardId);
 	Datum shardIntervalArray[] = { shardInterval->minValue, shardInterval->maxValue };
 	ArrayType *shardIntervalArrayType = NULL;
 
-	/* for now we expect value type to always be integer (hash output) */
-	Assert(shardInterval->valueTypeId == INT4OID);
+	Assert(expectedType == shardInterval->valueTypeId);
 
 	shardIntervalArrayType = DatumArrayToArrayType(shardIntervalArray, 2,
 												   shardInterval->valueTypeId);
@@ -183,6 +186,65 @@ partition_column_id(PG_FUNCTION_ARGS)
 
 
 /*
+ * partition_type simply finds a distributed table using the provided Oid and
+ * returns the type of partitioning in use by that table. If the specified
+ * table is not distributed, this function raises an error instead.
+ */
+Datum
+partition_type(PG_FUNCTION_ARGS)
+{
+	Oid distributedTableId = PG_GETARG_OID(0);
+	char partitionType = PartitionType(distributedTableId);
+
+	PG_RETURN_CHAR(partitionType);
+}
+
+
+/*
+ * is_distributed_table simply returns whether a given table is distributed. No
+ * errors, just a boolean.
+ */
+Datum
+is_distributed_table(PG_FUNCTION_ARGS)
+{
+	Oid distributedTableId = PG_GETARG_OID(0);
+	bool isDistributedTable = IsDistributedTable(distributedTableId);
+
+	PG_RETURN_BOOL(isDistributedTable);
+}
+
+
+/*
+ * distributed_tables_exist returns whether pg_shard knows of any distributed
+ * tables whatsoever.
+ */
+Datum
+distributed_tables_exist(PG_FUNCTION_ARGS __attribute__((unused)))
+{
+	bool distributedTablesExist = DistributedTablesExist();
+
+	PG_RETURN_BOOL(distributedTablesExist);
+}
+
+
+/*
+ * column_name_to_column_id takes a relation identifier and a name of a column
+ * in that relation and returns the index of that column in the relation. If
+ * the provided name is a system column or no column at all, this function will
+ * throw an error instead.
+ */
+Datum
+column_name_to_column_id(PG_FUNCTION_ARGS)
+{
+	Oid distributedTableId = PG_GETARG_OID(0);
+	char *columnName = PG_GETARG_CSTRING(1);
+	Var *column = ColumnNameToColumn(distributedTableId, columnName);
+
+	PG_RETURN_INT16((int16) column->varattno);
+}
+
+
+/*
  * insert_hash_partition_row inserts a partition row using the provided Oid and
  * partition key (a text value). This function raises an error on any failure.
  */
@@ -199,43 +261,42 @@ insert_hash_partition_row(PG_FUNCTION_ARGS)
 
 
 /*
- * insert_monolithic_shard_row creates a single shard covering all possible
+ * create_monolithic_shard_row creates a single shard covering all possible
  * hash values for a given table and inserts a row representing that shard
- * into the backing store.
+ * into the backing store. It returns the primary key of the new row.
  */
 Datum
-insert_monolithic_shard_row(PG_FUNCTION_ARGS)
+create_monolithic_shard_row(PG_FUNCTION_ARGS)
 {
 	Oid distributedTableId = PG_GETARG_OID(0);
-	uint64 shardId = (uint64) PG_GETARG_INT64(1);
 	StringInfo minInfo = makeStringInfo();
 	StringInfo maxInfo = makeStringInfo();
+	int64 newShardId = -1;
 
 	appendStringInfo(minInfo, "%d", INT32_MIN);
 	appendStringInfo(maxInfo, "%d", INT32_MAX);
 
-	InsertShardRow(distributedTableId, shardId, SHARD_STORAGE_TABLE,
-				   cstring_to_text(minInfo->data), cstring_to_text(maxInfo->data));
+	newShardId = CreateShardRow(distributedTableId, SHARD_STORAGE_TABLE,
+								cstring_to_text(minInfo->data),
+								cstring_to_text(maxInfo->data));
 
-	PG_RETURN_VOID();
+	PG_RETURN_INT64(newShardId);
 }
 
 
 /*
- * insert_healthy_local_shard_placement_row inserts a row representing a
+ * create_healthy_local_shard_placement_row inserts a row representing a
  * finalized placement for localhost (on the default port) into the backing
- * store.
+ * store. It returns the primary key of the new row.
  */
 Datum
-insert_healthy_local_shard_placement_row(PG_FUNCTION_ARGS)
+create_healthy_local_shard_placement_row(PG_FUNCTION_ARGS)
 {
-	uint64 shardPlacementId = (uint64) PG_GETARG_INT64(0);
-	uint64 shardId = (uint64) PG_GETARG_INT64(1);
+	uint64 shardId = (uint64) PG_GETARG_INT64(0);
+	int64 newShardPlacementId = CreateShardPlacementRow(shardId, STATE_FINALIZED,
+														"localhost", 5432);
 
-	InsertShardPlacementRow(shardPlacementId, shardId, STATE_FINALIZED, "localhost",
-							5432);
-
-	PG_RETURN_VOID();
+	PG_RETURN_INT64(newShardPlacementId);
 }
 
 
@@ -254,14 +315,18 @@ delete_shard_placement_row(PG_FUNCTION_ARGS)
 
 
 /*
- * next_shard_id returns the next value from the shard ID sequence.
+ * update_shard_placement_row_state sets the state of the placement with the
+ * specified ID.
  */
 Datum
-next_shard_id(PG_FUNCTION_ARGS __attribute__((unused)))
+update_shard_placement_row_state(PG_FUNCTION_ARGS)
 {
-	int64 shardId = (int64) NextSequenceId(SHARD_ID_SEQUENCE_NAME);
+	uint64 shardPlacementId = (uint64) PG_GETARG_INT64(0);
+	ShardState shardState = (ShardState) PG_GETARG_INT32(1);
 
-	PG_RETURN_INT64(shardId);
+	UpdateShardPlacementRowState(shardPlacementId, shardState);
+
+	PG_RETURN_VOID();
 }
 
 

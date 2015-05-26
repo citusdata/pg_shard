@@ -13,7 +13,6 @@
 #include "postgres.h"
 #include "fmgr.h"
 #include "miscadmin.h"
-#include "pg_config.h"
 
 #include "distribution_metadata.h"
 
@@ -21,18 +20,14 @@
 #include <string.h>
 
 #include "access/attnum.h"
-#include "access/genam.h"
-#include "access/heapam.h"
-#include "access/htup_details.h"
 #include "access/htup.h"
-#include "access/sdir.h"
-#include "access/skey.h"
 #include "access/tupdesc.h"
-#include "access/xact.h"
-#include "catalog/indexing.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#include "executor/spi.h"
+#pragma GCC diagnostic pop
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
-#include "commands/sequence.h"
 #include "nodes/makefuncs.h"
 #include "nodes/memnodes.h" /* IWYU pragma: keep */
 #include "nodes/pg_list.h"
@@ -41,13 +36,9 @@
 #include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/errcodes.h"
-#include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/palloc.h"
-#include "utils/rel.h"
-#include "utils/relcache.h"
-#include "utils/tqual.h"
 
 
 /*
@@ -58,8 +49,8 @@ static List *ShardIntervalListCache = NIL;
 
 
 /* local function forward declarations */
-static void LoadShardIntervalRow(int64 shardId, Oid *relationId,
-								 char **minValue, char **maxValue);
+static ShardInterval * TupleToShardInterval(HeapTuple heapTuple,
+											TupleDesc tupleDescriptor);
 static ShardPlacement * TupleToShardPlacement(HeapTuple heapTuple,
 											  TupleDesc tupleDescriptor);
 
@@ -126,48 +117,39 @@ List *
 LoadShardIntervalList(Oid distributedTableId)
 {
 	List *shardIntervalList = NIL;
-	RangeVar *heapRangeVar = NULL;
-	RangeVar *indexRangeVar = NULL;
-	Relation heapRelation = NULL;
-	Relation indexRelation = NULL;
-	IndexScanDesc indexScanDesc = NULL;
-	const int scanKeyCount = 1;
-	ScanKeyData scanKey[scanKeyCount];
-	HeapTuple heapTuple = NULL;
+	Oid argTypes[] = { OIDOID };
+	Datum argValues[] = { ObjectIdGetDatum(distributedTableId) };
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_TABLE_NAME, -1);
-	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_RELATION_INDEX_NAME, -1);
+	/*
+	 * SPI_connect switches to its own memory context, which is destroyed by
+	 * the call to SPI_finish. SPI_palloc is provided to allocate memory in
+	 * the previous ("upper") context, but that is inadequate when we need to
+	 * call other functions that themselves use the normal palloc (such as
+	 * lappend). So we switch to the upper context ourselves as needed.
+	 */
+	MemoryContext upperContext = CurrentMemoryContext, oldContext = NULL;
 
-	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
-	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
+	SPI_connect();
 
-	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_OIDEQ,
-				ObjectIdGetDatum(distributedTableId));
+	spiStatus = SPI_execute_with_args(SHARD_QUERY_PREFIX " WHERE s.relation_id = $1",
+									  argCount, argTypes, argValues, NULL, false, 0);
+	Assert(spiStatus == SPI_OK_SELECT);
 
-	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotSelf,
-									scanKeyCount, 0);
-	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
+	oldContext = MemoryContextSwitchTo(upperContext);
 
-	heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
-	while (HeapTupleIsValid(heapTuple))
+	for (uint32 rowNumber = 0; rowNumber < SPI_processed; rowNumber++)
 	{
-		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
-		bool isNull = false;
-
-		Datum shardIdDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_ID,
-										  tupleDescriptor, &isNull);
-
-		int64 shardId = DatumGetInt64(shardIdDatum);
-		ShardInterval *shardInterval = LoadShardInterval(shardId);
-
+		HeapTuple heapTuple = SPI_tuptable->vals[rowNumber];
+		ShardInterval *shardInterval = TupleToShardInterval(heapTuple,
+															SPI_tuptable->tupdesc);
 		shardIntervalList = lappend(shardIntervalList, shardInterval);
-
-		heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
 	}
 
-	index_endscan(indexScanDesc);
-	index_close(indexRelation, AccessShareLock);
-	relation_close(heapRelation, AccessShareLock);
+	MemoryContextSwitchTo(oldContext);
+
+	SPI_finish();
 
 	return shardIntervalList;
 }
@@ -182,47 +164,36 @@ ShardInterval *
 LoadShardInterval(int64 shardId)
 {
 	ShardInterval *shardInterval = NULL;
-	Datum minValue = 0;
-	Datum maxValue = 0;
-	char partitionType = '\0';
-	Oid intervalTypeId = InvalidOid;
-	int32 intervalTypeMod = -1;
-	Oid inputFunctionId = InvalidOid;
-	Oid typeIoParam = InvalidOid;
-	Oid relationId = InvalidOid;
-	char *minValueString = NULL;
-	char *maxValueString = NULL;
+	Oid argTypes[] = { INT8OID };
+	Datum argValues[] = { Int64GetDatum(shardId) };
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
 
-	/* first read the related row from the shard table */
-	LoadShardIntervalRow(shardId, &relationId, &minValueString, &maxValueString);
+	/*
+	 * SPI_connect switches to an SPI-specific MemoryContext. See the comment
+	 * in LoadShardIntervalList for a more extensive explanation.
+	 */
+	MemoryContext upperContext = CurrentMemoryContext, oldContext = NULL;
+	SPI_connect();
 
-	/* then find min/max values' actual types */
-	partitionType = PartitionType(relationId);
-	if (partitionType == HASH_PARTITION_TYPE)
+	spiStatus = SPI_execute_with_args(SHARD_QUERY_PREFIX " WHERE s.id = $1",
+									  argCount, argTypes, argValues, NULL, false, 1);
+	Assert(spiStatus == SPI_OK_SELECT);
+
+	if (SPI_processed != 1)
 	{
-		intervalTypeId = INT4OID;
-	}
-	else
-	{
-		Var *partitionColumn = PartitionColumn(relationId);
-		intervalTypeId = partitionColumn->vartype;
-		intervalTypeMod = partitionColumn->vartypmod;
+		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+						errmsg("shard with ID " INT64_FORMAT " does not exist",
+							   shardId)));
 	}
 
-	getTypeInputInfo(intervalTypeId, &inputFunctionId, &typeIoParam);
+	oldContext = MemoryContextSwitchTo(upperContext);
 
-	/* finally convert min/max values to their actual types */
-	minValue = OidInputFunctionCall(inputFunctionId, minValueString,
-									typeIoParam, intervalTypeMod);
-	maxValue = OidInputFunctionCall(inputFunctionId, maxValueString,
-									typeIoParam, intervalTypeMod);
+	shardInterval = TupleToShardInterval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc);
 
-	shardInterval = (ShardInterval *) palloc0(sizeof(ShardInterval));
-	shardInterval->id = shardId;
-	shardInterval->relationId = relationId;
-	shardInterval->minValue = minValue;
-	shardInterval->maxValue = maxValue;
-	shardInterval->valueTypeId = intervalTypeId;
+	MemoryContextSwitchTo(oldContext);
+
+	SPI_finish();
 
 	return shardInterval;
 }
@@ -262,42 +233,35 @@ List *
 LoadShardPlacementList(int64 shardId)
 {
 	List *shardPlacementList = NIL;
-	RangeVar *heapRangeVar = NULL;
-	RangeVar *indexRangeVar = NULL;
-	Relation heapRelation = NULL;
-	Relation indexRelation = NULL;
-	IndexScanDesc indexScanDesc = NULL;
-	const int scanKeyCount = 1;
-	ScanKeyData scanKey[scanKeyCount];
-	HeapTuple heapTuple = NULL;
+	Oid argTypes[] = { INT8OID };
+	Datum argValues[] = { Int64GetDatum(shardId) };
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_PLACEMENT_TABLE_NAME, -1);
-	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
-								 SHARD_PLACEMENT_SHARD_INDEX_NAME, -1);
+	/*
+	 * SPI_connect switches to an SPI-specific MemoryContext. See the comment
+	 * in LoadShardIntervalList for a more extensive explanation.
+	 */
+	MemoryContext upperContext = CurrentMemoryContext, oldContext = NULL;
+	SPI_connect();
 
-	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
-	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
+	spiStatus = SPI_execute_with_args(SHARD_PLACEMENT_QUERY, argCount, argTypes,
+									  argValues, NULL, false, 0);
+	Assert(spiStatus == SPI_OK_SELECT);
 
-	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ, Int64GetDatum(shardId));
+	oldContext = MemoryContextSwitchTo(upperContext);
 
-	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotSelf,
-									scanKeyCount, 0);
-	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
-
-	heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
-	while (HeapTupleIsValid(heapTuple))
+	for (uint32 rowNumber = 0; rowNumber < SPI_processed; rowNumber++)
 	{
-		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
+		HeapTuple heapTuple = SPI_tuptable->vals[rowNumber];
 		ShardPlacement *shardPlacement = TupleToShardPlacement(heapTuple,
-															   tupleDescriptor);
+															   SPI_tuptable->tupdesc);
 		shardPlacementList = lappend(shardPlacementList, shardPlacement);
-
-		heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
 	}
 
-	index_endscan(indexScanDesc);
-	index_close(indexRelation, AccessShareLock);
-	relation_close(heapRelation, AccessShareLock);
+	MemoryContextSwitchTo(oldContext);
+
+	SPI_finish();
 
 	/* if no shard placements are found, error out */
 	if (shardPlacementList == NIL)
@@ -314,40 +278,34 @@ LoadShardPlacementList(int64 shardId)
 /*
  * PartitionColumn looks up the column used to partition a given distributed
  * table and returns a reference to a Var representing that column. If no entry
- * can be found using the provided identifer, this function throws an error.
+ * can be found using the provided identifier, this function throws an error.
  */
 Var *
 PartitionColumn(Oid distributedTableId)
 {
 	Var *partitionColumn = NULL;
-	RangeVar *heapRangeVar = NULL;
-	Relation heapRelation = NULL;
-	HeapScanDesc scanDesc = NULL;
-	const int scanKeyCount = 1;
-	ScanKeyData scanKey[scanKeyCount];
-	HeapTuple heapTuple = NULL;
+	Oid argTypes[] = { OIDOID };
+	Datum argValues[] = { ObjectIdGetDatum(distributedTableId) };
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
+	bool isNull = false;
+	Datum keyDatum = 0;
+	char *partitionColumnName = NULL;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);
-	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
+	/*
+	 * SPI_connect switches to an SPI-specific MemoryContext. See the comment
+	 * in LoadShardIntervalList for a more extensive explanation.
+	 */
+	MemoryContext upperContext = CurrentMemoryContext, oldContext = NULL;
+	SPI_connect();
 
-	ScanKeyInit(&scanKey[0], ATTR_NUM_PARTITION_RELATION_ID, InvalidStrategy,
-				F_OIDEQ, ObjectIdGetDatum(distributedTableId));
+	spiStatus = SPI_execute_with_args("SELECT key "
+									  "FROM pgs_distribution_metadata.partition "
+									  "WHERE relation_id = $1", argCount, argTypes,
+									  argValues, NULL, false, 1);
+	Assert(spiStatus == SPI_OK_SELECT);
 
-	scanDesc = heap_beginscan(heapRelation, SnapshotSelf, scanKeyCount, scanKey);
-
-	heapTuple = heap_getnext(scanDesc, ForwardScanDirection);
-	if (HeapTupleIsValid(heapTuple))
-	{
-		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
-		bool isNull = false;
-
-		Datum keyDatum = heap_getattr(heapTuple, ATTR_NUM_PARTITION_KEY,
-									  tupleDescriptor, &isNull);
-		char *partitionColumnName = TextDatumGetCString(keyDatum);
-
-		partitionColumn = ColumnNameToColumn(distributedTableId, partitionColumnName);
-	}
-	else
+	if (SPI_processed != 1)
 	{
 		char *relationName = get_rel_name(distributedTableId);
 
@@ -356,8 +314,15 @@ PartitionColumn(Oid distributedTableId)
 							   relationName)));
 	}
 
-	heap_endscan(scanDesc);
-	relation_close(heapRelation, AccessShareLock);
+	keyDatum = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isNull);
+	oldContext = MemoryContextSwitchTo(upperContext);
+	partitionColumnName = TextDatumGetCString(keyDatum);
+
+	partitionColumn = ColumnNameToColumn(distributedTableId, partitionColumnName);
+
+	MemoryContextSwitchTo(oldContext);
+
+	SPI_finish();
 
 	return partitionColumn;
 }
@@ -372,32 +337,22 @@ char
 PartitionType(Oid distributedTableId)
 {
 	char partitionType = 0;
-	RangeVar *heapRangeVar = NULL;
-	Relation heapRelation = NULL;
-	HeapScanDesc scanDesc = NULL;
-	const int scanKeyCount = 1;
-	ScanKeyData scanKey[scanKeyCount];
-	HeapTuple heapTuple = NULL;
+	Oid argTypes[] = { OIDOID };
+	Datum argValues[] = { ObjectIdGetDatum(distributedTableId) };
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
+	bool isNull = false;
+	Datum partitionTypeDatum = 0;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);
-	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
+	SPI_connect();
 
-	ScanKeyInit(&scanKey[0], ATTR_NUM_PARTITION_RELATION_ID, InvalidStrategy,
-				F_OIDEQ, ObjectIdGetDatum(distributedTableId));
+	spiStatus = SPI_execute_with_args("SELECT partition_method "
+									  "FROM pgs_distribution_metadata.partition "
+									  "WHERE relation_id = $1", argCount, argTypes,
+									  argValues, NULL, false, 1);
+	Assert(spiStatus == SPI_OK_SELECT);
 
-	scanDesc = heap_beginscan(heapRelation, SnapshotSelf, scanKeyCount, scanKey);
-
-	heapTuple = heap_getnext(scanDesc, ForwardScanDirection);
-	if (HeapTupleIsValid(heapTuple))
-	{
-		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
-		bool isNull = false;
-
-		Datum partitionTypeDatum = heap_getattr(heapTuple, ATTR_NUM_PARTITION_TYPE,
-												tupleDescriptor, &isNull);
-		partitionType = DatumGetChar(partitionTypeDatum);
-	}
-	else
+	if (SPI_processed != 1)
 	{
 		char *relationName = get_rel_name(distributedTableId);
 
@@ -406,8 +361,11 @@ PartitionType(Oid distributedTableId)
 							   relationName)));
 	}
 
-	heap_endscan(scanDesc);
-	relation_close(heapRelation, AccessShareLock);
+	partitionTypeDatum = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1,
+									   &isNull);
+	partitionType = DatumGetChar(partitionTypeDatum);
+
+	SPI_finish();
 
 	return partitionType;
 }
@@ -419,28 +377,34 @@ PartitionType(Oid distributedTableId)
 bool
 IsDistributedTable(Oid tableId)
 {
+	Oid metadataNamespaceOid = get_namespace_oid("pgs_distribution_metadata", false);
+	Oid partitionMetadataTableOid = get_relname_relid("partition", metadataNamespaceOid);
 	bool isDistributedTable = false;
-	RangeVar *heapRangeVar = NULL;
-	Relation heapRelation = NULL;
-	HeapScanDesc scanDesc = NULL;
-	const int scanKeyCount = 1;
-	ScanKeyData scanKey[scanKeyCount];
-	HeapTuple heapTuple = NULL;
+	Oid argTypes[] = { OIDOID };
+	Datum argValues[] = { ObjectIdGetDatum(tableId) };
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);
-	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
+	/*
+	 * The query below hits the partition metadata table, so if we don't detect
+	 * that and short-circuit, we'll get infinite recursion in the planner.
+	 */
+	if (tableId == partitionMetadataTableOid)
+	{
+		return false;
+	}
 
-	ScanKeyInit(&scanKey[0], ATTR_NUM_PARTITION_RELATION_ID, InvalidStrategy,
-				F_OIDEQ, ObjectIdGetDatum(tableId));
+	SPI_connect();
 
-	scanDesc = heap_beginscan(heapRelation, SnapshotSelf, scanKeyCount, scanKey);
+	spiStatus = SPI_execute_with_args("SELECT NULL "
+									  "FROM pgs_distribution_metadata.partition "
+									  "WHERE relation_id = $1", argCount, argTypes,
+									  argValues, NULL, false, 1);
+	Assert(spiStatus == SPI_OK_SELECT);
 
-	heapTuple = heap_getnext(scanDesc, ForwardScanDirection);
+	isDistributedTable = (SPI_processed == 1);
 
-	isDistributedTable = HeapTupleIsValid(heapTuple);
-
-	heap_endscan(scanDesc);
-	relation_close(heapRelation, AccessShareLock);
+	SPI_finish();
 
 	return isDistributedTable;
 }
@@ -454,26 +418,16 @@ bool
 DistributedTablesExist(void)
 {
 	bool distributedTablesExist = false;
-	RangeVar *heapRangeVar = NULL;
-	Relation heapRelation = NULL;
-	HeapScanDesc scanDesc = NULL;
-	HeapTuple heapTuple = NULL;
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);
-	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
+	SPI_connect();
 
-	scanDesc = heap_beginscan(heapRelation, SnapshotSelf, 0, NULL);
+	spiStatus = SPI_exec("SELECT NULL FROM pgs_distribution_metadata.partition", 1);
+	Assert(spiStatus == SPI_OK_SELECT);
 
-	heapTuple = heap_getnext(scanDesc, ForwardScanDirection);
+	distributedTablesExist = (SPI_processed > 0);
 
-	/*
-	 * Check whether the partition metadata table contains any tuples. If so,
-	 * at least one distributed table exists.
-	 */
-	distributedTablesExist = HeapTupleIsValid(heapTuple);
-
-	heap_endscan(scanDesc);
-	relation_close(heapRelation, AccessShareLock);
+	SPI_finish();
 
 	return distributedTablesExist;
 }
@@ -524,69 +478,79 @@ ColumnNameToColumn(Oid relationId, char *columnName)
 
 
 /*
- * LoadShardIntervalRow finds the row for the specified shard identifier in the
- * shard table and copies values from that row into the provided output params.
+ * TupleToShardInterval populates a ShardInterval using values from a row of
+ * the shard configuration table and returns a pointer to that struct. The
+ * input tuple must not contain any NULLs and must have identical structure to
+ * rows produced by SHARD_QUERY_PREFIX.
  */
-static void
-LoadShardIntervalRow(int64 shardId, Oid *relationId, char **minValue,
-					 char **maxValue)
+static ShardInterval *
+TupleToShardInterval(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 {
-	RangeVar *heapRangeVar = NULL;
-	RangeVar *indexRangeVar = NULL;
-	Relation heapRelation = NULL;
-	Relation indexRelation = NULL;
-	IndexScanDesc indexScanDesc = NULL;
-	const int scanKeyCount = 1;
-	ScanKeyData scanKey[scanKeyCount];
-	HeapTuple heapTuple = NULL;
+	ShardInterval *shardInterval = NULL;
+	bool isNull = false;
+	Oid intervalTypeId = InvalidOid;
+	int32 intervalTypeMod = -1;
+	Oid inputFunctionId = InvalidOid;
+	Oid typeIoParam = InvalidOid;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_TABLE_NAME, -1);
-	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_PKEY_INDEX_NAME, -1);
+	Datum idDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+								  TLIST_NUM_SHARD_ID, &isNull);
+	Datum relationIdDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+										  TLIST_NUM_SHARD_RELATION_ID, &isNull);
+	Datum minValueTextDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+											TLIST_NUM_SHARD_MIN_VALUE, &isNull);
+	Datum maxValueTextDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+											TLIST_NUM_SHARD_MAX_VALUE, &isNull);
+	Datum partitionTypeDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+											 TLIST_NUM_SHARD_PARTITION_METHOD, &isNull);
+	char *minValueString = TextDatumGetCString(minValueTextDatum);
+	char *maxValueString = TextDatumGetCString(maxValueTextDatum);
+	Datum minValue = 0;
+	Datum maxValue = 0;
 
-	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
-	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
+	int64 shardId = DatumGetInt64(idDatum);
+	Oid relationId = DatumGetObjectId(relationIdDatum);
 
-	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ, Int64GetDatum(shardId));
-
-	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotSelf,
-									scanKeyCount, 0);
-	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
-
-	heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
-	if (HeapTupleIsValid(heapTuple))
+	char partitionType = DatumGetChar(partitionTypeDatum);
+	if (partitionType == HASH_PARTITION_TYPE)
 	{
-		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
-		bool isNull = false;
-
-		Datum relationIdDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_RELATION_ID,
-											 tupleDescriptor, &isNull);
-		Datum minValueDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_MIN_VALUE,
-										   tupleDescriptor, &isNull);
-		Datum maxValueDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_MAX_VALUE,
-										   tupleDescriptor, &isNull);
-
-		/* convert and deep copy row's values */
-		(*relationId) = DatumGetObjectId(relationIdDatum);
-		(*minValue) = TextDatumGetCString(minValueDatum);
-		(*maxValue) = TextDatumGetCString(maxValueDatum);
+		intervalTypeId = INT4OID;
 	}
 	else
 	{
-		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
-						errmsg("shard with ID " INT64_FORMAT " does not exist",
-							   shardId)));
+		Datum keyDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+									   TLIST_NUM_SHARD_KEY, &isNull);
+		char *partitionColumnName = TextDatumGetCString(keyDatum);
+
+		Var *partitionColumn = ColumnNameToColumn(relationId, partitionColumnName);
+		intervalTypeId = partitionColumn->vartype;
+		intervalTypeMod = partitionColumn->vartypmod;
 	}
 
-	index_endscan(indexScanDesc);
-	index_close(indexRelation, AccessShareLock);
-	relation_close(heapRelation, AccessShareLock);
+	getTypeInputInfo(intervalTypeId, &inputFunctionId, &typeIoParam);
+
+	/* finally convert min/max values to their actual types */
+	minValue = OidInputFunctionCall(inputFunctionId, minValueString,
+									typeIoParam, intervalTypeMod);
+	maxValue = OidInputFunctionCall(inputFunctionId, maxValueString,
+									typeIoParam, intervalTypeMod);
+
+	shardInterval = palloc0(sizeof(ShardInterval));
+	shardInterval->id = shardId;
+	shardInterval->relationId = relationId;
+	shardInterval->minValue = minValue;
+	shardInterval->maxValue = maxValue;
+	shardInterval->valueTypeId = intervalTypeId;
+
+	return shardInterval;
 }
 
 
 /*
  * TupleToShardPlacement populates a ShardPlacement using values from a row of
  * the placements configuration table and returns a pointer to that struct. The
- * input tuple must not contain any NULLs.
+ * input tuple must not contain any NULLs and must have identical structure to
+ * rows produced by SHARD_PLACEMENT_QUERY.
  */
 static ShardPlacement *
 TupleToShardPlacement(HeapTuple heapTuple, TupleDesc tupleDescriptor)
@@ -594,16 +558,16 @@ TupleToShardPlacement(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 	ShardPlacement *shardPlacement = NULL;
 	bool isNull = false;
 
-	Datum idDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_ID,
-								 tupleDescriptor, &isNull);
-	Datum shardIdDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_SHARD_ID,
-									  tupleDescriptor, &isNull);
-	Datum shardStateDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_SHARD_STATE,
-										 tupleDescriptor, &isNull);
-	Datum nodeNameDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_NODE_NAME,
-									   tupleDescriptor, &isNull);
-	Datum nodePortDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_NODE_PORT,
-									   tupleDescriptor, &isNull);
+	Datum idDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+								  TLIST_NUM_SHARD_PLACEMENT_ID, &isNull);
+	Datum shardIdDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+									   TLIST_NUM_SHARD_PLACEMENT_SHARD_ID, &isNull);
+	Datum shardStateDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+										  TLIST_NUM_SHARD_PLACEMENT_SHARD_STATE, &isNull);
+	Datum nodeNameDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+										TLIST_NUM_SHARD_PLACEMENT_NODE_NAME, &isNull);
+	Datum nodePortDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+										TLIST_NUM_SHARD_PLACEMENT_NODE_PORT, &isNull);
 
 	shardPlacement = palloc0(sizeof(ShardPlacement));
 	shardPlacement->id = DatumGetInt64(idDatum);
@@ -617,134 +581,110 @@ TupleToShardPlacement(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 
 
 /*
- * InsertPartitionRow opens the partition metadata table and inserts a new row
- * with the given values.
+ * InsertPartitionRow inserts a new row into the partition table using the
+ * supplied values.
  */
 void
 InsertPartitionRow(Oid distributedTableId, char partitionType, text *partitionKeyText)
 {
-	Relation partitionRelation = NULL;
-	RangeVar *partitionRangeVar = NULL;
-	TupleDesc tupleDescriptor = NULL;
-	HeapTuple heapTuple = NULL;
-	Datum values[PARTITION_TABLE_ATTRIBUTE_COUNT];
-	bool isNulls[PARTITION_TABLE_ATTRIBUTE_COUNT];
+	Oid argTypes[] = { OIDOID, CHAROID, TEXTOID };
+	Datum argValues[] = {
+		ObjectIdGetDatum(distributedTableId),
+		CharGetDatum(partitionType),
+		PointerGetDatum(partitionKeyText)
+	};
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
 
-	/* form new partition tuple */
-	memset(values, 0, sizeof(values));
-	memset(isNulls, false, sizeof(isNulls));
+	SPI_connect();
 
-	values[ATTR_NUM_PARTITION_RELATION_ID - 1] = ObjectIdGetDatum(distributedTableId);
-	values[ATTR_NUM_PARTITION_TYPE - 1] = CharGetDatum(partitionType);
-	values[ATTR_NUM_PARTITION_KEY - 1] = PointerGetDatum(partitionKeyText);
+	spiStatus = SPI_execute_with_args("INSERT INTO pgs_distribution_metadata.partition "
+									  "(relation_id, partition_method, key) "
+									  "VALUES ($1, $2, $3)", argCount, argTypes,
+									  argValues, NULL, false, 0);
+	Assert(spiStatus == SPI_OK_INSERT);
 
-	/* open the partition relation and insert new tuple */
-	partitionRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);
-	partitionRelation = heap_openrv(partitionRangeVar, RowExclusiveLock);
-
-	tupleDescriptor = RelationGetDescr(partitionRelation);
-	heapTuple = heap_form_tuple(tupleDescriptor, values, isNulls);
-
-	simple_heap_insert(partitionRelation, heapTuple);
-	CatalogUpdateIndexes(partitionRelation, heapTuple);
-	CommandCounterIncrement();
-
-	/* close relation */
-	relation_close(partitionRelation, RowExclusiveLock);
+	SPI_finish();
 }
 
 
 /*
- * InsertShardRow opens the shard metadata table and inserts a new row with
- * the given values into that table. Note that we allow the user to pass in
- * null min/max values.
+ * CreateShardRow creates a row in the shard table using the supplied values
+ * and returns the primary key of that new row. Note that we allow the user to
+ * pass in null min/max values.
  */
-void
-InsertShardRow(Oid distributedTableId, uint64 shardId, char shardStorage,
-			   text *shardMinValue, text *shardMaxValue)
+int64
+CreateShardRow(Oid distributedTableId, char shardStorage, text *shardMinValue,
+			   text *shardMaxValue)
 {
-	Relation shardRelation = NULL;
-	RangeVar *shardRangeVar = NULL;
-	TupleDesc tupleDescriptor = NULL;
-	HeapTuple heapTuple = NULL;
-	Datum values[SHARD_TABLE_ATTRIBUTE_COUNT];
-	bool isNulls[SHARD_TABLE_ATTRIBUTE_COUNT];
+	int64 newShardId = -1;
+	Oid argTypes[] = { OIDOID, CHAROID, TEXTOID, TEXTOID };
+	Datum argValues[] = {
+		ObjectIdGetDatum(distributedTableId),
+		CharGetDatum(shardStorage),
+		PointerGetDatum(shardMinValue),
+		PointerGetDatum(shardMaxValue)
+	};
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
+	bool isNull = false;
+	Datum shardIdDatum = 0;
 
-	/* form new shard tuple */
-	memset(values, 0, sizeof(values));
-	memset(isNulls, false, sizeof(isNulls));
+	SPI_connect();
 
-	values[ATTR_NUM_SHARD_ID - 1] = Int64GetDatum(shardId);
-	values[ATTR_NUM_SHARD_RELATION_ID - 1] = ObjectIdGetDatum(distributedTableId);
-	values[ATTR_NUM_SHARD_STORAGE - 1] = CharGetDatum(shardStorage);
+	spiStatus = SPI_execute_with_args("INSERT INTO pgs_distribution_metadata.shard "
+									  "(relation_id, storage, min_value, max_value) "
+									  "VALUES ($1, $2, $3, $4) RETURNING id", argCount,
+									  argTypes, argValues, NULL, false, 1);
+	Assert(spiStatus == SPI_OK_INSERT_RETURNING);
 
-	/* check if shard min/max values are null */
-	if (shardMinValue != NULL && shardMaxValue != NULL)
-	{
-		values[ATTR_NUM_SHARD_MIN_VALUE - 1] = PointerGetDatum(shardMinValue);
-		values[ATTR_NUM_SHARD_MAX_VALUE - 1] = PointerGetDatum(shardMaxValue);
-	}
-	else
-	{
-		isNulls[ATTR_NUM_SHARD_MIN_VALUE - 1] = true;
-		isNulls[ATTR_NUM_SHARD_MAX_VALUE - 1] = true;
-	}
+	shardIdDatum = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1,
+								 &isNull);
+	newShardId = DatumGetInt64(shardIdDatum);
 
-	/* open shard relation and insert new tuple */
-	shardRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_TABLE_NAME, -1);
-	shardRelation = heap_openrv(shardRangeVar, RowExclusiveLock);
+	SPI_finish();
 
-	tupleDescriptor = RelationGetDescr(shardRelation);
-	heapTuple = heap_form_tuple(tupleDescriptor, values, isNulls);
-
-	simple_heap_insert(shardRelation, heapTuple);
-	CatalogUpdateIndexes(shardRelation, heapTuple);
-	CommandCounterIncrement();
-
-	/* close relation */
-	heap_close(shardRelation, RowExclusiveLock);
+	return newShardId;
 }
 
 
 /*
- * InsertShardPlacementRow opens the shard placement metadata table and inserts
- * a row with the given values into the table.
+ * CreateShardPlacementRow creates a row in the shard placement table using the
+ * supplied values and returns the primary key of that new row.
  */
-void
-InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
-						ShardState shardState, char *nodeName, uint32 nodePort)
+int64
+CreateShardPlacementRow(uint64 shardId, ShardState shardState, char *nodeName,
+						uint32 nodePort)
 {
-	Relation shardPlacementRelation = NULL;
-	RangeVar *shardPlacementRangeVar = NULL;
-	TupleDesc tupleDescriptor = NULL;
-	HeapTuple heapTuple = NULL;
-	Datum values[SHARD_PLACEMENT_TABLE_ATTRIBUTE_COUNT];
-	bool isNulls[SHARD_PLACEMENT_TABLE_ATTRIBUTE_COUNT];
+	int64 newShardPlacementId = -1;
+	Oid argTypes[] = { INT8OID, INT4OID, TEXTOID, INT4OID };
+	Datum argValues[] = {
+		Int64GetDatum(shardId),
+		Int32GetDatum((int32) shardState),
+		CStringGetTextDatum(nodeName),
+		Int32GetDatum(nodePort)
+	};
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
+	bool isNull = false;
+	Datum placementIdDatum = 0;
 
-	/* form new shard placement tuple */
-	memset(values, 0, sizeof(values));
-	memset(isNulls, false, sizeof(isNulls));
+	SPI_connect();
 
-	values[ATTR_NUM_SHARD_PLACEMENT_ID - 1] = Int64GetDatum(shardPlacementId);
-	values[ATTR_NUM_SHARD_PLACEMENT_SHARD_ID - 1] = Int64GetDatum(shardId);
-	values[ATTR_NUM_SHARD_PLACEMENT_SHARD_STATE - 1] = UInt32GetDatum(shardState);
-	values[ATTR_NUM_SHARD_PLACEMENT_NODE_NAME - 1] = CStringGetTextDatum(nodeName);
-	values[ATTR_NUM_SHARD_PLACEMENT_NODE_PORT - 1] = UInt32GetDatum(nodePort);
+	spiStatus = SPI_execute_with_args("INSERT INTO "
+									  "pgs_distribution_metadata.shard_placement "
+									  "(shard_id, shard_state, node_name, node_port) "
+									  "VALUES ($1, $2, $3, $4) RETURNING id", argCount,
+									  argTypes, argValues, NULL, false, 1);
+	Assert(spiStatus == SPI_OK_INSERT_RETURNING);
 
-	/* open shard placement relation and insert new tuple */
-	shardPlacementRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
-										  SHARD_PLACEMENT_TABLE_NAME, -1);
-	shardPlacementRelation = heap_openrv(shardPlacementRangeVar, RowExclusiveLock);
+	placementIdDatum = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1,
+									 &isNull);
+	newShardPlacementId = DatumGetInt64(placementIdDatum);
 
-	tupleDescriptor = RelationGetDescr(shardPlacementRelation);
-	heapTuple = heap_form_tuple(tupleDescriptor, values, isNulls);
+	SPI_finish();
 
-	simple_heap_insert(shardPlacementRelation, heapTuple);
-	CatalogUpdateIndexes(shardPlacementRelation, heapTuple);
-	CommandCounterIncrement();
-
-	/* close relation */
-	heap_close(shardPlacementRelation, RowExclusiveLock);
+	return newShardPlacementId;
 }
 
 
@@ -755,73 +695,68 @@ InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
 void
 DeleteShardPlacementRow(uint64 shardPlacementId)
 {
-	RangeVar *heapRangeVar = NULL;
-	RangeVar *indexRangeVar = NULL;
-	Relation heapRelation = NULL;
-	Relation indexRelation = NULL;
-	IndexScanDesc indexScanDesc = NULL;
-	const int scanKeyCount = 1;
-	ScanKeyData scanKey[scanKeyCount];
-	HeapTuple heapTuple = NULL;
+	Oid argTypes[] = { INT8OID };
+	Datum argValues[] = { Int64GetDatum(shardPlacementId) };
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_PLACEMENT_TABLE_NAME, -1);
-	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
-								 SHARD_PLACEMENT_PKEY_INDEX_NAME, -1);
+	SPI_connect();
 
-	heapRelation = relation_openrv(heapRangeVar, RowExclusiveLock);
-	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
+	spiStatus = SPI_execute_with_args("DELETE FROM "
+									  "pgs_distribution_metadata.shard_placement "
+									  "WHERE id = $1", argCount, argTypes, argValues,
+									  NULL, false, 0);
+	Assert(spiStatus == SPI_OK_DELETE);
 
-	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ,
-				Int64GetDatum(shardPlacementId));
-
-	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotSelf,
-									scanKeyCount, 0);
-	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
-
-	heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
-	if (HeapTupleIsValid(heapTuple))
-	{
-		simple_heap_delete(heapRelation, &heapTuple->t_self);
-	}
-	else
+	if (SPI_processed != 1)
 	{
 		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
 						errmsg("shard placement with ID " INT64_FORMAT " does not exist",
 							   shardPlacementId)));
 	}
 
-	index_endscan(indexScanDesc);
-	index_close(indexRelation, AccessShareLock);
-	relation_close(heapRelation, RowExclusiveLock);
+	SPI_finish();
 }
 
 
 /*
- * NextSequenceId allocates and returns a new unique id generated from the given
- * sequence name.
+ * UpdateShardPlacementRowState sets the shard state of the row identified by
+ * the provided shard placement identifier, erroring out if it cannot find such
+ * a row.
  */
-uint64
-NextSequenceId(char *sequenceName)
+void
+UpdateShardPlacementRowState(int64 shardPlacementId, ShardState newState)
 {
-	RangeVar *sequenceRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
-											  sequenceName, -1);
-	bool failOk = false;
-	Oid sequenceRelationId = RangeVarGetRelid(sequenceRangeVar, NoLock, failOk);
-	Datum sequenceRelationIdDatum = ObjectIdGetDatum(sequenceRelationId);
+	Oid argTypes[] = { INT8OID, INT4OID };
+	Datum argValues[] = {
+		Int64GetDatum(shardPlacementId),
+		Int32GetDatum((int32) newState)
+	};
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
 
-	/* generate new and unique id from sequence */
-	Datum sequenceIdDatum = DirectFunctionCall1(nextval_oid, sequenceRelationIdDatum);
-	uint64 nextSequenceId = (uint64) DatumGetInt64(sequenceIdDatum);
+	SPI_connect();
 
-	return nextSequenceId;
+	spiStatus = SPI_execute_with_args("UPDATE pgs_distribution_metadata.shard_placement "
+									  "SET shard_state = $2 WHERE id = $1",
+									  argCount, argTypes, argValues, NULL, false, 1);
+	Assert(spiStatus == SPI_OK_UPDATE);
+
+	if (SPI_processed != 1)
+	{
+		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+						errmsg("shard placement with ID " INT64_FORMAT " does not exist",
+							   shardPlacementId)));
+	}
+
+	SPI_finish();
 }
 
 
 /*
  * LockShard returns after acquiring a lock for the specified shard, blocking
  * indefinitely if required. Only the ExclusiveLock and ShareLock modes are
- * supported: all others will trigger an error. Locks acquired with this method
- * are automatically released at transaction end.
+ * supported. Locks acquired with this method are released at transaction end.
  */
 void
 LockShard(int64 shardId, LOCKMODE lockMode)
@@ -829,22 +764,15 @@ LockShard(int64 shardId, LOCKMODE lockMode)
 	/* locks use 32-bit identifier fields, so split shardId */
 	uint32 keyUpperHalf = (uint32) (shardId >> 32);
 	uint32 keyLowerHalf = (uint32) shardId;
+	bool sessionLock = false;   /* we want a transaction lock */
+	bool dontWait = false;      /* block indefinitely until acquired */
 
 	LOCKTAG lockTag;
 	memset(&lockTag, 0, sizeof(LOCKTAG));
 
+	Assert(lockMode == ExclusiveLock || lockMode == ShareLock);
+
 	SET_LOCKTAG_ADVISORY(lockTag, MyDatabaseId, keyUpperHalf, keyLowerHalf, 0);
 
-	if (lockMode == ExclusiveLock || lockMode == ShareLock)
-	{
-		bool sessionLock = false;   /* we want a transaction lock */
-		bool dontWait = false;      /* block indefinitely until acquired */
-
-		(void) LockAcquire(&lockTag, lockMode, sessionLock, dontWait);
-	}
-	else
-	{
-		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						errmsg("lockMode must be one of: ExclusiveLock, ShareLock")));
-	}
+	(void) LockAcquire(&lockTag, lockMode, sessionLock, dontWait);
 }

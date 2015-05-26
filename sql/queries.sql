@@ -140,6 +140,15 @@ SELECT title, authors.name FROM authors, articles WHERE authors.id = articles.au
 -- joins are not supported in FROM clause
 SELECT * FROM  (articles INNER JOIN authors ON articles.id = authors.id);
 
+-- test CitusDB code path (this will error out in normal PostgreSQL)
+SELECT sync_table_metadata_to_citus('articles');
+
+-- with normal PostgreSQL, expect error about CitusDB being missing
+-- with CitusDB, expect an error about JOINing local table with distributed
+SET pg_shard.use_citusdb_select_logic TO true;
+SELECT title, authors.name FROM authors, articles WHERE authors.id = articles.author_id;
+SET pg_shard.use_citusdb_select_logic TO false;
+
 -- test cross-shard queries
 SELECT COUNT(*) FROM articles;
 
@@ -149,6 +158,24 @@ SELECT author_id, sum(word_count) AS corpus_size FROM articles
 	HAVING sum(word_count) > 25000
 	ORDER BY sum(word_count) DESC
 	LIMIT 5;
+
+-- cross-shard queries on a foreign table should fail
+-- we'll just point the article shards to a foreign table
+BEGIN;
+	CREATE FOREIGN TABLE foreign_articles (author_id bigint) SERVER fake_fdw_server;
+
+	UPDATE pgs_distribution_metadata.partition
+	SET relation_id='foreign_articles'::regclass
+	WHERE relation_id='articles'::regclass;
+
+	UPDATE pgs_distribution_metadata.shard
+	SET relation_id='foreign_articles'::regclass
+	WHERE relation_id='articles'::regclass;
+
+	SET pg_shard.log_distributed_statements = on;
+
+	SELECT COUNT(*) FROM foreign_articles;
+ROLLBACK;
 
 -- verify pg_shard produces correct remote SQL using logging flag
 SET pg_shard.log_distributed_statements = on;

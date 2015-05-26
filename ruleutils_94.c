@@ -20,9 +20,6 @@
 #include "fmgr.h"
 #include "funcapi.h"
 #include "miscadmin.h"
-#include "pg_config.h"
-#include "pg_config_manual.h"
-#include "postgres_ext.h"
 
 #include "ruleutils.h" /* IWYU pragma: keep */
 #include "ddl_commands.h"
@@ -72,6 +69,7 @@
 #include "utils/xml.h"
 
 #pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wempty-body"
 #pragma GCC diagnostic ignored "-Wsign-compare"
 #pragma GCC diagnostic ignored "-Wswitch"
 

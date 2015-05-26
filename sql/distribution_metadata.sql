@@ -7,8 +7,8 @@ CREATE FUNCTION load_shard_id_array(regclass, bool)
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 
-CREATE FUNCTION load_shard_interval_array(bigint)
-	RETURNS integer[]
+CREATE FUNCTION load_shard_interval_array(bigint, anyelement)
+	RETURNS anyarray
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 
@@ -21,19 +21,39 @@ CREATE FUNCTION partition_column_id(regclass)
 	RETURNS smallint
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
-	
+
+CREATE FUNCTION partition_type(regclass)
+	RETURNS "char"
+	AS 'pg_shard'
+	LANGUAGE C STRICT;
+
+CREATE FUNCTION is_distributed_table(regclass)
+	RETURNS boolean
+	AS 'pg_shard'
+	LANGUAGE C STRICT;
+
+CREATE FUNCTION distributed_tables_exist()
+	RETURNS boolean
+	AS 'pg_shard'
+	LANGUAGE C STRICT;
+
+CREATE FUNCTION column_name_to_column_id(regclass, cstring)
+	RETURNS smallint
+	AS 'pg_shard'
+	LANGUAGE C STRICT;
+
 CREATE FUNCTION insert_hash_partition_row(regclass, text)
 	RETURNS void
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 
-CREATE FUNCTION insert_monolithic_shard_row(regclass, bigint)
-	RETURNS void
+CREATE FUNCTION create_monolithic_shard_row(regclass)
+	RETURNS bigint
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 
-CREATE FUNCTION insert_healthy_local_shard_placement_row(bigint, bigint)
-	RETURNS void
+CREATE FUNCTION create_healthy_local_shard_placement_row(bigint)
+	RETURNS bigint
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 
@@ -42,13 +62,13 @@ CREATE FUNCTION delete_shard_placement_row(bigint)
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 
-CREATE FUNCTION acquire_shared_shard_lock(bigint)
+CREATE FUNCTION update_shard_placement_row_state(bigint, int)
 	RETURNS void
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 
-CREATE FUNCTION next_shard_id()
-	RETURNS bigint
+CREATE FUNCTION acquire_shared_shard_lock(bigint)
+	RETURNS void
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 
@@ -100,10 +120,23 @@ SELECT load_shard_id_array('events', true);
 SELECT load_shard_id_array('pg_type', false);
 
 -- should see array with first shard range
-SELECT load_shard_interval_array(1);
+SELECT load_shard_interval_array(1, 0);
+
+-- should even work for range-partitioned shards
+BEGIN;
+	UPDATE pgs_distribution_metadata.shard SET
+		min_value = 'Aardvark',
+		max_value = 'Zebra'
+	WHERE id = 1;
+
+	UPDATE pgs_distribution_metadata.partition SET partition_method = 'r'
+	WHERE relation_id = 'events'::regclass;
+
+	SELECT load_shard_interval_array(1, ''::text);
+ROLLBACK;
 
 -- should see error for non-existent shard
-SELECT load_shard_interval_array(5);
+SELECT load_shard_interval_array(5, 0);
 
 -- should see two placements
 SELECT load_shard_placement_array(2, false);
@@ -119,6 +152,29 @@ SELECT partition_column_id('events');
 
 -- should see error (catalog is not distributed)
 SELECT partition_column_id('pg_type');
+
+-- should see hash partition type and fail for non-distributed tables
+SELECT partition_type('events');
+SELECT partition_type('pg_type');
+
+-- should see true for events, false for others
+SELECT is_distributed_table('events');
+SELECT is_distributed_table('pg_type');
+SELECT is_distributed_table('pgs_distribution_metadata.shard');
+
+-- should see that we have distributed tables
+SELECT distributed_tables_exist();
+
+-- or maybe that we don't
+BEGIN;
+	DELETE FROM pgs_distribution_metadata.partition;
+	SELECT distributed_tables_exist();
+ROLLBACK;
+
+-- test underlying column name-id translation
+SELECT column_name_to_column_id('events', 'name');
+SELECT column_name_to_column_id('events', 'ctid');
+SELECT column_name_to_column_id('events', 'non_existent');
 
 -- drop shard rows (must drop placements first)
 DELETE FROM pgs_distribution_metadata.shard_placement
@@ -146,19 +202,29 @@ SELECT partition_method, key FROM pgs_distribution_metadata.partition
 	WHERE relation_id = 'customers'::regclass;
 
 -- make one huge shard and manually inspect shard row
-SELECT insert_monolithic_shard_row('customers', 5);
-SELECT storage, min_value, max_value FROM pgs_distribution_metadata.shard WHERE id = 5;
+SELECT create_monolithic_shard_row('customers') AS new_shard_id
+\gset
+SELECT storage, min_value, max_value FROM pgs_distribution_metadata.shard
+WHERE id = :new_shard_id;
 
 -- add a placement and manually inspect row
-SELECT insert_healthy_local_shard_placement_row(109, 5);
-SELECT * FROM pgs_distribution_metadata.shard_placement WHERE id = 109;
+SELECT create_healthy_local_shard_placement_row(:new_shard_id) AS new_placement_id
+\gset
+SELECT * FROM pgs_distribution_metadata.shard_placement WHERE id = :new_placement_id;
+
+-- mark it as unhealthy and inspect
+SELECT update_shard_placement_row_state(:new_placement_id, 3);
+SELECT shard_state FROM pgs_distribution_metadata.shard_placement
+WHERE id = :new_placement_id;
 
 -- remove it and verify it is gone
-SELECT delete_shard_placement_row(109);
-SELECT COUNT(*) FROM pgs_distribution_metadata.shard_placement WHERE id = 109;
+SELECT delete_shard_placement_row(:new_placement_id);
+SELECT COUNT(*) FROM pgs_distribution_metadata.shard_placement
+WHERE id = :new_placement_id;
 
--- ask for next shard id
-SELECT next_shard_id();
+-- deleting or updating a non-existent row should fail
+SELECT delete_shard_placement_row(:new_placement_id);
+SELECT update_shard_placement_row_state(:new_placement_id, 3);
 
 -- now we'll even test our lock methods...
 
@@ -175,5 +241,11 @@ COMMIT;
 -- lock should be gone now
 SELECT COUNT(*) FROM pg_locks WHERE locktype = 'advisory' AND objid = 5;
 
--- finally, check that having distributed tables prevent dropping the extension 
+-- finally, check that having distributed tables prevent dropping the extension
 DROP EXTENSION pg_shard;
+
+-- prevent actual drop using transaction
+BEGIN;
+-- the above should fail but we can force a drop with CASCADE
+DROP EXTENSION pg_shard CASCADE;
+ROLLBACK;
