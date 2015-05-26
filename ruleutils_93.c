@@ -21,6 +21,8 @@
 #include "funcapi.h"
 #include "miscadmin.h"
 
+#if (PG_VERSION_NUM >= 90300 && PG_VERSION_NUM < 90400)
+
 #include "ruleutils.h" /* IWYU pragma: keep */
 #include "ddl_commands.h"
 
@@ -6375,3 +6377,5 @@ generate_operator_name(Oid operid, Oid arg1, Oid arg2)
 }
 
 #pragma GCC diagnostic pop
+
+#endif /* (PG_VERSION_NUM >= 90300 && PG_VERSION_NUM < 90400) */
