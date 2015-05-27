@@ -19,7 +19,7 @@ PG_CPPFLAGS = -std=c99 -Wall -Wextra -Werror -Wno-unused-parameter -Iinclude -I$
 
 # The launcher regression flag lets us specify a special wrapper to handle
 # testing rather than psql directly. Our wrapper swaps in a known worker list.
-REGRESS_OPTS += --launcher=./launcher.sh
+REGRESS_OPTS += --launcher=./test/launcher.sh
 
 # pg_shard and CitusDB have several functions that share the same name. When we
 # link pg_shard against CitusDB on Linux, the loader resolves to the CitusDB
