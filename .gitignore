@@ -57,7 +57,4 @@
 !/test/expected/*.out
 
 # ignore latest install file
-/sql/pg_shard--*.sql
-
-# keep upgrade files
-!/sql/pg_shard--*--.sql
+sql/*--*.sql
