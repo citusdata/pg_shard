@@ -70,7 +70,5 @@ ifeq ($(PG93),no)
     $(error PostgreSQL 9.3 or 9.4 is required to compile this extension)
 endif
 
-print-%  : ; @echo $* = $($*)
-
 sql/$(EXTENSION)--$(EXTVERSION).sql: sql/$(EXTENSION).sql
 	cp $< $@
