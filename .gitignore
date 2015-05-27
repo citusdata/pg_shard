@@ -52,4 +52,10 @@ regression.out
 test/results/
 
 # keep expected output files
-!/test/expected/*.out
+!test/expected/*.out
+
+# ignore latest install file
+sql/pg_shard--*.sql
+
+# keep upgrade files
+!sql/pg_shard--*--.sql
