@@ -46,10 +46,12 @@
 # = Project-Specific =
 # ====================
 
-# regression test output
+# regression test detritus
+/log/
 /regression.diffs
 /regression.out
-/test/results/
+/results/
+/tmp_check*
 
 # keep expected output files
 !/test/expected/*.out
