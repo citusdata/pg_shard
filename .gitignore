@@ -48,11 +48,5 @@
 
 !/expected/*.out
 
-# Generated test files
-/expected/connection.out
-/sql/connection.sql
-/expected/create_shards.out
-/sql/create_shards.sql
-/expected/repair_shards.out
-/sql/repair_shards.sql
-/expected/modifications.out
+# header dependency information
+/.deps

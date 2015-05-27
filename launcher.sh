@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 
+# make bash behave
+set -euo pipefail
+IFS=$'\n\t'
+
 PGPORT=${PGPORT:-5432}
-BINDIR=`pg_config --bindir`
-PSQL=$BINDIR/psql
+PSQL=$1
 DATADIR=`$PSQL -p$PGPORT -AtXc 'SHOW data_directory' postgres`
 PG_WORKER_LIST_CONF=$DATADIR/pg_worker_list.conf
 
@@ -33,6 +36,7 @@ sed -i.bak -e's/^/#/g' -e"\$a\\
 localhost $PGPORT # added by installcheck\\
 adeadhost 5432 # added by installcheck" $PG_WORKER_LIST_CONF
 
-$*
+shift
+$PSQL -v worker_port=$PGPORT $*
 
 restore_worker_list
