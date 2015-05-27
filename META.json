@@ -2,7 +2,7 @@
     "name": "pg_shard",
     "abstract": "Easy sharding for PostgreSQL",
     "description": "Shards and replicates PostgreSQL tables for horizontal scale and high availability. Seamlessly distributes SQL statements, without requiring any application changes.",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "maintainer": "\"Jason Petersen\" <jason@citusdata.com>",
     "license": "lgpl_3_0",
     "prereqs": {
@@ -15,9 +15,9 @@
     "provides": {
         "pg_shard": {
             "abstract": "Easy sharding for PostgreSQL",
-            "file": "pg_shard--1.1.sql",
+            "file": "pg_shard--1.2.sql",
             "docfile": "README.md",
-            "version": "1.1.0"
+            "version": "1.2.0"
         }
     },
     "release_status": "stable",

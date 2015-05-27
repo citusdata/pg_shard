@@ -46,13 +46,15 @@
 # = Project-Specific =
 # ====================
 
-!/expected/*.out
+# regression test detritus
+/log/
+/regression.diffs
+/regression.out
+/results/
+/tmp_check*
 
-# Generated test files
-/expected/connection.out
-/sql/connection.sql
-/expected/create_shards.out
-/sql/create_shards.sql
-/expected/repair_shards.out
-/sql/repair_shards.sql
-/expected/modifications.out
+# keep expected output files
+!/test/expected/*.out
+
+# ignore latest install file
+sql/*--*.sql
