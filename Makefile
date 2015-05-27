@@ -9,13 +9,17 @@
 EXTENSION = $(shell grep -m 1 '"name":' META.json | sed -e 's/[[:space:]]*"name":[[:space:]]*"\([^"]*\)",/\1/')
 EXTVERSION = $(shell grep default_version $(EXTENSION).control | sed -e "s/default_version[[:space:]]*=[[:space:]]*'\([^']*\)'/\1/")
 
-MODULE_big = ${EXTENSION}
+DOCS = $(wildcard doc/*.md)
+SCRIPTS = $(wildcard bin/*)
+MODULE_big = $(EXTENSION)
 OBJS = $(patsubst %.c,%.o,$(wildcard src/*.c))
 TESTS = $(wildcard test/sql/*.sql)
 REGRESS = $(patsubst test/sql/%.sql,%,$(TESTS))
 REGRESS_OPTS = --inputdir=test --load-language=plpgsql
+EXTRA_CLEAN += $(addprefix src/,*.gcno *.gcda)
 
 PG_CPPFLAGS = -std=c99 -Wall -Wextra -Werror -Wno-unused-parameter -Iinclude -I$(libpq_srcdir)
+SHLIB_LINK = $(libpq)
 
 # The launcher regression flag lets us specify a special wrapper to handle
 # testing rather than psql directly. Our wrapper swaps in a known worker list.
@@ -27,20 +31,15 @@ REGRESS_OPTS += --launcher=./test/launcher.sh
 # pg_shard function instead.
 OS := $(shell uname)
 ifeq ($(OS), Linux)
-	SHLIB_LINK = $(libpq) -Wl,-Bsymbolic
-else
-	SHLIB_LINK = $(libpq)
+	SHLIB_LINK += -Wl,-Bsymbolic
 endif
 
 DATA = $(wildcard sql/*--*.sql)
 DATA_built = sql/$(EXTENSION)--$(EXTVERSION).sql
 
-SCRIPTS = bin/copy_to_distributed_table
-
 ifeq ($(enable_coverage),yes)
 	PG_CPPFLAGS += --coverage
 	SHLIB_LINK  += --coverage
-	EXTRA_CLEAN += *.gcno *.gcda test/*.gcno test/*.gcda
 endif
 
 # Let the test makefile tell us what objects to build.
