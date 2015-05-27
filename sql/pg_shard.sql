@@ -1,4 +1,4 @@
-/* pg_shard--1.2.sql */
+/* sql/pg_shard.sql */
 
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION pg_shard" to load this file. \quit

@@ -32,7 +32,9 @@ else
 	SHLIB_LINK = $(libpq)
 endif
 
-DATA = pg_shard--1.2.sql pg_shard--1.0--1.1.sql pg_shard--1.1--1.2.sql
+DATA = $(wildcard sql/*--*.sql)
+DATA_built = sql/$(EXTENSION)--$(EXTVERSION).sql
+
 SCRIPTS = bin/copy_to_distributed_table
 
 ifeq ($(enable_coverage),yes)
@@ -67,3 +69,8 @@ PG93 = $(shell echo $(MAJORVERSION) | grep -qE "8\.|9\.[012]" && echo no || echo
 ifeq ($(PG93),no)
     $(error PostgreSQL 9.3 or 9.4 is required to compile this extension)
 endif
+
+print-%  : ; @echo $* = $($*)
+
+sql/$(EXTENSION)--$(EXTVERSION).sql: sql/$(EXTENSION).sql
+	cp $< $@
