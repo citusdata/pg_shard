@@ -11,8 +11,7 @@ EXTENSION = $(shell grep -m 1 '"name":' META.json | sed -e 's/[[:space:]]*"name"
 EXTVERSION = $(shell grep default_version $(EXTENSION).control | sed -e "s/default_version[[:space:]]*=[[:space:]]*'\([^']*\)'/\1/")
 
 # installation scripts
-DATA = $(wildcard sql/*--*.sql)
-DATA_built = sql/$(EXTENSION)--$(EXTVERSION).sql
+DATA = $(wildcard updates/*--*.sql)
 
 # documentation and executables
 DOCS = $(wildcard doc/*.md)
@@ -34,7 +33,7 @@ REGRESS_OPTS += --launcher=./test/launcher.sh # use custom launcher for tests
 # add coverage flags if requested
 ifeq ($(enable_coverage),yes)
 PG_CPPFLAGS += --coverage
-SHLIB_LINK  += --coverage
+SHLIB_LINK += --coverage
 endif
 
 # Handle a Linux issue where the loader might resolve ambiguous symbols to
@@ -44,8 +43,12 @@ OS := $(shell uname)
 ifeq ($(OS), Linux)
 SHLIB_LINK += -Wl,-Bsymbolic
 endif
-# let the test makefile tell us what objects to build
 
+# be explicit about the default target
+all:
+
+# delegate to subdirectory makefiles as needed
+include sql/Makefile
 include test/Makefile
 
 # detect whether to build with pgxs or build in-tree
@@ -71,7 +74,3 @@ PG93 = $(shell echo $(MAJORVERSION) | grep -qE "8\.|9\.[012]" && echo no || echo
 ifeq ($(PG93),no)
 $(error PostgreSQL 9.3 or higher is required to compile this extension)
 endif
-
-# define build process for latest install file
-sql/$(EXTENSION)--$(EXTVERSION).sql: sql/$(EXTENSION).sql
-	cp $< $@
