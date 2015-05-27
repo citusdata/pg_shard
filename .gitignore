@@ -47,3 +47,6 @@
 # ====================
 
 !/expected/*.out
+
+# header dependency information
+/.deps
