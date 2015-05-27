@@ -61,6 +61,9 @@ SELECT master_create_distributed_table('table_to_distribute', 'bad_column');
 -- use unsupported partition type
 SELECT master_create_distributed_table('table_to_distribute', 'name', 'r');
 
+-- use unrecognized partition type
+SELECT master_create_distributed_table('table_to_distribute', 'name', 'z');
+
 -- use a partition column of a type lacking any default operator class
 SELECT master_create_distributed_table('table_to_distribute', 'json_data');
 
