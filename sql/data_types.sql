@@ -55,7 +55,11 @@ CREATE TABLE composite_type_partitioned_table
 );
 
 SELECT master_create_distributed_table('composite_type_partitioned_table', 'col');
+
+-- squelch noisy warnings when creating shards
+\set VERBOSITY terse
 SELECT master_create_worker_shards('composite_type_partitioned_table', 4, 1);
+\set VERBOSITY default
 
 -- execute INSERT, SELECT and UPDATE queries on composite_type_partitioned_table   
 INSERT INTO composite_type_partitioned_table VALUES  (1, '(1, 2)'::test_composite_type);
@@ -80,7 +84,11 @@ CREATE TABLE bugs (
 );
 
 SELECT master_create_distributed_table('bugs', 'status');
+
+-- squelch noisy warnings when creating shards
+\set VERBOSITY terse
 SELECT master_create_worker_shards('bugs', 4, 1);
+\set VERBOSITY default
 
 -- execute INSERT, SELECT and UPDATE queries on composite_type_partitioned_table   
 INSERT INTO bugs VALUES  (1, 'new');
