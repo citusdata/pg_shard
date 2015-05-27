@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * connection.c
+ * src/connection.c
  *
  * This file contains functions to implement a connection hash.
  *

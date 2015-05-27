@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * ruleutils_94.c
+ * src/ruleutils_94.c
  *	  Functions to convert stored expressions/querytrees back to
  *	  source text. Used by pg_shard to recreate the text of an
  *	  incoming query with the proper shard identifier added. As

@@ -16,7 +16,7 @@
 
 #include "distribution_metadata.h"
 #include "prune_shard_list.h"
-#include "test/test_helper_functions.h" /* IWYU pragma: keep */
+#include "test_helper_functions.h" /* IWYU pragma: keep */
 
 #include <string.h>
 

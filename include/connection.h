@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * connection.h
+ * include/connection.h
  *
  * Declarations for public functions and types related to connection hash
  * functionality.

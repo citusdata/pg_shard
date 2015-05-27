@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * ruleutils.h
+ * include/ruleutils.h
  *
  * Declarations for public functions and types to produce an SQL string
  * targeting a particular shard based on an initial query and shard ID.

@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * pg_shard.h
+ * include/pg_shard.h
  *
  * Declarations for public functions and types needed by the pg_shard extension.
  *

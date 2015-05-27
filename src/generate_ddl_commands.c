@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * generate_ddl_commands.c
+ * src/generate_ddl_commands.c
  *
  * This file contains functions to retrieve ddl commands for a table. Functions
  * contained here are borrowed from CitusDB.

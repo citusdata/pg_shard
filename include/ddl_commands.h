@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * ddl_commands.h
+ * include/ddl_commands.h
  *
  * Declarations for public functions related to generating and extending DDL
  * commands.

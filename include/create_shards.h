@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * create_shards.h
+ * include/create_shards.h
  *
  * Declarations for public functions and types related to shard creation
  * functionality.

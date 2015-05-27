@@ -15,7 +15,7 @@
 #include "fmgr.h"
 
 #include "distribution_metadata.h"
-#include "test/test_helper_functions.h" /* IWYU pragma: keep */
+#include "test_helper_functions.h" /* IWYU pragma: keep */
 
 #include <stddef.h>
 #include <stdint.h>

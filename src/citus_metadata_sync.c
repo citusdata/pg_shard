@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * citus_metadata_sync.c
+ * src/citus_metadata_sync.c
  *
  * This file contains functions to sync pg_shard metadata to the CitusDB
  * metadata tables.
