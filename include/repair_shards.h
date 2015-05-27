@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * repair_shards.h
+ * include/repair_shards.h
  *
  * Declarations for public functions and types to implement shard repair
  * functionality.

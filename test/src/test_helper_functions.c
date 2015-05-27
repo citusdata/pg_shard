@@ -12,7 +12,7 @@
 #include "postgres.h"
 #include "c.h"
 
-#include "test/test_helper_functions.h" /* IWYU pragma: keep */
+#include "test_helper_functions.h" /* IWYU pragma: keep */
 
 #include <string.h>
 

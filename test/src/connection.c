@@ -16,7 +16,7 @@
 #include "libpq-fe.h"
 
 #include "connection.h"
-#include "test/test_helper_functions.h"
+#include "test_helper_functions.h"
 
 #include <stddef.h>
 #include <string.h>

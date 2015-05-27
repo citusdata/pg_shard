@@ -10,7 +10,7 @@ EXTENSION = $(shell grep -m 1 '"name":' META.json | sed -e 's/[[:space:]]*"name"
 EXTVERSION = $(shell grep default_version $(EXTENSION).control | sed -e "s/default_version[[:space:]]*=[[:space:]]*'\([^']*\)'/\1/")
 
 MODULE_big = ${EXTENSION}
-OBJS = $(patsubst %.c,%.o,$(wildcard *.c))
+OBJS = $(patsubst %.c,%.o,$(wildcard src/*.c))
 TESTS = $(wildcard test/sql/*.sql)
 REGRESS = $(patsubst test/sql/%.sql,%,$(TESTS))
 REGRESS_OPTS = --inputdir=test --outputdir=test --load-language=plpgsql

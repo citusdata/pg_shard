@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * prune_shard_list.c
+ * src/prune_shard_list.c
  *
  * This file contains functions to examine lists of shards and remove those not
  * required to execute a given query. Functions contained here are borrowed from

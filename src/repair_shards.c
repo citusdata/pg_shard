@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * repair_shards.c
+ * src/repair_shards.c
  *
  * This file contains functions to repair unhealthy shard placements using data
  * from healthy ones.

@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * distribution_metadata.h
+ * include/distribution_metadata.h
  *
  * Declarations for public functions and types related to metadata handling.
  *

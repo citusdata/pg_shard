@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * create_shards.c
+ * src/create_shards.c
  *
  * This file contains functions to distribute a table by creating shards for it
  * across a set of worker nodes.

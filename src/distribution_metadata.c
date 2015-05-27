@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * distribution_metadata.c
+ * src/distribution_metadata.c
  *
  * This file contains functions to access and manage the distributed table
  * metadata.

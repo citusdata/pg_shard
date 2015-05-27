@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * pg_shard.c
+ * src/pg_shard.c
  *
  * This file contains functions to perform distributed planning and execution of
  * distributed tables.

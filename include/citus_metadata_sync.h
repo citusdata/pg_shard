@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * citus_metadata_sync.h
+ * include/citus_metadata_sync.h
  *
  * Declarations for public functions and types related to syncing metadata with
  * CitusDB.
