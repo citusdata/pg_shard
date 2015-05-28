@@ -204,6 +204,11 @@ SELECT author_id FROM articles
 	GROUP BY author_id
 	ORDER BY author_id;
 
+-- a query with GROUP BY on partition column where ORDER BY column must be pulled
+SELECT count(*) FROM articles
+	GROUP BY author_id
+	ORDER BY author_id;
+
 -- an aggregate query with GROUP BY on partition column
 SELECT author_id, count(*) FROM articles
 	GROUP BY author_id

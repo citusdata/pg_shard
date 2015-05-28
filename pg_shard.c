@@ -110,6 +110,7 @@ static List * BuildAggregatedDistributedTargetList(Query *query,
 												   List *localRestrictList);
 static List * BuildNonAggregatedDistributedTargetList(Query *query,
 													  List *localRestrictList);
+static bool SortTargetEntry(List *sortClause, TargetEntry *targetEntry);
 static Query * BuildLocalQuery(Query *query, List *localRestrictList,
 							   bool safeToPushDownAggregate);
 static Query * RemoveAggregates(Query *aggregatedQuery);
@@ -900,6 +901,7 @@ BuildAggregatedDistributedTargetList(Query *query, List *localRestrictList)
 	List *targetList = query->targetList;
 	List *newTargetList = NIL;
 	ListCell *targetListCell = NULL;
+	List *sortClause = query->sortClause;
 	PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
 	PVCPlaceHolderBehavior placeHolderBehavior = PVC_REJECT_PLACEHOLDERS;
 
@@ -940,12 +942,56 @@ BuildAggregatedDistributedTargetList(Query *query, List *localRestrictList)
 
 				newTargetEntry->ressortgroupref = targetListEntry->ressortgroupref;
 
+				/*
+				 *  Sort columns which does not appear in the final
+				 *  target list must be pulled from the worker nodes.
+				 */
+				if (targetListEntry->resjunk)
+				{
+					bool sortTargetEntry = SortTargetEntry(sortClause, newTargetEntry);
+
+					if (sortTargetEntry)
+					{
+						newTargetEntry->resjunk = false;
+					}
+					else
+					{
+						newTargetEntry->resjunk = true;
+					}
+				}
+
 				newTargetList = lappend(newTargetList, newTargetEntry);
 			}
 		}
 	}
 
 	return newTargetList;
+}
+
+
+/*
+ * SortTargetEntry returns true if targetEntry references one of the elements
+ * in the sortClause.
+ */
+static bool
+SortTargetEntry(List *sortClause, TargetEntry *targetEntry)
+{
+	bool referencedByTargetEntry = false;
+	Index targetEntryReference = targetEntry->ressortgroupref;
+
+	ListCell *sortClauseCell = NULL;
+	foreach(sortClauseCell, sortClause)
+	{
+		SortGroupClause *sortClause = (SortGroupClause *) lfirst(sortClauseCell);
+
+		if (targetEntryReference == sortClause->tleSortGroupRef)
+		{
+			referencedByTargetEntry = true;
+			break;
+		}
+	}
+
+	return referencedByTargetEntry;
 }
 
 
@@ -1058,16 +1104,6 @@ RemoveAggregates(Query *aggregatedQuery)
 		TargetEntry *targetListEntry = (TargetEntry *) lfirst(targetListCell);
 		TargetEntry *newTargetEntry = copyObject(targetListEntry);
 
-		/*
-		 * Columns which appear on GROUP BY/ORDER BY statements show up in the
-		 * targetList. We discard these columns from the aggregated query's
-		 * final target list.
-		 */
-		if (newTargetEntry->resjunk == true)
-		{
-			continue;
-		}
-
 		/* update target list entries which include Aggrefs */
 		if (ContainsAggref((Node *) newTargetEntry->expr))
 		{
@@ -1083,8 +1119,9 @@ RemoveAggregates(Query *aggregatedQuery)
 		newTargetEntry->expr = (Expr *) VarNodeMutator((Node *) newTargetEntry->expr,
 													   &columnId);
 
-		/* ressortgroupref must be updated for ORDER BY columns */
+		/* ressortgroupref and resjunk must be updated for ORDER BY columns */
 		newTargetEntry->ressortgroupref = targetListEntry->ressortgroupref;
+		newTargetEntry->resjunk = targetListEntry->resjunk;
 
 		newTargetEntry->resno = targetResNo;
 		nonAggregatedTargetList = lappend(nonAggregatedTargetList,
