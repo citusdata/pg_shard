@@ -5,6 +5,11 @@
 -- create a table and create its distribution metadata
 CREATE TABLE customer_engagements ( id integer, created_at date, event_data text );
 
+-- add some indexes
+CREATE INDEX ON customer_engagements (id);
+CREATE INDEX ON customer_engagements (created_at);
+CREATE INDEX ON customer_engagements (event_data);
+
 INSERT INTO pgs_distribution_metadata.partition (relation_id, partition_method, key)
 VALUES
 	('customer_engagements'::regclass, 'h', 'id');
