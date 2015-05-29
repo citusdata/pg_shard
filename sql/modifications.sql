@@ -13,16 +13,28 @@ CREATE TABLE limit_orders (
 	limit_price decimal NOT NULL DEFAULT 0.00 CHECK (limit_price >= 0.00)
 );
 
+CREATE TABLE insufficient_shards ( LIKE limit_orders );
+
 SELECT master_create_distributed_table('limit_orders', 'id');
+SELECT master_create_distributed_table('insufficient_shards', 'id');
 
 \set VERBOSITY terse
 SELECT master_create_worker_shards('limit_orders', 2, 1);
+
+-- make a single shard that covers no partition values
+SELECT master_create_worker_shards('insufficient_shards', 1, 1);
+UPDATE pgs_distribution_metadata.shard SET min_value = 0, max_value = 0
+WHERE relation_id = 'insufficient_shards'::regclass;
 \set VERBOSITY default
 
 -- basic single-row INSERT
 INSERT INTO limit_orders VALUES (32743, 'AAPL', 9580, '2004-10-19 10:23:54', 'buy',
 								 20.69);
 SELECT COUNT(*) FROM limit_orders WHERE id = 32743;
+
+-- try a single-row INSERT with no shard to receive it
+INSERT INTO insufficient_shards VALUES (32743, 'AAPL', 9580, '2004-10-19 10:23:54', 'buy',
+										20.69);
 
 -- INSERT with DEFAULT in the target list
 INSERT INTO limit_orders VALUES (12756, 'MSFT', 10959, '2013-05-08 07:29:23', 'sell',
