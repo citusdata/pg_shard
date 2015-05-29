@@ -79,13 +79,13 @@ SELECT partition_method, key FROM pgs_distribution_metadata.partition
 
 -- use a bad shard count
 SELECT master_create_worker_shards('table_to_distribute', 0, 1);
-ERROR:  shardCount must be positive
+ERROR:  shard_count must be positive
 -- use a bad replication factor
 SELECT master_create_worker_shards('table_to_distribute', 16, 0);
-ERROR:  replicationFactor must be positive
+ERROR:  replication_factor must be positive
 -- use a replication factor higher than shard count
 SELECT master_create_worker_shards('table_to_distribute', 16, 3);
-ERROR:  replicationFactor (3) exceeds number of worker nodes (2)
+ERROR:  replication_factor (3) exceeds number of worker nodes (2)
 HINT:  Add more worker nodes or try again with a lower replication factor.
 \set VERBOSITY terse
 -- use a replication factor higher than healthy node count
