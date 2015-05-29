@@ -455,8 +455,8 @@ ColumnNameToColumn(Oid relationId, char *columnName)
 	/* check length to prevent failed Assert for long names in get_attnum */
 	if (strnlen(columnName, NAMEDATALEN) == NAMEDATALEN)
 	{
-		ereport(ERROR, (errcode(ERRCODE_NAME_TOO_LONG), errmsg("columnName too long"),
-						errdetail("columnName must be less than %d characters.",
+		ereport(ERROR, (errcode(ERRCODE_NAME_TOO_LONG), errmsg("column name too long"),
+						errdetail("Column name must be less than %d characters.",
 								  NAMEDATALEN)));
 	}
 

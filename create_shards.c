@@ -188,14 +188,14 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 	if (shardCount <= 0)
 	{
 		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						errmsg("shardCount must be positive")));
+						errmsg("shard_count must be positive")));
 	}
 
 	/* make sure that at least one replica is specified */
 	if (replicationFactor <= 0)
 	{
 		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						errmsg("replicationFactor must be positive")));
+						errmsg("replication_factor must be positive")));
 	}
 
 	/* calculate the split of the hash space */
@@ -215,7 +215,7 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 	if (replicationFactor > workerNodeCount)
 	{
 		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						errmsg("replicationFactor (%d) exceeds number of worker nodes "
+						errmsg("replication_factor (%d) exceeds number of worker nodes "
 							   "(%d)", replicationFactor, workerNodeCount),
 						errhint("Add more worker nodes or try again with a lower "
 								"replication factor.")));

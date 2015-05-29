@@ -170,8 +170,8 @@ BEGIN;
 	WHERE  relation_id = 'events' :: regclass;
 	---- should see error that partition column is too long
 	SELECT Partition_column_id('events');
-ERROR:  columnName too long
-DETAIL:  columnName must be less than 64 characters.
+ERROR:  column name too long
+DETAIL:  Column name must be less than 64 characters.
 ROLLBACK;
 -- should see error (catalog is not distributed)
 SELECT partition_column_id('pg_type');
