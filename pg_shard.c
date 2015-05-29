@@ -849,9 +849,14 @@ BuildDistributedQuery(Query *query, List *remoteRestrictList, List *localRestric
 											safeToPushDownAggregate);
 	if (safeToPushDownAggregate)
 	{
-		filterQuery->groupClause = list_copy(query->groupClause);
-		filterQuery->havingQual = copyObject(query->havingQual);
 		filterQuery->hasAggs = true;
+		filterQuery->groupClause = list_copy(query->groupClause);
+
+		/*
+		 * Note that both havingQual is in implicitly-ANDed-list form
+		 * at this point, even though they are declared as Node.
+		*/
+		filterQuery->havingQual = (Node *) make_ands_explicit((List *) query->havingQual);
 	}
 
 	filterQuery->commandType = CMD_SELECT;

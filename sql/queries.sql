@@ -221,6 +221,12 @@ SELECT author_id, (count(*) + author_id) as cnt FROM articles
 	HAVING (count(*) + author_id) > 4
 	ORDER BY author_id;
 
+-- a query with multiple HAVING clauses
+SELECT author_id, count(*) as cnt FROM articles
+	GROUP BY author_id
+	HAVING count(*) > 4 AND sum(author_id) > 30
+	ORDER BY author_id;
+
 -- a query with WHERE, HAVING and GROUP BY on partition column
 SELECT author_id, count(*) as cnt FROM articles
 	WHERE author_id > 8
