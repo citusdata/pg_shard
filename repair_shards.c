@@ -280,8 +280,8 @@ RecreateTableDDLCommandList(Oid relationId, int64 shardId)
 	extendedCreateCommandList = ExtendedDDLCommandList(relationId, shardId,
 													   createCommandList);
 
-	extendedRecreateCommandList = list_union(extendedDropCommandList,
-											 extendedCreateCommandList);
+	extendedRecreateCommandList = list_concat(extendedDropCommandList,
+											  extendedCreateCommandList);
 
 	return extendedRecreateCommandList;
 }
