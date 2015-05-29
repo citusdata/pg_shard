@@ -1,3 +1,7 @@
+### pg_shard v1.1.1 (May 29, 2015) ###
+
+* Fixes shard repair bug triggered when indexes present
+
 ### pg_shard v1.1.0 (March 19, 2015) ###
 
 * Speeds up INSERTs by up to 300%
