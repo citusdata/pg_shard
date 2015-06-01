@@ -259,8 +259,8 @@ SELECT title FROM articles
 	GROUP BY title
 	HAVING sum(word_count) > 18000
 	ORDER BY title;
-LOG:  distributed statement: SELECT title, word_count FROM ONLY articles_10036 WHERE true
 LOG:  distributed statement: SELECT title, word_count FROM ONLY articles_10037 WHERE true
+LOG:  distributed statement: SELECT title, word_count FROM ONLY articles_10038 WHERE true
    title    
 ------------
  alkylic
@@ -276,8 +276,8 @@ SELECT title, sum(word_count) AS corpus_size FROM articles
 	HAVING sum(word_count) > 2000
 	ORDER BY sum(word_count) DESC
 	LIMIT 5;
-LOG:  distributed statement: SELECT title, word_count FROM ONLY articles_10036 WHERE true
 LOG:  distributed statement: SELECT title, word_count FROM ONLY articles_10037 WHERE true
+LOG:  distributed statement: SELECT title, word_count FROM ONLY articles_10038 WHERE true
    title    | corpus_size 
 ------------+-------------
  anjanette  |       19519
@@ -291,8 +291,8 @@ LOG:  distributed statement: SELECT title, word_count FROM ONLY articles_10037 W
 SELECT author_id FROM articles
 	GROUP BY author_id
 	ORDER BY author_id;
-LOG:  distributed statement: SELECT author_id FROM ONLY articles_10036 WHERE true GROUP BY author_id HAVING true
 LOG:  distributed statement: SELECT author_id FROM ONLY articles_10037 WHERE true GROUP BY author_id HAVING true
+LOG:  distributed statement: SELECT author_id FROM ONLY articles_10038 WHERE true GROUP BY author_id HAVING true
  author_id 
 -----------
          1
@@ -317,8 +317,8 @@ GROUP BY
 ORDER BY 
 	max(word_count), author_id  DESC 
 LIMIT 5;
-LOG:  distributed statement: SELECT id, count(*) AS cnt, max(word_count), author_id FROM ONLY articles_10036 WHERE (author_id > 0) GROUP BY author_id, id HAVING true
 LOG:  distributed statement: SELECT id, count(*) AS cnt, max(word_count), author_id FROM ONLY articles_10037 WHERE (author_id > 0) GROUP BY author_id, id HAVING true
+LOG:  distributed statement: SELECT id, count(*) AS cnt, max(word_count), author_id FROM ONLY articles_10038 WHERE (author_id > 0) GROUP BY author_id, id HAVING true
  id | cnt 
 ----+-----
  16 |   1
@@ -332,8 +332,8 @@ LOG:  distributed statement: SELECT id, count(*) AS cnt, max(word_count), author
 SELECT author_id, count(*) FROM articles
 	GROUP BY author_id
 	ORDER BY author_id;
-LOG:  distributed statement: SELECT author_id, count(*) AS count FROM ONLY articles_10036 WHERE true GROUP BY author_id HAVING true
 LOG:  distributed statement: SELECT author_id, count(*) AS count FROM ONLY articles_10037 WHERE true GROUP BY author_id HAVING true
+LOG:  distributed statement: SELECT author_id, count(*) AS count FROM ONLY articles_10038 WHERE true GROUP BY author_id HAVING true
  author_id | count 
 -----------+-------
          1 |     5
@@ -354,8 +354,8 @@ SELECT author_id, (count(*) + author_id) as cnt FROM articles
 	GROUP BY author_id
 	HAVING (count(*) + author_id) > 4
 	ORDER BY author_id;
-LOG:  distributed statement: SELECT author_id, (count(*) + author_id) AS cnt FROM ONLY articles_10036 WHERE true GROUP BY author_id HAVING ((count(*) + author_id) > 4)
 LOG:  distributed statement: SELECT author_id, (count(*) + author_id) AS cnt FROM ONLY articles_10037 WHERE true GROUP BY author_id HAVING ((count(*) + author_id) > 4)
+LOG:  distributed statement: SELECT author_id, (count(*) + author_id) AS cnt FROM ONLY articles_10038 WHERE true GROUP BY author_id HAVING ((count(*) + author_id) > 4)
  author_id | cnt 
 -----------+-----
          1 |   6
@@ -375,8 +375,8 @@ SELECT author_id, count(*) as cnt FROM articles
 	GROUP BY author_id
 	HAVING count(*) > 4 AND sum(author_id) > 30
 	ORDER BY author_id;
-LOG:  distributed statement: SELECT author_id, count(*) AS cnt FROM ONLY articles_10036 WHERE true GROUP BY author_id HAVING ((count(*) > 4) AND (sum(author_id) > 30::numeric))
 LOG:  distributed statement: SELECT author_id, count(*) AS cnt FROM ONLY articles_10037 WHERE true GROUP BY author_id HAVING ((count(*) > 4) AND (sum(author_id) > 30::numeric))
+LOG:  distributed statement: SELECT author_id, count(*) AS cnt FROM ONLY articles_10038 WHERE true GROUP BY author_id HAVING ((count(*) > 4) AND (sum(author_id) > 30::numeric))
  author_id | cnt 
 -----------+-----
          7 |   5
@@ -391,8 +391,8 @@ SELECT author_id, count(*) as cnt FROM articles
 	GROUP BY author_id
 	HAVING count(*) >= 5
 	ORDER BY author_id DESC;
-LOG:  distributed statement: SELECT author_id, count(*) AS cnt FROM ONLY articles_10036 WHERE (author_id > 8) GROUP BY author_id HAVING (count(*) >= 5)
 LOG:  distributed statement: SELECT author_id, count(*) AS cnt FROM ONLY articles_10037 WHERE (author_id > 8) GROUP BY author_id HAVING (count(*) >= 5)
+LOG:  distributed statement: SELECT author_id, count(*) AS cnt FROM ONLY articles_10038 WHERE (author_id > 8) GROUP BY author_id HAVING (count(*) >= 5)
  author_id | cnt 
 -----------+-----
         10 |   5
@@ -405,8 +405,8 @@ SELECT author_id, double_single_int(15) FROM articles
 	WHERE author_id > 5
 	GROUP BY author_id
 	ORDER BY author_id DESC;
-LOG:  distributed statement: SELECT author_id FROM ONLY articles_10036 WHERE (author_id > 5) GROUP BY author_id HAVING true
 LOG:  distributed statement: SELECT author_id FROM ONLY articles_10037 WHERE (author_id > 5) GROUP BY author_id HAVING true
+LOG:  distributed statement: SELECT author_id FROM ONLY articles_10038 WHERE (author_id > 5) GROUP BY author_id HAVING true
  author_id | double_single_int 
 -----------+-------------------
         10 |               225
@@ -423,8 +423,8 @@ SELECT author_id, count(*) as cnt, sum_two_ints(7, author_id::int) as summed_val
 	GROUP BY author_id
 	ORDER BY sum_two_ints(7, author_id::int) DESC
 	LIMIT 3;
-LOG:  distributed statement: SELECT author_id, count(*) AS cnt, author_id AS summed_value FROM ONLY articles_10036 WHERE (author_id < 9) GROUP BY author_id HAVING true
 LOG:  distributed statement: SELECT author_id, count(*) AS cnt, author_id AS summed_value FROM ONLY articles_10037 WHERE (author_id < 9) GROUP BY author_id HAVING true
+LOG:  distributed statement: SELECT author_id, count(*) AS cnt, author_id AS summed_value FROM ONLY articles_10038 WHERE (author_id < 9) GROUP BY author_id HAVING true
  author_id | cnt | summed_value 
 -----------+-----+--------------
          8 |   5 |           15
@@ -438,8 +438,8 @@ SELECT author_id, word_count, count(*) as cnt FROM articles
 	WHERE author_id > 8 AND word_count > 8000
 	GROUP BY author_id, word_count
 	ORDER BY word_count DESC;	
-LOG:  distributed statement: SELECT author_id, word_count, count(*) AS cnt FROM ONLY articles_10036 WHERE ((author_id > 8) AND (word_count > 8000)) GROUP BY word_count, author_id HAVING true
 LOG:  distributed statement: SELECT author_id, word_count, count(*) AS cnt FROM ONLY articles_10037 WHERE ((author_id > 8) AND (word_count > 8000)) GROUP BY word_count, author_id HAVING true
+LOG:  distributed statement: SELECT author_id, word_count, count(*) AS cnt FROM ONLY articles_10038 WHERE ((author_id > 8) AND (word_count > 8000)) GROUP BY word_count, author_id HAVING true
  author_id | word_count | cnt 
 -----------+------------+-----
         10 |      19519 |   1
@@ -455,8 +455,8 @@ LOG:  distributed statement: SELECT author_id, word_count, count(*) AS cnt FROM 
 SELECT author_id, count(*), sum(author_id), avg(author_id), max(author_id) FROM articles
 	GROUP BY author_id
 	ORDER BY author_id;
-LOG:  distributed statement: SELECT author_id FROM ONLY articles_10036 WHERE true
 LOG:  distributed statement: SELECT author_id FROM ONLY articles_10037 WHERE true
+LOG:  distributed statement: SELECT author_id FROM ONLY articles_10038 WHERE true
  author_id | count | sum |          avg           | max 
 -----------+-------+-----+------------------------+-----
          1 |     5 |   5 | 1.00000000000000000000 |   1
