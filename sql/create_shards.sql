@@ -1,142 +1,103 @@
 -- ===================================================================
 -- create test functions and types needed for tests
 -- ===================================================================
+
 CREATE FUNCTION sort_names(cstring, cstring, cstring)
 	RETURNS cstring
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
+
 CREATE FUNCTION create_table_then_fail(cstring, integer)
 	RETURNS bool
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
+
 -- create a custom type...
 CREATE TYPE dummy_type AS (
     i integer
 );
+
 -- ... as well as a function to use as its comparator...
 CREATE FUNCTION dummy_type_function(dummy_type, dummy_type) RETURNS boolean
 AS 'SELECT TRUE;'
 LANGUAGE SQL
 IMMUTABLE
 RETURNS NULL ON NULL INPUT;
+
 -- ... use that function to create a custom operator...
 CREATE OPERATOR = (
     LEFTARG = dummy_type,
     RIGHTARG = dummy_type,
     PROCEDURE = dummy_type_function
 );
+
 -- ... and create a custom operator family for hash indexes...
 CREATE OPERATOR FAMILY dummy_op_family USING hash;
+
 -- ... finally, build an operator class, designate it as the default operator
 -- class for the type, but only specify an equality operator. So the type will
 -- have a default op class but no hash operator in that class.
 CREATE OPERATOR CLASS dummy_op_family_class
 DEFAULT FOR TYPE dummy_type USING hash FAMILY dummy_op_family AS
 OPERATOR 1 =;
+
 -- ===================================================================
 -- test shard creation functionality
 -- ===================================================================
+
 CREATE TABLE table_to_distribute (
 	name text,
 	id bigint PRIMARY KEY,
 	json_data json,
 	test_type_data dummy_type
 );
+
 -- use an index instead of table name
 SELECT master_create_distributed_table('table_to_distribute_pkey', 'id');
-ERROR:  cannot distribute relation: table_to_distribute_pkey
-DETAIL:  Distributed relations must be regular or foreign tables.
+
 -- use a bad column name
 SELECT master_create_distributed_table('table_to_distribute', 'bad_column');
-ERROR:  column "bad_column" of relation "table_to_distribute" does not exist
+
 -- use unsupported partition type
 SELECT master_create_distributed_table('table_to_distribute', 'name', 'r');
-ERROR:  pg_shard only supports hash partitioning
+
+-- use unrecognized partition type
+SELECT master_create_distributed_table('table_to_distribute', 'name', 'z');
+
 -- use a partition column of a type lacking any default operator class
 SELECT master_create_distributed_table('table_to_distribute', 'json_data');
-ERROR:  data type json has no default operator class for specified partition method
-DETAIL:  Partition column types must have a default operator class defined.
+
 -- use a partition column of type lacking the required support function (hash)
 SELECT master_create_distributed_table('table_to_distribute', 'test_type_data');
-ERROR:  could not identify a hash function for type dummy_type
-DETAIL:  Partition column types must have a hash function defined to use hash partitioning.
+
 -- distribute table and inspect side effects
 SELECT master_create_distributed_table('table_to_distribute', 'name');
- master_create_distributed_table 
----------------------------------
- 
-(1 row)
-
 SELECT partition_method, key FROM pgs_distribution_metadata.partition
 	WHERE relation_id = 'table_to_distribute'::regclass;
- partition_method | key  
-------------------+------
- h                | name
-(1 row)
 
 -- use a bad shard count
 SELECT master_create_worker_shards('table_to_distribute', 0, 1);
-ERROR:  shardCount must be positive
+
 -- use a bad replication factor
 SELECT master_create_worker_shards('table_to_distribute', 16, 0);
-ERROR:  replicationFactor must be positive
+
 -- use a replication factor higher than shard count
 SELECT master_create_worker_shards('table_to_distribute', 16, 3);
-ERROR:  replicationFactor (3) exceeds number of worker nodes (2)
-HINT:  Add more worker nodes or try again with a lower replication factor.
+
 \set VERBOSITY terse
+
 -- use a replication factor higher than healthy node count
 -- this will create a shard on the healthy node but fail right after
 SELECT master_create_worker_shards('table_to_distribute', 16, 2);
-WARNING:  Connection failed to adeadhost:5432
-WARNING:  could not create shard on "adeadhost:5432"
-ERROR:  could not satisfy specified replication factor
+
 -- finally, create shards and inspect metadata
 SELECT master_create_worker_shards('table_to_distribute', 16, 1);
-WARNING:  Connection failed to adeadhost:5432
-WARNING:  could not create shard on "adeadhost:5432"
-WARNING:  Connection failed to adeadhost:5432
-WARNING:  could not create shard on "adeadhost:5432"
-WARNING:  Connection failed to adeadhost:5432
-WARNING:  could not create shard on "adeadhost:5432"
-WARNING:  Connection failed to adeadhost:5432
-WARNING:  could not create shard on "adeadhost:5432"
-WARNING:  Connection failed to adeadhost:5432
-WARNING:  could not create shard on "adeadhost:5432"
-WARNING:  Connection failed to adeadhost:5432
-WARNING:  could not create shard on "adeadhost:5432"
-WARNING:  Connection failed to adeadhost:5432
-WARNING:  could not create shard on "adeadhost:5432"
-WARNING:  Connection failed to adeadhost:5432
-WARNING:  could not create shard on "adeadhost:5432"
- master_create_worker_shards 
------------------------------
- 
-(1 row)
 
 \set VERBOSITY default
+
 SELECT storage, min_value, max_value FROM pgs_distribution_metadata.shard
 	WHERE relation_id = 'table_to_distribute'::regclass
 	ORDER BY (min_value COLLATE "C") ASC;
- storage |  min_value  |  max_value  
----------+-------------+-------------
- t       | -1073741828 | -805306374
- t       | -1342177283 | -1073741829
- t       | -1610612738 | -1342177284
- t       | -1879048193 | -1610612739
- t       | -2147483648 | -1879048194
- t       | -268435463  | -9
- t       | -536870918  | -268435464
- t       | -8          | 268435446
- t       | -805306373  | -536870919
- t       | 1073741812  | 1342177266
- t       | 1342177267  | 1610612721
- t       | 1610612722  | 1879048176
- t       | 1879048177  | 2147483647
- t       | 268435447   | 536870901
- t       | 536870902   | 805306356
- t       | 805306357   | 1073741811
-(16 rows)
 
 -- all shards should be on a single node
 WITH unique_nodes AS (
@@ -145,46 +106,27 @@ WITH unique_nodes AS (
 		WHERE shard_placement.shard_id = shard.id
 	)
 SELECT COUNT(*) FROM unique_nodes;
- count 
--------
-     1
-(1 row)
 
 SELECT COUNT(*) FROM pg_class WHERE relname LIKE 'table_to_distribute%' AND relkind = 'r';
- count 
--------
-    18
-(1 row)
 
 -- try to create them again
 SELECT master_create_worker_shards('table_to_distribute', 16, 1);
-ERROR:  table "table_to_distribute" has already had shards created for it
+
 -- test list sorting
 SELECT sort_names('sumedh', 'jason', 'ozgun');
- sort_names 
-------------
- jason     +
- ozgun     +
- sumedh    +
- 
-(1 row)
+
+-- squelch WARNINGs that contain worker_port
+SET client_min_messages TO ERROR;
 
 -- test remote command execution
-SELECT create_table_then_fail('localhost', $PGPORT);
-WARNING:  Bad result from localhost:$PGPORT
-DETAIL:  Remote message: syntax error at or near "THIS"
- create_table_then_fail 
-------------------------
- f
-(1 row)
+SELECT create_table_then_fail('localhost', :worker_port);
+
+SET client_min_messages TO DEFAULT;
 
 SELECT COUNT(*) FROM pg_class WHERE relname LIKE 'throwaway%' AND relkind = 'r';
- count 
--------
-     0
-(1 row)
 
 \set VERBOSITY terse
+
 -- test foreign table creation
 CREATE FOREIGN TABLE foreign_table_to_distribute
 (
@@ -192,57 +134,14 @@ CREATE FOREIGN TABLE foreign_table_to_distribute
 	id bigint
 )
 SERVER fake_fdw_server;
-SELECT master_create_distributed_table('foreign_table_to_distribute', 'id');
- master_create_distributed_table 
----------------------------------
- 
-(1 row)
 
+SELECT master_create_distributed_table('foreign_table_to_distribute', 'id');
 SELECT master_create_worker_shards('foreign_table_to_distribute', 16, 1);
-WARNING:  Connection failed to adeadhost:5432
-WARNING:  could not create shard on "adeadhost:5432"
-WARNING:  Connection failed to adeadhost:5432
-WARNING:  could not create shard on "adeadhost:5432"
-WARNING:  Connection failed to adeadhost:5432
-WARNING:  could not create shard on "adeadhost:5432"
-WARNING:  Connection failed to adeadhost:5432
-WARNING:  could not create shard on "adeadhost:5432"
-WARNING:  Connection failed to adeadhost:5432
-WARNING:  could not create shard on "adeadhost:5432"
-WARNING:  Connection failed to adeadhost:5432
-WARNING:  could not create shard on "adeadhost:5432"
-WARNING:  Connection failed to adeadhost:5432
-WARNING:  could not create shard on "adeadhost:5432"
-WARNING:  Connection failed to adeadhost:5432
-WARNING:  could not create shard on "adeadhost:5432"
- master_create_worker_shards 
------------------------------
- 
-(1 row)
 
 \set VERBOSITY default
 SELECT storage, min_value, max_value FROM pgs_distribution_metadata.shard
 	WHERE relation_id = 'foreign_table_to_distribute'::regclass
 	ORDER BY (min_value COLLATE "C") ASC;
- storage |  min_value  |  max_value  
----------+-------------+-------------
- f       | -1073741828 | -805306374
- f       | -1342177283 | -1073741829
- f       | -1610612738 | -1342177284
- f       | -1879048193 | -1610612739
- f       | -2147483648 | -1879048194
- f       | -268435463  | -9
- f       | -536870918  | -268435464
- f       | -8          | 268435446
- f       | -805306373  | -536870919
- f       | 1073741812  | 1342177266
- f       | 1342177267  | 1610612721
- f       | 1610612722  | 1879048176
- f       | 1879048177  | 2147483647
- f       | 268435447   | 536870901
- f       | 536870902   | 805306356
- f       | 805306357   | 1073741811
-(16 rows)
 
 -- cleanup foreign table, related shards and shard placements
 DELETE FROM pgs_distribution_metadata.shard_placement

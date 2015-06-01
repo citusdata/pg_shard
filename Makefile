@@ -28,20 +28,6 @@ EXTENSION = pg_shard
 DATA = pg_shard--1.2.sql pg_shard--1.0--1.1.sql pg_shard--1.1--1.2.sql
 SCRIPTS = bin/copy_to_distributed_table
 
-# Default to 5432 if PGPORT is undefined. Replace placeholders in our tests
-# with actual port number in order to anticipate correct output during tests.
-PGPORT ?= 5432
-sql/%: sql/%.tmpl
-	sed -e 's/$$PGPORT/${PGPORT}/g' $^ > $@
-
-expected/%: expected/%.tmpl
-	sed -e 's/$$PGPORT/${PGPORT}/g' $^ > $@
-
-# REGRESS_PREP is a make target executed by the PGXS build system before any
-# tests are run. We use it to trigger variable interpolation in our tests.
-REGRESS_PREP = sql/connection.sql expected/connection.out sql/create_shards.sql \
-			   expected/create_shards.out sql/repair_shards.sql \
-			   expected/repair_shards.out  expected/modifications.out
 REGRESS = init connection distribution_metadata extend_ddl_commands \
 		  generate_ddl_commands create_shards prune_shard_list repair_shards \
 		  modifications queries utilities citus_metadata_sync create_insert_proxy

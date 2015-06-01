@@ -1647,9 +1647,17 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 
 		if (zeroShardQuery)
 		{
-			/* if zero shards are involved, let query hit local table */
+			/* if zero shards are involved, let non-INSERTs hit local table */
 			Plan *originalPlan = distributedPlan->originalPlan;
 			plannedStatement->planTree = originalPlan;
+
+			if (plannedStatement->commandType == CMD_INSERT)
+			{
+				ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+								errmsg("could not find destination shard for new row"),
+								errdetail("Target relation does not contain any shards "
+										  "capable of storing the new row.")));
+			}
 
 			NextExecutorStartHook(queryDesc, eflags);
 		}
