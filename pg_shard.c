@@ -324,7 +324,7 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			 */
 			plannedStatement = PlanSequentialScan(localQuery, cursorOptions, boundParams);
 
-			/* construct a CreateStmt to clone the existing table */
+			/* construct a CreateStmt depending on safeToPushDownAggregate */
 			createTemporaryTableStmt = CreateTemporaryTable(localQuery, distributedQuery,
 															safeToPushDownAggregate);
 		}
@@ -853,9 +853,9 @@ BuildDistributedQuery(Query *query, List *remoteRestrictList, List *localRestric
 		filterQuery->groupClause = list_copy(query->groupClause);
 
 		/*
-		 * Note that both havingQual is in implicitly-ANDed-list form
+		 * Note that havingQual is in implicitly-ANDed-list form
 		 * at this point, even though they are declared as Node.
-		*/
+		 */
 		filterQuery->havingQual = (Node *) make_ands_explicit((List *) query->havingQual);
 	}
 
@@ -870,7 +870,7 @@ BuildDistributedQuery(Query *query, List *remoteRestrictList, List *localRestric
 
 /*
  * BuildDistributedTargetList returns a list of TargetEntry for the distributed query.
- * Returned list depends on whethe aggregates are pushed down to the workers or not.
+ * Returned list depends on whether aggregates are pushed down to the workers or not.
  * If aggregations are pushed down, do not replace AggRefs with Vars in the target list.
  * Otherwise, replace all target entries with Vars. Also, when aggregates are pushed
  * down, do not fetch HAVING columns, since they are also pushed down.
@@ -880,7 +880,6 @@ BuildDistributedTargetList(Query *query, List *localRestrictList,
 						   bool safeToPushDownAggregate)
 {
 	List *targetList = NIL;
-
 
 	if (safeToPushDownAggregate)
 	{
@@ -931,10 +930,10 @@ BuildAggregatedDistributedTargetList(Query *query, List *localRestrictList)
 		}
 		else
 		{
+			ListCell *targetVarListCell = NULL;
 			List *targetVarList = pull_var_clause((Node *) targetExpression,
 												  aggregateBehavior,
 												  placeHolderBehavior);
-			ListCell *targetVarListCell = NULL;
 
 			foreach(targetVarListCell, targetVarList)
 			{
@@ -946,26 +945,30 @@ BuildAggregatedDistributedTargetList(Query *query, List *localRestrictList)
 												 targetListEntry->resjunk);
 
 				newTargetEntry->ressortgroupref = targetListEntry->ressortgroupref;
-
-				/*
-				 *  Sort columns which does not appear in the final
-				 *  target list must be pulled from the worker nodes.
-				 */
-				if (targetListEntry->resjunk)
-				{
-					bool sortTargetEntry = SortTargetEntry(sortClause, newTargetEntry);
-
-					if (sortTargetEntry)
-					{
-						newTargetEntry->resjunk = false;
-					}
-					else
-					{
-						newTargetEntry->resjunk = true;
-					}
-				}
-
 				newTargetList = lappend(newTargetList, newTargetEntry);
+			}
+		}
+	}
+
+	/*
+	 *  Sort columns which does not appear in the final
+	 *  target list must be pulled from the worker nodes.
+	 */
+	foreach(targetListCell, newTargetList)
+	{
+		TargetEntry *targetListEntry = (TargetEntry *) lfirst(targetListCell);
+
+		if (targetListEntry->resjunk)
+		{
+			bool sortTargetEntry = SortTargetEntry(sortClause, targetListEntry);
+
+			if (sortTargetEntry)
+			{
+				targetListEntry->resjunk = false;
+			}
+			else
+			{
+				targetListEntry->resjunk = true;
 			}
 		}
 	}
@@ -1400,7 +1403,7 @@ TargetEntryList(List *expressionList)
 
 /*
  * TargetEntryVarList get a target list and creates a new target list entry
- * whose elements are Var corresponding elements of the input target list.
+ * whose elements are Vars, which are pulled from the input target list.
  */
 static List *
 TargetEntryVarList(List *targetEntryList)
@@ -1443,7 +1446,7 @@ CreateTemporaryTable(Query *localQuery, Query *distributedQuery, bool pushDownAg
 
 /*
  * CreateTemporaryTableStmtFromQuery returns a CreateStmt node which will create
- * a temporary table whose columns are equivalent to the target list.
+ * a temporary table whose columns are Vars which are pulled from the target list.
  */
 static CreateStmt *
 CreateTemporaryTableStmtFromQuery(Query *query)

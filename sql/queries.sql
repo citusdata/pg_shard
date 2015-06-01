@@ -204,10 +204,16 @@ SELECT author_id FROM articles
 	GROUP BY author_id
 	ORDER BY author_id;
 
--- a query with GROUP BY on partition column where ORDER BY column must be pulled
-SELECT count(*) FROM articles
-	GROUP BY author_id
-	ORDER BY author_id;
+-- a query with GROUP BY on partition column where ORDER BY column(s) must be pulled
+SELECT 
+	id, count(*) as cnt FROM articles
+WHERE
+	author_id  > 0
+GROUP BY 
+	author_id, id
+ORDER BY 
+	max(word_count), author_id  DESC 
+LIMIT 5;
 
 -- an aggregate query with GROUP BY on partition column
 SELECT author_id, count(*) FROM articles

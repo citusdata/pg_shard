@@ -307,25 +307,26 @@ LOG:  distributed statement: SELECT author_id FROM ONLY articles_10037 WHERE tru
         10
 (10 rows)
 
--- a query with GROUP BY on partition column where ORDER BY column must be pulled
-SELECT count(*) FROM articles
-	GROUP BY author_id
-	ORDER BY author_id;
-LOG:  distributed statement: SELECT count(*) AS count, author_id FROM ONLY articles_10036 WHERE true GROUP BY author_id HAVING true
-LOG:  distributed statement: SELECT count(*) AS count, author_id FROM ONLY articles_10037 WHERE true GROUP BY author_id HAVING true
- count 
--------
-     5
-     5
-     5
-     5
-     5
-     5
-     5
-     5
-     5
-     5
-(10 rows)
+-- a query with GROUP BY on partition column where ORDER BY column(s) must be pulled
+SELECT 
+	id, count(*) as cnt FROM articles
+WHERE
+	author_id  > 0
+GROUP BY 
+	author_id, id
+ORDER BY 
+	max(word_count), author_id  DESC 
+LIMIT 5;
+LOG:  distributed statement: SELECT id, count(*) AS cnt, max(word_count), author_id FROM ONLY articles_10036 WHERE (author_id > 0) GROUP BY author_id, id HAVING true
+LOG:  distributed statement: SELECT id, count(*) AS cnt, max(word_count), author_id FROM ONLY articles_10037 WHERE (author_id > 0) GROUP BY author_id, id HAVING true
+ id | cnt 
+----+-----
+ 16 |   1
+  9 |   1
+ 45 |   1
+ 18 |   1
+ 11 |   1
+(5 rows)
 
 -- an aggregate query with GROUP BY on partition column
 SELECT author_id, count(*) FROM articles
