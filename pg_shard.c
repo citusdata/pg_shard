@@ -7,7 +7,7 @@
  *
  * Copyright (c) 2014-2015, Citus Data, Inc.
  *
- *****-------------------------------------------------------------------------
+ *-------------------------------------------------------------------------
  */
 
 #include "postgres.h"
@@ -114,7 +114,7 @@ static bool SortTargetEntry(List *sortClause, TargetEntry *targetEntry);
 static Query * BuildLocalQuery(Query *query, List *localRestrictList,
 							   bool safeToPushDownAggregate);
 static Query * RemoveAggregates(Query *aggregatedQuery);
-static Node * VarNodeMutator(Node *originalNode, AttrNumber *columnId);
+static Node * AttributeNumberMutator(Node *originalNode, AttrNumber *columnId);
 static bool ContainsAggref(Node *originalNode);
 static PlannedStmt * PlanSequentialScan(Query *query, int cursorOptions,
 										ParamListInfo boundParams);
@@ -124,8 +124,8 @@ static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
 static List * QueryFromList(List *rangeTableList);
 static List * TargetEntryList(List *expressionList);
 static List * TargetEntryVarList(List *targetEntryList);
-static CreateStmt * CreateTemporaryTable(Query *localQuery, Query *distributedQuery,
-										 bool pushDownAggregates);
+static CreateStmt * CreateTemporaryTableStmt(Query *localQuery, Query *distributedQuery,
+											 bool pushDownAggregates);
 static CreateStmt * CreateTemporaryTableStmtFromQuery(Query *query);
 static CreateStmt * CreateTemporaryTableLikeStmt(Oid sourceRelationId);
 CreateStmt * CreateStatement(RangeVar *relation, List *columnDefinitionList);
@@ -253,7 +253,6 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 		List *queryShardList = NIL;
 		bool selectFromMultipleShards = false;
 		CreateStmt *createTemporaryTableStmt = NULL;
-		Oid distributedTableId = InvalidOid;
 
 		/* call standard planner first to have Query transformations performed */
 		plannedStatement = standard_planner(distributedQuery, cursorOptions,
@@ -285,12 +284,12 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			List *remoteRestrictList = NIL;
 			List *localRestrictList = NIL;
 			bool safeToPushDownAggregate = false;
+			Oid distributedTableId = ExtractFirstDistributedTableId(distributedQuery);
 
 			/* partition restrictions into remote and local lists */
 			ClassifyRestrictions(queryRestrictList, &remoteRestrictList,
 								 &localRestrictList);
 
-			distributedTableId = ExtractFirstDistributedTableId(distributedQuery);
 			safeToPushDownAggregate = SafeToPushDownAggregate(distributedQuery,
 															  distributedTableId);
 
@@ -325,8 +324,9 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			plannedStatement = PlanSequentialScan(localQuery, cursorOptions, boundParams);
 
 			/* construct a CreateStmt depending on safeToPushDownAggregate */
-			createTemporaryTableStmt = CreateTemporaryTable(localQuery, distributedQuery,
-															safeToPushDownAggregate);
+			createTemporaryTableStmt = CreateTemporaryTableStmt(localQuery,
+																distributedQuery,
+																safeToPushDownAggregate);
 		}
 
 		distributedPlan = BuildDistributedPlan(distributedQuery, queryShardList);
@@ -381,15 +381,13 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 static bool
 SafeToPushDownAggregate(Query *query, Oid distributedTableId)
 {
-	List *groupClauseList = query->groupClause;
-	List *targetList = query->targetList;
 	bool safeToPushDownAggregates = false;
-	Var *partitionColumn = PartitionColumn(distributedTableId);
+	List *targetList = query->targetList;
 	char *finalAttributeName = get_attname(distributedTableId, list_length(targetList));
 
 	/*
 	 * standard_planner will be called on localQuery at PlanSequentialScan function.
-	 * In a sequential scan, there is an implicit check that the total number of unique
+	 * In a sequential scan, there is an implicit check that the total number of
 	 * targetList elements cannot be greater than the total number of columns in the table.
 	 * Thus, it is not safe to push down aggregates for such cases.
 	 */
@@ -399,6 +397,9 @@ SafeToPushDownAggregate(Query *query, Oid distributedTableId)
 	}
 	else
 	{
+		Var *partitionColumn = PartitionColumn(distributedTableId);
+		List *groupClauseList = query->groupClause;
+
 		safeToPushDownAggregates = GroupedByColumn(groupClauseList, targetList,
 												   partitionColumn);
 	}
@@ -1123,9 +1124,14 @@ RemoveAggregates(Query *aggregatedQuery)
 											 targetListEntry->resjunk);
 		}
 
-		/* update column attribute numbers */
-		newTargetEntry->expr = (Expr *) VarNodeMutator((Node *) newTargetEntry->expr,
-													   &columnId);
+		/*
+		 * Since we update target list elements which are AggRefs, it is necessary
+		 * to update column attribute numbers of the new target entries with respect
+		 * to the order they exist currently.
+		 */
+		newTargetEntry->expr =
+			(Expr *) AttributeNumberMutator((Node *) newTargetEntry->expr,
+											&columnId);
 
 		/* ressortgroupref and resjunk must be updated for ORDER BY columns */
 		newTargetEntry->ressortgroupref = targetListEntry->ressortgroupref;
@@ -1147,12 +1153,13 @@ RemoveAggregates(Query *aggregatedQuery)
 
 
 /*
- * VarNodeMutator walks over the original expression,  and recurses into
- * the expression mutator function for all other expression types to update the
- * varattno of the Vars in the expression.
+ * AttributeNumberMutator walks over the original target entry expression, and
+ * creates the new expression tree to execute on master node. The function updates the
+ * varattno of the Var expressions and recurses into the expression mutator function
+ * for all other expression types.
  */
 static Node *
-VarNodeMutator(Node *originalNode, AttrNumber *columnId)
+AttributeNumberMutator(Node *originalNode, AttrNumber *columnId)
 {
 	Node *newNode = NULL;
 	if (originalNode == NULL)
@@ -1172,7 +1179,7 @@ VarNodeMutator(Node *originalNode, AttrNumber *columnId)
 	}
 	else
 	{
-		newNode = expression_tree_mutator(originalNode, VarNodeMutator,
+		newNode = expression_tree_mutator(originalNode, AttributeNumberMutator,
 										  (void *) columnId);
 	}
 
@@ -1426,7 +1433,8 @@ TargetEntryVarList(List *targetEntryList)
  * aggregates in the localQuery can be pushed down to the workers or not.
  */
 static CreateStmt *
-CreateTemporaryTable(Query *localQuery, Query *distributedQuery, bool pushDownAggregates)
+CreateTemporaryTableStmt(Query *localQuery, Query *distributedQuery,
+						 bool pushDownAggregates)
 {
 	CreateStmt *createStmt = NULL;
 	Oid distributedTableId = ExtractFirstDistributedTableId(distributedQuery);
