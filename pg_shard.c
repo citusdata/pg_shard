@@ -115,7 +115,6 @@ static Query * BuildLocalQuery(Query *query, List *localRestrictList,
 							   bool safeToPushDownAggregate);
 static Query * RemoveAggregates(Query *aggregatedQuery);
 static Node * AttributeNumberMutator(Node *originalNode, AttrNumber *columnId);
-static bool ContainsAggref(Node *originalNode);
 static PlannedStmt * PlanSequentialScan(Query *query, int cursorOptions,
 										ParamListInfo boundParams);
 static List * QueryRestrictList(Query *query);
@@ -123,7 +122,6 @@ static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
 static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
 static List * QueryFromList(List *rangeTableList);
 static List * TargetEntryList(List *expressionList);
-static List * TargetEntryVarList(List *targetEntryList);
 static CreateStmt * CreateTemporaryTableStmt(Query *localQuery, Query *distributedQuery,
 											 bool pushDownAggregates);
 static CreateStmt * CreateTemporaryTableStmtFromQuery(Query *query);
@@ -309,7 +307,12 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			 */
 			if (safeToPushDownAggregate)
 			{
-				distributedPlanTargetList = TargetEntryVarList(localQuery->targetList);
+				PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
+				PVCPlaceHolderBehavior placeHolderBehavior = PVC_RECURSE_PLACEHOLDERS;
+
+				distributedPlanTargetList = flatten_tlist(localQuery->targetList,
+														  aggregateBehavior,
+														  placeHolderBehavior);
 			}
 			else
 			{
@@ -924,7 +927,7 @@ BuildAggregatedDistributedTargetList(Query *query, List *localRestrictList)
 		Expr *targetExpression = (Expr *) targetListEntry->expr;
 		TargetEntry *newTargetEntry = NULL;
 
-		if (ContainsAggref((Node *) targetExpression))
+		if (contain_agg_clause((Node *) targetExpression))
 		{
 			newTargetEntry = copyObject(targetListEntry);
 			newTargetList = lappend(newTargetList, newTargetEntry);
@@ -1114,7 +1117,7 @@ RemoveAggregates(Query *aggregatedQuery)
 		TargetEntry *newTargetEntry = copyObject(targetListEntry);
 
 		/* update target list entries which include Aggrefs */
-		if (ContainsAggref((Node *) newTargetEntry->expr))
+		if (contain_agg_clause((Node *) newTargetEntry->expr))
 		{
 			Var *targetVar = makeVarFromTargetEntry(masterTableId, targetListEntry);
 
@@ -1184,35 +1187,6 @@ AttributeNumberMutator(Node *originalNode, AttrNumber *columnId)
 	}
 
 	return newNode;
-}
-
-
-/*
- * ContainsAggref returns true if originalNode includes any Aggrefs.
- * The function walks over the original expression, and recurses into
- * all nodes in the input node.
- */
-static bool
-ContainsAggref(Node *originalNode)
-{
-	bool contains = false;
-
-	if (originalNode == NULL)
-	{
-		return false;
-	}
-
-	if (IsA(originalNode, Aggref))
-	{
-		contains = true;
-	}
-	else
-	{
-		contains = expression_tree_walker(originalNode, ContainsAggref,
-										  (void *) NULL);
-	}
-
-	return contains;
 }
 
 
@@ -1405,26 +1379,6 @@ TargetEntryList(List *expressionList)
 	}
 
 	return targetEntryList;
-}
-
-
-/*
- * TargetEntryVarList get a target list and creates a new target list entry
- * whose elements are Vars, which are pulled from the input target list.
- */
-static List *
-TargetEntryVarList(List *targetEntryList)
-{
-	PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
-	PVCPlaceHolderBehavior placeHolderBehavior = PVC_RECURSE_PLACEHOLDERS;
-	List *projectColumnList = NIL;
-	List *newTargetEntryList = NIL;
-
-	projectColumnList = pull_var_clause((Node *) targetEntryList,
-										aggregateBehavior, placeHolderBehavior);
-	newTargetEntryList = TargetEntryList(projectColumnList);
-
-	return newTargetEntryList;
 }
 
 
