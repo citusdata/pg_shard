@@ -104,8 +104,6 @@ static void ClassifyRestrictions(List *queryRestrictList, List **remoteRestrictL
 static Query * BuildDistributedQuery(Query *query, List *remoteRestrictList,
 									 List *localRestrictList,
 									 bool safeToPushDownAggregate);
-static List * BuildDistributedTargetList(Query *query, List *localRestrictList,
-										 bool safeToPushDownAggregate);
 static List * BuildAggregatedDistributedTargetList(Query *query,
 												   List *localRestrictList);
 static List * BuildNonAggregatedDistributedTargetList(Query *query,
@@ -837,7 +835,6 @@ BuildDistributedQuery(Query *query, List *remoteRestrictList, List *localRestric
 					  bool safeToPushDownAggregate)
 {
 	List *rangeTableList = NIL;
-	List *targetList = NIL;
 	FromExpr *fromExpr = NULL;
 	Query *filterQuery = makeNode(Query);
 
@@ -849,12 +846,12 @@ BuildDistributedQuery(Query *query, List *remoteRestrictList, List *localRestric
 	fromExpr->quals = (Node *) make_ands_explicit((List *) remoteRestrictList);
 	fromExpr->fromlist = QueryFromList(rangeTableList);
 
-	targetList = BuildDistributedTargetList(query, localRestrictList,
-											safeToPushDownAggregate);
 	if (safeToPushDownAggregate)
 	{
 		filterQuery->hasAggs = true;
 		filterQuery->groupClause = list_copy(query->groupClause);
+		filterQuery->targetList =
+			BuildAggregatedDistributedTargetList(query, localRestrictList);
 
 		/*
 		 * Note that havingQual is in implicitly-ANDed-list form
@@ -862,39 +859,17 @@ BuildDistributedQuery(Query *query, List *remoteRestrictList, List *localRestric
 		 */
 		filterQuery->havingQual = (Node *) make_ands_explicit((List *) query->havingQual);
 	}
+	else
+	{
+		filterQuery->targetList =
+			BuildNonAggregatedDistributedTargetList(query, localRestrictList);
+	}
 
 	filterQuery->commandType = CMD_SELECT;
 	filterQuery->rtable = rangeTableList;
 	filterQuery->jointree = fromExpr;
-	filterQuery->targetList = targetList;
 
 	return filterQuery;
-}
-
-
-/*
- * BuildDistributedTargetList returns a list of TargetEntry for the distributed query.
- * Returned list depends on whether aggregates are pushed down to the workers or not.
- * If aggregations are pushed down, do not replace AggRefs with Vars in the target list.
- * Otherwise, replace all target entries with Vars. Also, when aggregates are pushed
- * down, do not fetch HAVING columns, since they are also pushed down.
- */
-static List *
-BuildDistributedTargetList(Query *query, List *localRestrictList,
-						   bool safeToPushDownAggregate)
-{
-	List *targetList = NIL;
-
-	if (safeToPushDownAggregate)
-	{
-		targetList = BuildAggregatedDistributedTargetList(query, localRestrictList);
-	}
-	else
-	{
-		targetList = BuildNonAggregatedDistributedTargetList(query, localRestrictList);
-	}
-
-	return targetList;
 }
 
 
