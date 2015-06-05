@@ -384,6 +384,7 @@ SafeToPushDownAggregate(Query *query, Oid distributedTableId)
 {
 	bool safeToPushDownAggregates = false;
 	List *targetList = query->targetList;
+	List *groupClauseList = query->groupClause;
 	char *finalAttributeName = get_attname(distributedTableId, list_length(targetList));
 
 	/*
@@ -391,15 +392,16 @@ SafeToPushDownAggregate(Query *query, Oid distributedTableId)
 	 * In a sequential scan, there is an implicit check that the total number of
 	 * targetList elements cannot be greater than the total number of columns in the table.
 	 * Thus, it is not safe to push down aggregates for such cases.
+	 *
+	 * Also, if GROUP BY does not present in the query, we cannot push down.
 	 */
-	if (finalAttributeName == NULL)
+	if (finalAttributeName == NULL || groupClauseList == NIL)
 	{
 		safeToPushDownAggregates = false;
 	}
 	else
 	{
 		Var *partitionColumn = PartitionColumn(distributedTableId);
-		List *groupClauseList = query->groupClause;
 
 		safeToPushDownAggregates = GroupedByColumn(groupClauseList, targetList,
 												   partitionColumn);
