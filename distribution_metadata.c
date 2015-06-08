@@ -370,24 +370,36 @@ PartitionType(Oid distributedTableId)
 
 
 /*
- * IsDistributedTable simply returns whether the specified table is distributed.
+ * IsDistributedTable returns whether the specified table is distributed. It
+ * returns false if the input is InvalidOid.
  */
 bool
 IsDistributedTable(Oid tableId)
 {
-	Oid tableNamespaceOid = get_rel_namespace(tableId);
 	Oid metadataNamespaceOid = get_namespace_oid("pgs_distribution_metadata", false);
-	Oid partitionMetadataTableOid = get_relname_relid("partition", metadataNamespaceOid);
+	Oid tableNamespaceOid = InvalidOid;
+	Oid partitionMetadataTableOid = InvalidOid;
 	bool isDistributedTable = false;
 	Oid argTypes[] = { OIDOID };
 	Datum argValues[] = { ObjectIdGetDatum(tableId) };
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
 
+	/* short-circuit if the input is invalid */
+	if (tableId == InvalidOid)
+	{
+		return false;
+	}
+
 	/*
 	 * The query below hits the partition metadata table, so if we don't detect
 	 * that and short-circuit, we'll get infinite recursion in the planner.
+	 *
+	 * Within CitusDB, a view rewrite the query to reference CitusDB catalogs,
+	 * so we also need to catch whether the table exists in a system namespace.
 	 */
+	tableNamespaceOid = get_rel_namespace(tableId);
+	partitionMetadataTableOid = get_relname_relid("partition", metadataNamespaceOid);
 	if (IsSystemNamespace(tableNamespaceOid) || tableId == partitionMetadataTableOid)
 	{
 		return false;

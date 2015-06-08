@@ -73,7 +73,7 @@ BEGIN
 						 partkey)
 			VALUES      (NEW.relation_id,
 						 NEW.partition_method,
-						 column_name_to_column(NEW.relation_id, NEW.key));
+						 column_name_to_column(NEW.relation_id::oid, NEW.key));
 
 			RETURN NEW;
 		END
