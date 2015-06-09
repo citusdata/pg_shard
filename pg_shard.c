@@ -123,9 +123,14 @@ static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
 static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
 static List * QueryFromList(List *rangeTableList);
 static List * TargetEntryList(List *expressionList);
-static CreateStmt * CreateTemporaryTableStmt(Query *localQuery, Query *distributedQuery,
+static CreateStmt * CreateTemporaryTableStmt(Query *distributedQuery,
 											 bool pushDownAggregates);
-static CreateStmt * CreateTemporaryTableStmtFromQuery(Query *query);
+static CreateStmt * BuildCreateStatement(StringInfo masterTableName,
+										 List *masterTargetList,
+										 List *masterColumnNameList);
+static List * ValueToStringList(List *valueList);
+static List * MasterTargetList(List *workerTargetList);
+static List * ColumnDefinitionList(List *columnNameList, List *columnTypeList);
 static CreateStmt * CreateTemporaryTableLikeStmt(Oid sourceRelationId);
 CreateStmt * CreateStatement(RangeVar *relation, List *columnDefinitionList);
 static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalList);
@@ -334,8 +339,7 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			plannedStatement = PlanSequentialScan(localQuery, cursorOptions, boundParams);
 
 			/* construct a CreateStmt depending on safeToPushDownAggregate */
-			createTemporaryTableStmt = CreateTemporaryTableStmt(localQuery,
-																distributedQuery,
+			createTemporaryTableStmt = CreateTemporaryTableStmt(distributedQuery,
 																aggregatesPushedDown);
 		}
 
@@ -959,7 +963,7 @@ BuildAggregatedDistributedTargetList(Query *query, List *localRestrictList)
 
 			/* this is equivalent of pulling Vars from non-aggregated expressions */
 			targetVarList = pull_var_clause((Node *) targetExpression, aggregateBehavior,
-										    placeHolderBehavior);
+											placeHolderBehavior);
 
 			foreach(targetVarListCell, targetVarList)
 			{
@@ -1407,14 +1411,24 @@ TargetEntryList(List *expressionList)
  * aggregates in the localQuery can be pushed down to the workers or not.
  */
 static CreateStmt *
-CreateTemporaryTableStmt(Query *localQuery, Query *distributedQuery,
-						 bool pushDownAggregates)
+CreateTemporaryTableStmt(Query *distributedQuery, bool pushDownAggregates)
 {
 	CreateStmt *createStmt = NULL;
 
 	if (pushDownAggregates)
 	{
-		createStmt = CreateTemporaryTableStmtFromQuery(localQuery);
+		List *workerTargetList = distributedQuery->targetList;
+		List *rangeTableList = distributedQuery->rtable;
+		RangeTblEntry *rangeTableEntry = (RangeTblEntry *) linitial(rangeTableList);
+		List *columnNameValueList = rangeTableEntry->eref->colnames;
+		List *columnNameList = ValueToStringList(columnNameValueList);
+		List *targetList = MasterTargetList(workerTargetList);
+		Oid localTableId = rangeTableEntry->relid;
+		char *localTableNameStr = get_rel_name(localTableId);
+		StringInfo localTableName = makeStringInfo();
+		appendStringInfo(localTableName, "%s", localTableNameStr);
+
+		createStmt = BuildCreateStatement(localTableName, targetList, columnNameList);
 	}
 	else
 	{
@@ -1428,67 +1442,154 @@ CreateTemporaryTableStmt(Query *localQuery, Query *distributedQuery,
 
 
 /*
- * CreateTemporaryTableStmtFromQuery returns a CreateStmt node which will create
- * a temporary table whose columns are Vars which are pulled from the target list.
+ * ValueToStringList walks over the given list of string value types, converts
+ * value types to cstrings, and adds these cstrings into a new list.
  */
-static CreateStmt *
-CreateTemporaryTableStmtFromQuery(Query *query)
+static List *
+ValueToStringList(List *valueList)
 {
-	unsigned int columnCount = 0;
-	char *temporaryTableColumnPrefix = "temp_column_";
-	static unsigned long temporaryTableId = 0;
-	List *columnDefinitionList = NIL;
-	CreateStmt *createStatement = NULL;
-	StringInfo tableName = NULL;
-	RangeVar *relation = NULL;
-	PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
-	PVCPlaceHolderBehavior placeHolderBehavior = PVC_RECURSE_PLACEHOLDERS;
-	List *projectColumnList = NIL;
-	ListCell *projectColumnListCell = NULL;
+	List *stringList = NIL;
+	ListCell *valueCell = NULL;
 
-	/* create a unique name for the table */
-	tableName = makeStringInfo();
-	appendStringInfo(tableName, "%s_%d_%lu", TEMPORARY_TABLE_PREFIX, MyProcPid,
-					 temporaryTableId);
-	temporaryTableId++;
-
-	projectColumnList = pull_var_clause((Node *) query->targetList, aggregateBehavior,
-										placeHolderBehavior);
-
-	foreach(projectColumnListCell, projectColumnList)
+	foreach(valueCell, valueList)
 	{
-		Var *projectColumn = (Var *) lfirst(projectColumnListCell);
-		ColumnDef *columnDefinition = makeNode(ColumnDef);
-		StringInfo columnName = makeStringInfo();
+		Value *value = (Value *) lfirst(valueCell);
+		char *stringValue = strVal(value);
 
-		/* create unique column name */
-		appendStringInfo(columnName, "%s", temporaryTableColumnPrefix);
-		appendStringInfo(columnName, "%d", columnCount);
-
-		columnDefinition->colname = columnName->data;
-		columnDefinition->typeName = makeTypeNameFromOid(projectColumn->vartype,
-														 projectColumn->vartypmod);
-		columnDefinition->inhcount = 1;
-		columnDefinition->is_not_null = false;
-		columnDefinition->is_from_type = false;
-		columnDefinition->storage = 0;
-		columnDefinition->raw_default = NULL;
-		columnDefinition->cooked_default = NULL;
-		columnDefinition->collClause = NULL;
-		columnDefinition->collOid = projectColumn->varcollid;
-		columnDefinition->constraints = NIL;
-		columnDefinition->is_local = true;
-
-		columnDefinitionList = lappend(columnDefinitionList, columnDefinition);
-		++columnCount;
+		stringList = lappend(stringList, stringValue);
 	}
 
-	relation = makeRangeVar(NULL, tableName->data, -1);
+	return stringList;
+}
+
+
+/*
+ * MasterTargetList uses the given worker target list's expressions, and creates
+ * a target target list for the master node. This master target list keeps the
+ * temporary table's columns on the master node.
+ */
+static List *
+MasterTargetList(List *workerTargetList)
+{
+	List *masterTargetList = NIL;
+	const Index tableId = 1;
+	AttrNumber columnId = 1;
+
+	ListCell *workerTargetCell = NULL;
+	foreach(workerTargetCell, workerTargetList)
+	{
+		TargetEntry *workerTargetEntry = (TargetEntry *) lfirst(workerTargetCell);
+		TargetEntry *masterTargetEntry = copyObject(workerTargetEntry);
+
+		Var *masterColumn = makeVarFromTargetEntry(tableId, workerTargetEntry);
+		masterColumn->varattno = columnId;
+		masterColumn->varoattno = columnId;
+		columnId++;
+
+		/*
+		 * The master target entry has two pieces to it. The first piece is the
+		 * target entry's expression, which we set to the newly created column.
+		 * The second piece is sort and group clauses that we implicitly copy
+		 * from the worker target entry. Note that any changes to worker target
+		 * entry's sort and group clauses will *break* us here.
+		 */
+		masterTargetEntry->expr = (Expr *) masterColumn;
+		masterTargetList = lappend(masterTargetList, masterTargetEntry);
+	}
+
+	return masterTargetList;
+}
+
+
+/*
+ * BuildCreateStatement builds the executable create statement for creating a
+ * temporary table on the master; and then returns this create statement. This
+ * function obtains the needed column type information from the target list.
+ */
+static CreateStmt *
+BuildCreateStatement(StringInfo masterTableName, List *masterTargetList,
+					 List *masterColumnNameList)
+{
+	CreateStmt *createStatement = NULL;
+	RangeVar *relation = NULL;
+	char *relationName = NULL;
+	List *columnTypeList = NIL;
+	List *columnDefinitionList = NIL;
+	ListCell *masterTargetCell = NULL;
+
+	/* build rangevar object for temporary table */
+	relationName = masterTableName->data;
+	relation = makeRangeVar(NULL, relationName, -1);
 	relation->relpersistence = RELPERSISTENCE_TEMP;
 
+	/* build the list of column types as cstrings */
+	foreach(masterTargetCell, masterTargetList)
+	{
+		TargetEntry *targetEntry = (TargetEntry *) lfirst(masterTargetCell);
+		Var *column = (Var *) targetEntry->expr;
+		Oid columnTypeId = exprType((Node *) column);
+		int32 columnTypeMod = exprTypmod((Node *) column);
+
+		char *columnTypeName = format_type_with_typemod(columnTypeId, columnTypeMod);
+		columnTypeList = lappend(columnTypeList, columnTypeName);
+	}
+
+	/* build the column definition list */
+	columnDefinitionList = ColumnDefinitionList(masterColumnNameList, columnTypeList);
+
+	/* build the create statement */
 	createStatement = CreateStatement(relation, columnDefinitionList);
 
 	return createStatement;
+}
+
+
+/*
+ * ColumnDefinitionList creates and returns a list of column definition objects
+ * from two lists of column names and types. As an example, this function takes
+ * in two single elements lists: "l_quantity" and "decimal(15, 2)". The function
+ * then returns a list with one column definition, where the column's name is
+ * l_quantity, its type is numeric, and the type modifier represents (15, 2).
+ */
+static List *
+ColumnDefinitionList(List *columnNameList, List *columnTypeList)
+{
+	List *columnDefinitionList = NIL;
+	ListCell *columnNameCell = NULL;
+	ListCell *columnTypeCell = NULL;
+
+	forboth(columnNameCell, columnNameList, columnTypeCell, columnTypeList)
+	{
+		const char *columnName = (const char *) lfirst(columnNameCell);
+		const char *columnType = (const char *) lfirst(columnTypeCell);
+
+		/*
+		 * We should have a SQL compatible column type declaration; we first
+		 * convert this type to PostgreSQL's type identifiers and modifiers.
+		 */
+		Oid columnTypeId = InvalidOid;
+		int32 columnTypeMod = -1;
+		bool missingOK = false;
+		TypeName *typeName = NULL;
+		ColumnDef *columnDefinition = NULL;
+
+		parseTypeString(columnType, &columnTypeId, &columnTypeMod, missingOK);
+		typeName = makeTypeNameFromOid(columnTypeId, columnTypeMod);
+
+		/* we then create the column definition */
+		columnDefinition = makeNode(ColumnDef);
+		columnDefinition->colname = (char *) columnName;
+		columnDefinition->typeName = typeName;
+		columnDefinition->is_local = true;
+		columnDefinition->is_not_null = false;
+		columnDefinition->raw_default = NULL;
+		columnDefinition->cooked_default = NULL;
+		columnDefinition->constraints = NIL;
+
+		columnDefinitionList = lappend(columnDefinitionList, columnDefinition);
+	}
+
+	return columnDefinitionList;
 }
 
 
