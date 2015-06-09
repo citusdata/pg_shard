@@ -1572,7 +1572,7 @@ ColumnDefinitionList(List *columnNameList, List *columnTypeList)
 		TypeName *typeName = NULL;
 		ColumnDef *columnDefinition = NULL;
 
-#if PG_VERSION_NUM <= 90300
+#if PG_VERSION_NUM < 90400
 		parseTypeString(columnType, &columnTypeId, &columnTypeMod);
 #else
 		bool missingOK = false;
