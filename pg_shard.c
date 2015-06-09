@@ -132,7 +132,8 @@ static List * ValueToStringList(List *valueList);
 static List * MasterTargetList(List *workerTargetList);
 static List * ColumnDefinitionList(List *columnNameList, List *columnTypeList);
 static CreateStmt * CreateTemporaryTableLikeStmt(Oid sourceRelationId);
-CreateStmt * CreateStatement(RangeVar *relation, List *columnDefinitionList);
+static StringInfo CreateUniqueTableName(void);
+static CreateStmt * CreateStatement(RangeVar *relation, List *columnDefinitionList);
 static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalList);
 
 /* executor functions forward declarations */
@@ -1426,12 +1427,9 @@ CreateTemporaryTableStmt(Query *distributedQuery, bool pushDownAggregates)
 		List *columnNameValueList = rangeTableEntry->eref->colnames;
 		List *columnNameList = ValueToStringList(columnNameValueList);
 		List *targetList = MasterTargetList(workerTargetList);
-		Oid localTableId = rangeTableEntry->relid;
-		char *localTableNameStr = get_rel_name(localTableId);
-		StringInfo localTableName = makeStringInfo();
-		appendStringInfo(localTableName, "%s", localTableNameStr);
+		StringInfo tempTableName = CreateUniqueTableName();
 
-		createStmt = BuildCreateStatement(localTableName, targetList, columnNameList);
+		createStmt = BuildCreateStatement(tempTableName, targetList, columnNameList);
 	}
 	else
 	{
@@ -1604,7 +1602,7 @@ ColumnDefinitionList(List *columnNameList, List *columnTypeList)
  * CreateStatement creates and initializes a simple table create statement that
  * only has column definitions.
  */
-CreateStmt *
+static CreateStmt *
 CreateStatement(RangeVar *relation, List *columnDefinitionList)
 {
 	CreateStmt *createStatement = makeNode(CreateStmt);
@@ -1630,7 +1628,6 @@ CreateStatement(RangeVar *relation, List *columnDefinitionList)
 static CreateStmt *
 CreateTemporaryTableLikeStmt(Oid sourceRelationId)
 {
-	static unsigned long temporaryTableId = 0;
 	CreateStmt *createStmt = NULL;
 	StringInfo clonedTableName = NULL;
 	RangeVar *clonedRelation = NULL;
@@ -1645,10 +1642,7 @@ CreateTemporaryTableLikeStmt(Oid sourceRelationId)
 	tableLikeClause->options = 0; /* don't copy over indexes/constraints etc */
 
 	/* create a unique name for the cloned table */
-	clonedTableName = makeStringInfo();
-	appendStringInfo(clonedTableName, "%s_%d_%lu", TEMPORARY_TABLE_PREFIX, MyProcPid,
-					 temporaryTableId);
-	temporaryTableId++;
+	clonedTableName = CreateUniqueTableName();
 
 	clonedRelation = makeRangeVar(NULL, clonedTableName->data, -1);
 	clonedRelation->relpersistence = RELPERSISTENCE_TEMP;
@@ -1659,6 +1653,23 @@ CreateTemporaryTableLikeStmt(Oid sourceRelationId)
 	createStmt->oncommit = ONCOMMIT_DROP;
 
 	return createStmt;
+}
+
+
+/*
+ * CreateUniqueTableName creates a unique table name on every invocation. It takes
+ * no parameters and returns a StringInfo.
+ */
+static StringInfo
+CreateUniqueTableName(void)
+{
+	static unsigned long temporaryTableId = 0;
+	StringInfo uniqueTableName = makeStringInfo();
+	appendStringInfo(uniqueTableName, "%s_%d_%lu", TEMPORARY_TABLE_PREFIX, MyProcPid,
+					 temporaryTableId);
+	temporaryTableId++;
+
+	return uniqueTableName;
 }
 
 
