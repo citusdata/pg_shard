@@ -320,12 +320,8 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			 */
 			if (aggregatesPushedDown)
 			{
-				PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
-				PVCPlaceHolderBehavior placeHolderBehavior = PVC_RECURSE_PLACEHOLDERS;
-
-				distributedPlanTargetList = flatten_tlist(localQuery->targetList,
-														  aggregateBehavior,
-														  placeHolderBehavior);
+				distributedPlanTargetList = MasterTargetList(
+					distributedQuery->targetList);
 			}
 			else
 			{
