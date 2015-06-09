@@ -814,7 +814,10 @@ SafeToPushDownAggregate(Query *query, Oid distributedTableId)
 	bool safeToPushDownAggregates = false;
 	List *targetList = query->targetList;
 	List *groupClauseList = query->groupClause;
-	char *finalAttributeName = get_attname(distributedTableId, list_length(targetList));
+	List *rangeTableList = query->rtable;
+	RangeTblEntry *rangeTableEntry = (RangeTblEntry *) linitial(rangeTableList);
+	int tableColumnCount = list_length(rangeTableEntry->eref->colnames);
+	int targetListCount = list_length(targetList);
 
 	/*
 	 * standard_planner will be called on localQuery at PlanSequentialScan function.
@@ -824,7 +827,7 @@ SafeToPushDownAggregate(Query *query, Oid distributedTableId)
 	 *
 	 * Also, if GROUP BY does not present in the query, we cannot push down.
 	 */
-	if (finalAttributeName == NULL || groupClauseList == NIL)
+	if ((targetListCount > tableColumnCount) || groupClauseList == NIL)
 	{
 		safeToPushDownAggregates = false;
 	}
