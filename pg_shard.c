@@ -1569,11 +1569,15 @@ ColumnDefinitionList(List *columnNameList, List *columnTypeList)
 		 */
 		Oid columnTypeId = InvalidOid;
 		int32 columnTypeMod = -1;
-		bool missingOK = false;
 		TypeName *typeName = NULL;
 		ColumnDef *columnDefinition = NULL;
 
+#if PG_VERSION_NUM <= 90300
+		parseTypeString(columnType, &columnTypeId, &columnTypeMod);
+#else
+		bool missingOK = false;
 		parseTypeString(columnType, &columnTypeId, &columnTypeMod, missingOK);
+#endif
 		typeName = makeTypeNameFromOid(columnTypeId, columnTypeMod);
 
 		/* we then create the column definition */
