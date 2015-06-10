@@ -214,6 +214,22 @@ ERROR:  could not plan SELECT query
 DETAIL:  Configured to use CitusDB's SELECT logic, but CitusDB is not installed.
 HINT:  Install CitusDB or set the "use_citusdb_select_logic" configuration parameter to "false".
 SET pg_shard.use_citusdb_select_logic TO false;
+-- test use of EXECUTE statements within plpgsql
+DO $sharded_execute$
+	BEGIN
+		EXECUTE 'SELECT COUNT(*) FROM articles ' ||
+				'WHERE author_id = $1 AND author_id = $2' USING 1, 2;
+	END
+$sharded_execute$;
+-- test use of bare SQL within plpgsql
+DO $sharded_sql$
+	BEGIN
+		SELECT COUNT(*) FROM articles WHERE author_id = 1 AND author_id = 2;
+	END
+$sharded_sql$;
+ERROR:  unrecognized node type: 2100
+CONTEXT:  SQL statement "SELECT COUNT(*) FROM articles WHERE author_id = 1 AND author_id = 2"
+PL/pgSQL function inline_code_block line 3 at SQL statement
 -- test cross-shard queries
 SELECT COUNT(*) FROM articles;
  count 
