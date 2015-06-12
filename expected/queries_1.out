@@ -227,7 +227,9 @@ DO $sharded_sql$
 		SELECT COUNT(*) FROM articles WHERE author_id = 1 AND author_id = 2;
 	END
 $sharded_sql$;
-ERROR:  unrecognized node type: 2100
+ERROR:  cannot cache distributed plan
+DETAIL:  PL/pgSQL's statement caching is unsupported by pg_shard.
+HINT:  Bypass caching by using the EXECUTE keyword instead.
 CONTEXT:  SQL statement "SELECT COUNT(*) FROM articles WHERE author_id = 1 AND author_id = 2"
 PL/pgSQL function inline_code_block line 3 at SQL statement
 -- test cross-shard queries
