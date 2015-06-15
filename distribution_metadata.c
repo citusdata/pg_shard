@@ -22,10 +22,7 @@
 #include "access/attnum.h"
 #include "access/htup.h"
 #include "access/tupdesc.h"
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-parameter"
 #include "executor/spi.h"
-#pragma GCC diagnostic pop
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
 #include "nodes/makefuncs.h"
