@@ -220,13 +220,15 @@ _PG_init(void)
 static void
 SetupPLErrorTransformation(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 {
+	MemoryContext oldContext = MemoryContextSwitchTo(TopTransactionContext);
 	ErrorContextCallback *pgShardErrorContext = palloc0(sizeof(ErrorContextCallback));
 
 	pgShardErrorContext->previous = error_context_stack;
 	pgShardErrorContext->callback = PgShardErrorTransform;
-	pgShardErrorContext->arg = CurrentMemoryContext;
+	pgShardErrorContext->arg = NULL;
 
 	error_context_stack = pgShardErrorContext;
+	MemoryContextSwitchTo(oldContext);
 }
 
 
@@ -255,7 +257,6 @@ static void
 PgShardErrorTransform(void *arg)
 {
 	int sqlCode = geterrcode();
-	MemoryContext callerContext = (MemoryContext) arg;
 	MemoryContext errorContext = NULL;
 	ErrorData *errorData = NULL;
 
@@ -266,7 +267,7 @@ PgShardErrorTransform(void *arg)
 	}
 
 	/* get current error data */
-	errorContext = MemoryContextSwitchTo(callerContext);
+	errorContext = MemoryContextSwitchTo(TopTransactionContext);
 	errorData = CopyErrorData();
 	MemoryContextSwitchTo(errorContext);
 
