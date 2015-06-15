@@ -206,11 +206,20 @@ _PG_init(void)
 
 	EmitWarningsOnPlaceholders("pg_shard");
 
+	/* install error transformation handler for PL/pgSQL invocations */
 	plugin_ptr = (PLpgSQL_plugin **) find_rendezvous_variable("PLpgSQL_plugin");
 	*plugin_ptr = &PluginFuncs;
 }
 
 
+/*
+ * SetupPLErrorTransformation is intended to run before entering PL/pgSQL
+ * functions. It pushes an error transform onto the error context stack and
+ * stashes away the current memory context for use within that transform.
+ *
+ * There is no corresponding teardown function as PL/pgSQL will take care of
+ * popping this stack after functions successfully exit.
+ */
 static void
 SetupPLErrorTransformation(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 {
@@ -220,6 +229,12 @@ SetupPLErrorTransformation(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 }
 
 
+/*
+ * PgShardErrorTransform detects an uninformative error message produced when
+ * a pg_shard-distributed relation is referenced in bare SQL within a PL/pgSQL
+ * function and replaces it with a more specific message to help the user work
+ * around the underlying issue.
+ */
 static void
 PgShardErrorTransform(void *arg)
 {
