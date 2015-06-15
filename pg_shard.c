@@ -140,12 +140,12 @@ static void ErrorOnDropIfDistributedTablesExist(DropStmt *dropStatement);
 
 /* PL/pgSQL plugin declarations */
 static void SetupPLErrorTransformation(PLpgSQL_execstate *estate, PLpgSQL_function *func);
+static void TeardownPLErrorTransformation(PLpgSQL_execstate *estate,
+										  PLpgSQL_function *func);
 static void PgShardErrorTransform(void *arg);
-static PLpgSQL_plugin PluginFuncs = { .func_beg = SetupPLErrorTransformation };
-static ErrorContextCallback PgShardErrorContext = {
-	.previous = NULL,
-	.callback = PgShardErrorTransform,
-	.arg = NULL
+static PLpgSQL_plugin PluginFuncs = {
+	.func_beg = SetupPLErrorTransformation,
+	.func_end = TeardownPLErrorTransformation
 };
 
 /* declarations for dynamic loading */
@@ -216,16 +216,32 @@ _PG_init(void)
  * SetupPLErrorTransformation is intended to run before entering PL/pgSQL
  * functions. It pushes an error transform onto the error context stack and
  * stashes away the current memory context for use within that transform.
- *
- * There is no corresponding teardown function as PL/pgSQL will take care of
- * popping this stack after functions successfully exit.
  */
 static void
 SetupPLErrorTransformation(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 {
-	PgShardErrorContext.previous = error_context_stack;
-	PgShardErrorContext.arg = CurrentMemoryContext;
-	error_context_stack = &PgShardErrorContext;
+	ErrorContextCallback *pgShardErrorContext = palloc0(sizeof(ErrorContextCallback));
+
+	pgShardErrorContext->previous = error_context_stack;
+	pgShardErrorContext->callback = PgShardErrorTransform;
+	pgShardErrorContext->arg = CurrentMemoryContext;
+
+	error_context_stack = pgShardErrorContext;
+}
+
+
+/*
+ * TeardownPLErrorTransformation is intended to run after a PL/pgSQL function
+ * successfully returns. It pops the error context stack in order to remove and
+ * free the transform placed on that stack by SetupPLErrorTransformation.
+ */
+static void
+TeardownPLErrorTransformation(PLpgSQL_execstate *estate, PLpgSQL_function *func)
+{
+	ErrorContextCallback *pgShardErrorContext = error_context_stack;
+
+	error_context_stack = pgShardErrorContext->previous;
+	pfree(pgShardErrorContext);
 }
 
 
