@@ -219,7 +219,7 @@ is_distributed_table(PG_FUNCTION_ARGS)
  * tables whatsoever.
  */
 Datum
-distributed_tables_exist(PG_FUNCTION_ARGS __attribute__((unused)))
+distributed_tables_exist(PG_FUNCTION_ARGS)
 {
 	bool distributedTablesExist = DistributedTablesExist();
 

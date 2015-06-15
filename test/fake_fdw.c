@@ -30,9 +30,6 @@
 #include "optimizer/restrictinfo.h"
 #include "utils/palloc.h"
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-parameter"
-
 /* local function forward declarations */
 static void FakeGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel,
 								  Oid foreigntableid);
@@ -144,6 +141,3 @@ FakeReScanForeignScan(ForeignScanState *node) { }
  */
 static void
 FakeEndForeignScan(ForeignScanState *node) { }
-
-
-#pragma GCC diagnostic pop
