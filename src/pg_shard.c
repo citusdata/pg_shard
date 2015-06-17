@@ -1151,6 +1151,7 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 		ShardInterval *shardInterval = (ShardInterval *) lfirst(shardIntervalCell);
 		int64 shardId = shardInterval->id;
 		List *finalizedPlacementList = NIL;
+		FromExpr *joinTree = NULL;
 		Task *task = NULL;
 		StringInfo queryString = makeStringInfo();
 
@@ -1165,7 +1166,7 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 		 * before we deparse the query. This applies to SELECT, UPDATE and
 		 * DELETE statements.
 		 */
-		FromExpr *joinTree = query->jointree;
+		joinTree = query->jointree;
 		if ((joinTree != NULL) && (joinTree->quals != NULL))
 		{
 			Node *whereClause = joinTree->quals;
