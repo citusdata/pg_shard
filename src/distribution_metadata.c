@@ -836,6 +836,12 @@ LockRelationDistributionMetadata(Oid relationId, LOCKMODE lockMode)
 }
 
 
+/*
+ * AcquireShardLock implements the shared logic needed by LockShardData and
+ * LockShardDistributionMetadata. It builds a lock tag with a shard identifier
+ * (bound to the current database) and specified shard lock type, then blocks
+ * to acquire the corresponding lock in the specified mode.
+ */
 static void
 AcquireShardLock(int64 shardId, ShardLockType shardLockType, LOCKMODE lockMode)
 {
