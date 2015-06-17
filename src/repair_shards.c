@@ -91,7 +91,7 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 	 * (INSERT, UPDATE, or DELETE) and prevent concurrent repair operations from
 	 * being able to operate on this shard.
 	 */
-	LockShard(shardId, ExclusiveLock);
+	LockShardData(shardId, ExclusiveLock);
 
 	shardPlacementList = LoadShardPlacementList(shardId);
 

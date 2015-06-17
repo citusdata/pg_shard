@@ -1390,7 +1390,7 @@ AcquireExecutorShardLocks(List *taskList, LOCKMODE lockMode)
 		Task *task = (Task *) lfirst(taskCell);
 		int64 shardId = task->shardId;
 
-		LockShard(shardId, lockMode);
+		LockShardData(shardId, lockMode);
 	}
 }
 

@@ -31,6 +31,7 @@
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
 #include "storage/lock.h"
+#include "storage/lmgr.h"
 #include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/errcodes.h"
@@ -51,6 +52,8 @@ static ShardInterval * TupleToShardInterval(HeapTuple heapTuple,
 											TupleDesc tupleDescriptor);
 static ShardPlacement * TupleToShardPlacement(HeapTuple heapTuple,
 											  TupleDesc tupleDescriptor);
+static void AcquireShardLock(int64 shardId, ShardLockType shardLockType,
+							 LOCKMODE lockMode);
 
 
 /*
@@ -789,12 +792,52 @@ UpdateShardPlacementRowState(int64 shardPlacementId, ShardState newState)
 
 
 /*
- * LockShard returns after acquiring a lock for the specified shard, blocking
- * indefinitely if required. Only the ExclusiveLock and ShareLock modes are
- * supported. Locks acquired with this method are released at transaction end.
+ * LockShardData returns after acquiring a lock for the specified shard's data,
+ * blocking if required. Only ExclusiveLock and ShareLock modes are supported.
+ * Locks acquired with this method are released at transaction end.
  */
 void
-LockShard(int64 shardId, LOCKMODE lockMode)
+LockShardData(int64 shardId, LOCKMODE lockMode)
+{
+	AcquireShardLock(shardId, SHARD_LOCK_DATA, lockMode);
+}
+
+
+/*
+ * LockShardDistributionMetadata returns after grabbing a lock for distribution
+ * metadata related to the specified shard, blocking if required. ExclusiveLock
+ * and ShareLock modes are supported. Any locks acquired using this method are
+ * released at transaction end.
+ */
+void
+LockShardDistributionMetadata(int64 shardId, LOCKMODE lockMode)
+{
+	AcquireShardLock(shardId, SHARD_LOCK_METADATA, lockMode);
+}
+
+
+/*
+ * LockRelationDistributionMetadata returns after getting a the lock used for a
+ * relation's distribution metadata, blocking if required. Only ExclusiveLock
+ * and ShareLock modes are supported. Any locks acquired using this method are
+ * released at transaction end.
+ */
+void
+LockRelationDistributionMetadata(Oid relationId, LOCKMODE lockMode)
+{
+	Assert(lockMode == ExclusiveLock || lockMode == ShareLock);
+
+	if (lockMode == ExclusiveLock)
+	{
+		lockMode = AccessExclusiveLock;
+	}
+
+	(void) LockRelationOid(relationId, lockMode);
+}
+
+
+static void
+AcquireShardLock(int64 shardId, ShardLockType shardLockType, LOCKMODE lockMode)
 {
 	/* locks use 32-bit identifier fields, so split shardId */
 	uint32 keyUpperHalf = (uint32) (shardId >> 32);
@@ -806,8 +849,10 @@ LockShard(int64 shardId, LOCKMODE lockMode)
 	memset(&lockTag, 0, sizeof(LOCKTAG));
 
 	Assert(lockMode == ExclusiveLock || lockMode == ShareLock);
+	Assert(shardLockType = !SHARD_LOCK_INVALID_FIRST);
 
-	SET_LOCKTAG_ADVISORY(lockTag, MyDatabaseId, keyUpperHalf, keyLowerHalf, 0);
+	SET_LOCKTAG_ADVISORY(lockTag, MyDatabaseId, keyUpperHalf, keyLowerHalf,
+						 (uint16) shardLockType);
 
 	(void) LockAcquire(&lockTag, lockMode, sessionLock, dontWait);
 }
