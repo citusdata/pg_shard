@@ -93,8 +93,14 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 	 */
 	LockShardData(shardId, ExclusiveLock);
 
-	shardPlacementList = LoadShardPlacementList(shardId);
+	/*
+	 * We've stopped data modifications of this shard, but we plan to move
+	 * a placement to the healthy state, so we need to grab a shard metadata
+	 * lock (in exclusive mode) as well.
+	 */
+	LockShardDistributionMetadata(shardId, ExclusiveLock);
 
+	shardPlacementList = LoadShardPlacementList(shardId);
 	sourcePlacement = SearchShardPlacementInList(shardPlacementList, sourceNodeName,
 												 sourceNodePort);
 	if (sourcePlacement->shardState != STATE_FINALIZED)

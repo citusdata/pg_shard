@@ -175,6 +175,9 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 	/* make sure table is hash partitioned */
 	CheckHashPartitionedTable(distributedTableId);
 
+	/* we plan to add shards: get an exclusive metadata lock */
+	LockRelationDistributionMetadata(distributedTableId, ExclusiveLock);
+
 	/* validate that shards haven't already been created for this table */
 	existingShardList = LoadShardIntervalList(distributedTableId);
 	if (existingShardList != NIL)
@@ -266,6 +269,14 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 
 		extendedDDLCommands = ExtendedDDLCommandList(distributedTableId, shardId,
 													 ddlCommandList);
+
+		/*
+		 * Grabbing the shard metadata lock isn't technically necessary since
+		 * we already hold an exclusive lock on the partition table, but we'll
+		 * acquire it for the sake of completeness. As we're adding new active
+		 * placements, the mode must be exclusive.
+		 */
+		LockShardDistributionMetadata(shardId, ExclusiveLock);
 
 		for (placementIndex = 0; placementIndex < placementAttemptCount; placementIndex++)
 		{

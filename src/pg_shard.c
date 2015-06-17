@@ -724,9 +724,13 @@ DistributedQueryShardList(Query *query)
 	List *prunedShardList = NIL;
 
 	Oid distributedTableId = ExtractFirstDistributedTableId(query);
-	List *shardIntervalList = LookupShardIntervalList(distributedTableId);
+	List *shardIntervalList = NIL;
 
-	/* error out if no shards exists for the table */
+	/* acquire lock to ensure no shards can be added during execution */
+	LockRelationDistributionMetadata(distributedTableId, ShareLock);
+
+	/* error out if no shards exist for the table */
+	shardIntervalList = LookupShardIntervalList(distributedTableId);
 	if (shardIntervalList == NIL)
 	{
 		char *relationName = get_rel_name(distributedTableId);
@@ -1146,9 +1150,15 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 	{
 		ShardInterval *shardInterval = (ShardInterval *) lfirst(shardIntervalCell);
 		int64 shardId = shardInterval->id;
-		List *finalizedPlacementList = LoadFinalizedShardPlacementList(shardId);
+		List *finalizedPlacementList = NIL;
 		Task *task = NULL;
 		StringInfo queryString = makeStringInfo();
+
+		/* grab shared metadata lock to stop concurrent placement additions */
+		LockShardDistributionMetadata(shardId, ShareLock);
+
+		/* now safe to populate placement list */
+		finalizedPlacementList = LoadFinalizedShardPlacementList(shardId);
 
 		/*
 		 * Convert the qualifiers to an explicitly and'd clause, which is needed
