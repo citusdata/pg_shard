@@ -114,6 +114,11 @@ typedef struct ShardIntervalListCacheEntry
 } ShardIntervalListCacheEntry;
 
 
+/*
+ * ShardLockType specifies the kinds of locks that can be acquired for a given
+ * shard, i.e. one to change data in that shard or a lock to change placements
+ * of the shard itself (the shard's metadata).
+ */
 typedef enum
 {
 	SHARD_LOCK_INVALID_FIRST = 0,
