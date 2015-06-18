@@ -214,8 +214,7 @@ _PG_init(void)
 
 /*
  * SetupPLErrorTransformation is intended to run before entering PL/pgSQL
- * functions. It pushes an error transform onto the error context stack and
- * stashes away the current memory context for use within that transform.
+ * functions. It pushes an error transform onto the error context stack.
  */
 static void
 SetupPLErrorTransformation(PLpgSQL_execstate *estate, PLpgSQL_function *func)
