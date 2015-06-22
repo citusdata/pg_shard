@@ -202,7 +202,7 @@ LoadShardInterval(int64 shardId)
  * an error if the specified shard has not been placed.
  */
 List *
-LoadFinalizedShardPlacementList(uint64 shardId)
+LoadFinalizedShardPlacementList(int64 shardId)
 {
 	List *finalizedPlacementList = NIL;
 	List *shardPlacementList = LoadShardPlacementList(shardId);
@@ -660,7 +660,7 @@ CreateShardRow(Oid distributedTableId, char shardStorage, text *shardMinValue,
  * supplied values and returns the primary key of that new row.
  */
 int64
-CreateShardPlacementRow(uint64 shardId, ShardState shardState, char *nodeName,
+CreateShardPlacementRow(int64 shardId, ShardState shardState, char *nodeName,
 						uint32 nodePort)
 {
 	int64 newShardPlacementId = -1;
@@ -700,7 +700,7 @@ CreateShardPlacementRow(uint64 shardId, ShardState shardState, char *nodeName,
  * placement identifier, erroring out if it cannot find such a row.
  */
 void
-DeleteShardPlacementRow(uint64 shardPlacementId)
+DeleteShardPlacementRow(int64 shardPlacementId)
 {
 	Oid argTypes[] = { INT8OID };
 	Datum argValues[] = { Int64GetDatum(shardPlacementId) };

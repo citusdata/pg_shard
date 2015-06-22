@@ -117,7 +117,7 @@ typedef struct ShardIntervalListCacheEntry
 extern List * LookupShardIntervalList(Oid distributedTableId);
 extern List * LoadShardIntervalList(Oid distributedTableId);
 extern ShardInterval * LoadShardInterval(int64 shardId);
-extern List * LoadFinalizedShardPlacementList(uint64 shardId);
+extern List * LoadFinalizedShardPlacementList(int64 shardId);
 extern List * LoadShardPlacementList(int64 shardId);
 extern Var * PartitionColumn(Oid distributedTableId);
 extern char PartitionType(Oid distributedTableId);
@@ -128,9 +128,9 @@ extern void InsertPartitionRow(Oid distributedTableId, char partitionType,
 							   text *partitionKeyText);
 extern int64 CreateShardRow(Oid distributedTableId, char shardStorage,
 							text *shardMinValue, text *shardMaxValue);
-extern int64 CreateShardPlacementRow(uint64 shardId, ShardState shardState,
+extern int64 CreateShardPlacementRow(int64 shardId, ShardState shardState,
 									 char *nodeName, uint32 nodePort);
-extern void DeleteShardPlacementRow(uint64 shardPlacementId);
+extern void DeleteShardPlacementRow(int64 shardPlacementId);
 extern void UpdateShardPlacementRowState(int64 shardPlacementId, ShardState newState);
 extern void LockShard(int64 shardId, LOCKMODE lockMode);
 
