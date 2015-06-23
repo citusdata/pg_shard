@@ -1143,25 +1143,21 @@ BuildLocalTargetListWithoutAggregates(List *targetListWithAggregates)
 {
 	ListCell *targetListCell = NULL;
 	List *targetListWithoutAggregates = NIL;
-	AttrNumber targetResNo = 1;
 	AttrNumber columnId = 1;
 
 	foreach(targetListCell, targetListWithAggregates)
 	{
-		TargetEntry *targetListEntry = (TargetEntry *) lfirst(targetListCell);
-		TargetEntry *newTargetEntry = copyObject(targetListEntry);
+		TargetEntry *originalTargetEntry = (TargetEntry *) lfirst(targetListCell);
+		TargetEntry *newTargetEntry = copyObject(originalTargetEntry);
+		Expr *baseExpression = originalTargetEntry->expr;
 		Expr *newExpression = NULL;
 
 		/* update target list entries which include Aggrefs */
-		if (contain_agg_clause((Node *) newTargetEntry->expr))
+		if (contain_agg_clause((Node *) baseExpression))
 		{
 			Index masterTableId = 1;
-			Var *targetVar = makeVarFromTargetEntry(masterTableId, targetListEntry);
-
-			newTargetEntry = makeTargetEntry((Expr *) targetVar,
-											 targetResNo,
-											 targetListEntry->resname,
-											 targetListEntry->resjunk);
+			Var *column = makeVarFromTargetEntry(masterTableId, originalTargetEntry);
+			baseExpression = (Expr *) column;
 		}
 
 		/*
@@ -1169,18 +1165,12 @@ BuildLocalTargetListWithoutAggregates(List *targetListWithAggregates)
 		 * to update column attribute numbers of the new target entries with respect
 		 * to the order they currently exist.
 		 */
-		newExpression = (Expr *) AttributeNumberMutator((Node *) newTargetEntry->expr,
+		newExpression = (Expr *) AttributeNumberMutator((Node *) baseExpression,
 														&columnId);
 
-		/* ressortgroupref and resjunk must be updated for ORDER BY columns */
-		newTargetEntry->ressortgroupref = targetListEntry->ressortgroupref;
-		newTargetEntry->resjunk = targetListEntry->resjunk;
 		newTargetEntry->expr = newExpression;
-
-		newTargetEntry->resno = targetResNo;
 		targetListWithoutAggregates = lappend(targetListWithoutAggregates,
 											  newTargetEntry);
-		++targetResNo;
 	}
 
 	return targetListWithoutAggregates;
