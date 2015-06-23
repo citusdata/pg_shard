@@ -27,6 +27,7 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "access/attnum.h"
 #include "access/heapam.h"
 #include "access/htup_details.h"
 #include "access/htup.h"
@@ -52,6 +53,7 @@
 #include "nodes/pg_list.h"
 #include "nodes/plannodes.h"
 #include "nodes/primnodes.h"
+#include "nodes/value.h"
 #include "optimizer/clauses.h"
 #include "optimizer/cost.h"
 #include "optimizer/planner.h"
@@ -111,8 +113,7 @@ static List * BuildDistributedTargetListWithAggregates(Query *query,
 													   List *localRestrictList);
 static List * BuildDistributedTargetListWithoutAggregates(Query *query,
 														  List *localRestrictList);
-static bool SortClauseReferencedByTargetEntry(List *sortClause,
-											  TargetEntry *targetEntry);
+static bool SortClauseReferencedByTargetEntry(List *sortClause, TargetEntry *targetEntry);
 static Query * BuildLocalQuery(Query *query, List *localRestrictList,
 							   bool aggregatesPushedDown);
 static List * BuildLocalTargetListWithoutAggregates(List *targetListWithAggregates);
@@ -303,9 +304,9 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 													 &localQueryHasAggregates);
 
 			/*
-			 * Determine whether we pushed down aggregates or not. Basically, we are
+			 * Determine whether we will push down aggregates or not. Basically, we are
 			 * "pushing down" aggregates if only the remote query has any. However, we
-			 * keep the second parameter of the AND to emphasize the proper behaviour.
+			 * keep the second parameter of the AND to emphasize the proper behavior.
 			 */
 			aggregatesPushedDown = (remoteQueryHasAggregates && !localQueryHasAggregates);
 
@@ -319,10 +320,10 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			distributedQueryTargetList = distributedQuery->targetList;
 
 			/*
-			 * The schema of the temporary table must change to reflect whether
-			 * aggregates pushed down or not. So we calculate a new target list based
-			 * on the output of the pushed down aggregates in the remote query.
-			 * If no push down takes place, the target list remains unmodified.
+			 * The schema of the temporary table must change depending on whether
+			 * aggregates will be pushed down or not. So we calculate a new target
+			 * list based on the output of the pushed down aggregates in the remote
+			 * query. If no push down takes place, the target list is not changed.
 			 */
 			if (aggregatesPushedDown)
 			{
@@ -776,9 +777,9 @@ ClassifyRestrictions(List *queryRestrictList, List **remoteRestrictList,
 
 
 /*
- * ClassifyHasAggregates decides whether local and distributed queries will include
- * aggregates or not. remoteQueryHasAggregates and localQueryHasAggregates are output
- * parameters to receive these boolean values.
+ * DetermineRemoteAndLocalAggregatePresence decides whether local and distributed queries
+ * will include aggregates or not. remoteQueryHasAggregates and localQueryHasAggregates
+ * are output parameters to receive these boolean values.
  */
 static void
 DetermineRemoteAndLocalAggregatePresence(Query *query, bool *remoteQueryHasAggregates,
@@ -809,10 +810,10 @@ DetermineRemoteAndLocalAggregatePresence(Query *query, bool *remoteQueryHasAggre
 /*
  * SafeToPushDownAggregate determines whether a query's GROUP BY clause includes
  * the partition column of the distributed table identified by the second argument.
- * This function returns false if the query has no GROUP BY clause whatsoever.
- * To work around a restriction in sequential scans, this function will also return
- * false the query's target list has more elements than the number of columns in
- * the specified table.
+ * This function returns false if the query has no GROUP BY clause whatsoever. To
+ * work around a restriction in sequential scans, this function will also return
+ * false if the query's target list has more elements than the number of columns
+ * in the specified table.
  */
 static bool
 SafeToPushDownAggregate(Query *query, Oid distributedTableId)
