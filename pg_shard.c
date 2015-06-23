@@ -99,22 +99,23 @@ static List * DistributedQueryShardList(Query *query);
 static bool SelectFromMultipleShards(Query *query, List *queryShardList);
 static void ClassifyRestrictions(List *queryRestrictList, List **remoteRestrictList,
 								 List **localRestrictList);
-static void ClassifyHasAggregates(Query *query, bool *remoteQueryHasAggregates,
-								  bool *localQueryHasAggregates);
+static void DetermineRemoteAndLocalAggregatePresence(Query *query,
+													 bool *remoteQueryHasAggregates,
+													 bool *localQueryHasAggregates);
 static bool SafeToPushDownAggregate(Query *query, Oid distributedTableId);
 static bool GroupedByColumn(List *groupClauseList, List *targetList, Var *column);
 static Query * BuildDistributedQuery(Query *query, List *remoteRestrictList,
 									 List *localRestrictList,
-									 bool remoteQueryHasAggregates);
-static List * BuildAggregatedDistributedTargetList(Query *query,
-												   List *localRestrictList);
-static List * BuildNonAggregatedDistributedTargetList(Query *query,
-													  List *localRestrictList);
-static bool SortTargetEntry(List *sortClause, TargetEntry *targetEntry);
+									 bool aggregatesPushedDown);
+static List * BuildDistributedTargetListWithAggregates(Query *query,
+													   List *localRestrictList);
+static List * BuildDistributedTargetListWithoutAggregates(Query *query,
+														  List *localRestrictList);
+static bool SortClauseReferencedByTargetEntry(List *sortClause,
+											  TargetEntry *targetEntry);
 static Query * BuildLocalQuery(Query *query, List *localRestrictList,
-							   bool localQueryHasAggregates,
-							   bool remoteQueryHasAggregates);
-static List * BuildNonAggregatedLocalTargetList(List *aggregatedTargetList);
+							   bool aggregatesPushedDown);
+static List * BuildLocalTargetListWithoutAggregates(List *targetListWithAggregates);
 static Node * AttributeNumberMutator(Node *originalNode, AttrNumber *columnId);
 static PlannedStmt * PlanSequentialScan(Query *query, int cursorOptions,
 										ParamListInfo boundParams);
@@ -288,6 +289,7 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			List *queryRestrictList = QueryRestrictList(distributedQuery);
 			List *remoteRestrictList = NIL;
 			List *localRestrictList = NIL;
+			List *distributedQueryTargetList = NIL;
 			bool localQueryHasAggregates = false;
 			bool remoteQueryHasAggregates = false;
 			bool aggregatesPushedDown = false;
@@ -296,36 +298,39 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			ClassifyRestrictions(queryRestrictList, &remoteRestrictList,
 								 &localRestrictList);
 
-			/* decide remote and local hasAggs values */
-			ClassifyHasAggregates(query, &remoteQueryHasAggregates,
-								  &localQueryHasAggregates);
+			/* decide whether remote and local queries will have aggregates */
+			DetermineRemoteAndLocalAggregatePresence(query, &remoteQueryHasAggregates,
+													 &localQueryHasAggregates);
+
+			/*
+			 * Determine whether we pushed down aggregates or not. Basically, we are
+			 * "pushing down" aggregates if only the remote query has any. However, we
+			 * keep the second parameter of the AND to emphasize the proper behaviour.
+			 */
+			aggregatesPushedDown = (remoteQueryHasAggregates && !localQueryHasAggregates);
 
 			/* build local and distributed query */
 			distributedQuery = BuildDistributedQuery(distributedQuery,
 													 remoteRestrictList,
 													 localRestrictList,
-													 remoteQueryHasAggregates);
-			localQuery = BuildLocalQuery(query, localRestrictList,
-										 localQueryHasAggregates,
-										 remoteQueryHasAggregates);
+													 aggregatesPushedDown);
+			localQuery = BuildLocalQuery(query, localRestrictList, aggregatesPushedDown);
 
-			/* determine whether we pushed down aggregates or not */
-			aggregatesPushedDown = (remoteQueryHasAggregates && !localQueryHasAggregates);
+			distributedQueryTargetList = distributedQuery->targetList;
 
 			/*
-			 * distributedPlanTargetList is used for determining intermediate
-			 * temporary table's tuple descriptor in the executer. So, if aggregates
-			 * pushed down, we need to update the list to enable localQuery to be
-			 * executed on the intermediate table.
+			 * The schema of the temporary table must change to reflect whether
+			 * aggregates pushed down or not. So we calculate a new target list based
+			 * on the output of the pushed down aggregates in the remote query.
+			 * If no push down takes place, the target list remains unmodified.
 			 */
 			if (aggregatesPushedDown)
 			{
-				distributedPlanTargetList = MasterTargetList(
-					distributedQuery->targetList);
+				distributedPlanTargetList = MasterTargetList(distributedQueryTargetList);
 			}
 			else
 			{
-				distributedPlanTargetList = distributedQuery->targetList;
+				distributedPlanTargetList = distributedQueryTargetList;
 			}
 
 			/*
@@ -335,7 +340,10 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			 */
 			plannedStatement = PlanSequentialScan(localQuery, cursorOptions, boundParams);
 
-			/* construct a CreateStmt depending on safeToPushDownAggregate */
+			/*
+			 * Construct a CREATE statement based on whether aggregates are being
+			 * pushed down.
+			 */
 			createTemporaryTableStmt = CreateTemporaryTableStmt(distributedQuery,
 																aggregatesPushedDown);
 		}
@@ -773,8 +781,8 @@ ClassifyRestrictions(List *queryRestrictList, List **remoteRestrictList,
  * parameters to receive these boolean values.
  */
 static void
-ClassifyHasAggregates(Query *query, bool *remoteQueryHasAggregates,
-					  bool *localQueryHasAggregates)
+DetermineRemoteAndLocalAggregatePresence(Query *query, bool *remoteQueryHasAggregates,
+										 bool *localQueryHasAggregates)
 {
 	*remoteQueryHasAggregates = false;
 	*localQueryHasAggregates = false;
@@ -784,7 +792,6 @@ ClassifyHasAggregates(Query *query, bool *remoteQueryHasAggregates,
 		Oid tableId = ExtractFirstDistributedTableId(query);
 		bool safeToPushDownAggregate = SafeToPushDownAggregate(query, tableId);
 
-		/* if we can push down the aggregates update */
 		if (safeToPushDownAggregate)
 		{
 			*remoteQueryHasAggregates = true;
@@ -800,10 +807,12 @@ ClassifyHasAggregates(Query *query, bool *remoteQueryHasAggregates,
 
 
 /*
- * SafeToPushDownAggregate returns true if GROUP BY clause includes the partition column.
- * This function returns false if the total length of target list is greater than the
- * total number of columns on the distributed table whose Oid is the second parameter
- * of this function.
+ * SafeToPushDownAggregate determines whether a query's GROUP BY clause includes
+ * the partition column of the distributed table identified by the second argument.
+ * This function returns false if the query has no GROUP BY clause whatsoever.
+ * To work around a restriction in sequential scans, this function will also return
+ * false the query's target list has more elements than the number of columns in
+ * the specified table.
  */
 static bool
 SafeToPushDownAggregate(Query *query, Oid distributedTableId)
@@ -817,12 +826,8 @@ SafeToPushDownAggregate(Query *query, Oid distributedTableId)
 	int targetListCount = list_length(targetList);
 
 	/*
-	 * standard_planner will be called on localQuery at PlanSequentialScan function.
-	 * In a sequential scan, there is an implicit check that the total number of
-	 * targetList elements cannot be greater than the total number of columns in the table.
-	 * Thus, it is not safe to push down aggregates for such cases.
-	 *
-	 * Also, if GROUP BY does not present in the query, we cannot push down.
+	 * Return false if the target list has more elements than the table has columns or
+	 * if there is no GROUP BY clause.
 	 */
 	if ((targetListCount > tableColumnCount) || groupClauseList == NIL)
 	{
@@ -880,10 +885,12 @@ GroupedByColumn(List *groupClauseList, List *targetList, Var *column)
  */
 static Query *
 BuildDistributedQuery(Query *query, List *remoteRestrictList, List *localRestrictList,
-					  bool remoteQueryHasAggregates)
+					  bool aggregatesPushedDown)
 {
 	List *rangeTableList = NIL;
+	List *targetList = NIL;
 	FromExpr *fromExpr = NULL;
+	Node *havingQual = NULL;
 	Query *distributedQuery = makeNode(Query);
 
 	ExtractRangeTableEntryWalker((Node *) query, &rangeTableList);
@@ -894,41 +901,41 @@ BuildDistributedQuery(Query *query, List *remoteRestrictList, List *localRestric
 	fromExpr->quals = (Node *) make_ands_explicit((List *) remoteRestrictList);
 	fromExpr->fromlist = QueryFromList(rangeTableList);
 
-	if (remoteQueryHasAggregates)
+	if (aggregatesPushedDown)
 	{
 		distributedQuery->hasAggs = true;
 		distributedQuery->groupClause = list_copy(query->groupClause);
-		distributedQuery->targetList =
-			BuildAggregatedDistributedTargetList(query, localRestrictList);
+		targetList = BuildDistributedTargetListWithAggregates(query, localRestrictList);
 
 		/*
 		 * Note that havingQual is in implicitly-ANDed-list form
 		 * at this point, even though they are declared as Node.
 		 */
-		distributedQuery->havingQual =
-			(Node *) make_ands_explicit((List *) query->havingQual);
+		havingQual = (Node *) make_ands_explicit((List *) query->havingQual);
 	}
 	else
 	{
-		distributedQuery->targetList =
-			BuildNonAggregatedDistributedTargetList(query, localRestrictList);
+		targetList = BuildDistributedTargetListWithoutAggregates(query,
+																 localRestrictList);
 	}
 
 	distributedQuery->commandType = CMD_SELECT;
 	distributedQuery->rtable = rangeTableList;
 	distributedQuery->jointree = fromExpr;
+	distributedQuery->targetList = targetList;
+	distributedQuery->havingQual = havingQual;
 
 	return distributedQuery;
 }
 
 
 /*
- * BuildAggregatedDistributedTargetList returns a list of TargetEntry for the
+ * BuildDistributedTargetListWithAggregates returns a list of TargetEntry for the
  * distributed query when aggregates are pushed down. This function leaves
  * AggRefs as it is in the target list. Also, WHERE clause columns pushed down.
  */
 static List *
-BuildAggregatedDistributedTargetList(Query *query, List *localRestrictList)
+BuildDistributedTargetListWithAggregates(Query *query, List *localRestrictList)
 {
 	List *targetList = query->targetList;
 	List *newTargetList = NIL;
@@ -989,7 +996,8 @@ BuildAggregatedDistributedTargetList(Query *query, List *localRestrictList)
 
 		if (targetListEntry->resjunk)
 		{
-			bool sortTargetEntry = SortTargetEntry(sortClause, targetListEntry);
+			bool sortTargetEntry = SortClauseReferencedByTargetEntry(sortClause,
+																	 targetListEntry);
 
 			if (sortTargetEntry)
 			{
@@ -1007,11 +1015,11 @@ BuildAggregatedDistributedTargetList(Query *query, List *localRestrictList)
 
 
 /*
- * SortTargetEntry returns true if targetEntry references one of the elements
- * in the sortClause.
+ * SortClauseReferencedByTargetEntry returns true if targetEntry references one
+ * of the elements in the sortClause.
  */
 static bool
-SortTargetEntry(List *sortClause, TargetEntry *targetEntry)
+SortClauseReferencedByTargetEntry(List *sortClause, TargetEntry *targetEntry)
 {
 	bool referencedByTargetEntry = false;
 	Index targetEntryReference = targetEntry->ressortgroupref;
@@ -1033,12 +1041,12 @@ SortTargetEntry(List *sortClause, TargetEntry *targetEntry)
 
 
 /*
- * BuildNonAggregatedDistributedTargetList returns a list of TargetEntry for the
+ * BuildDistributedTargetListWithoutAggregates returns a list of TargetEntry for the
  * distributed query when aggregates are not pushed down. This function replaces all
  * target entries with Vars. Also, WHERE and HAVING clauses columns pushed down.
  */
 static List *
-BuildNonAggregatedDistributedTargetList(Query *query, List *localRestrictList)
+BuildDistributedTargetListWithoutAggregates(Query *query, List *localRestrictList)
 {
 	List *projectColumnList = NIL;
 	List *havingClauseColumnList = NIL;
@@ -1101,12 +1109,10 @@ BuildNonAggregatedDistributedTargetList(Query *query, List *localRestrictList)
  * aggregates if necessary. Expects queries with a single entry in their FROM list.
  */
 static Query *
-BuildLocalQuery(Query *query, List *localRestrictList, bool localQueryHasAggregates,
-				bool remoteQueryHasAggregates)
+BuildLocalQuery(Query *query, List *localRestrictList, bool aggregatesPushedDown)
 {
 	Query *localQuery = copyObject(query);
 	FromExpr *joinTree = localQuery->jointree;
-	bool aggregatesPushedDown = (remoteQueryHasAggregates && !localQueryHasAggregates);
 
 	Assert(joinTree != NULL);
 	Assert(list_length(joinTree->fromlist) == 1);
@@ -1118,7 +1124,7 @@ BuildLocalQuery(Query *query, List *localRestrictList, bool localQueryHasAggrega
 		localQuery->hasAggs = false;
 		localQuery->groupClause = NIL;
 		localQuery->havingQual = NULL;
-		localQuery->targetList = BuildNonAggregatedLocalTargetList(query->targetList);
+		localQuery->targetList = BuildLocalTargetListWithoutAggregates(query->targetList);
 	}
 
 	return localQuery;
@@ -1126,23 +1132,24 @@ BuildLocalQuery(Query *query, List *localRestrictList, bool localQueryHasAggrega
 
 
 /*
- * BuildNonAggregatedLocalTargetList takes an aggregated target list and returns a newly
- * created non-aggregated target list. The function iterates over the list, replaces
- * aggregated elements with corresponding non-aggregated ones. Also, updates attribute
- * numbers of the target list elements accordingly.
+ * BuildLocalTargetListWithoutAggregates takes an aggregated target list and returns a
+ * newly created non-aggregated target list. The function iterates over the list,
+ * replaces aggregated elements with corresponding non-aggregated ones. Also, updates
+ * attribute numbers of the target list elements accordingly.
  */
 static List *
-BuildNonAggregatedLocalTargetList(List *aggregatedTargetList)
+BuildLocalTargetListWithoutAggregates(List *targetListWithAggregates)
 {
 	ListCell *targetListCell = NULL;
-	List *nonAggregatedTargetList = NIL;
+	List *targetListWithoutAggregates = NIL;
 	AttrNumber targetResNo = 1;
 	AttrNumber columnId = 1;
 
-	foreach(targetListCell, aggregatedTargetList)
+	foreach(targetListCell, targetListWithAggregates)
 	{
 		TargetEntry *targetListEntry = (TargetEntry *) lfirst(targetListCell);
 		TargetEntry *newTargetEntry = copyObject(targetListEntry);
+		Expr *newExpression = NULL;
 
 		/* update target list entries which include Aggrefs */
 		if (contain_agg_clause((Node *) newTargetEntry->expr))
@@ -1161,21 +1168,21 @@ BuildNonAggregatedLocalTargetList(List *aggregatedTargetList)
 		 * to update column attribute numbers of the new target entries with respect
 		 * to the order they currently exist.
 		 */
-		newTargetEntry->expr =
-			(Expr *) AttributeNumberMutator((Node *) newTargetEntry->expr,
-											&columnId);
+		newExpression = (Expr *) AttributeNumberMutator((Node *) newTargetEntry->expr,
+														&columnId);
 
 		/* ressortgroupref and resjunk must be updated for ORDER BY columns */
 		newTargetEntry->ressortgroupref = targetListEntry->ressortgroupref;
 		newTargetEntry->resjunk = targetListEntry->resjunk;
+		newTargetEntry->expr = newExpression;
 
 		newTargetEntry->resno = targetResNo;
-		nonAggregatedTargetList = lappend(nonAggregatedTargetList,
-										  newTargetEntry);
+		targetListWithoutAggregates = lappend(targetListWithoutAggregates,
+											  newTargetEntry);
 		++targetResNo;
 	}
 
-	return nonAggregatedTargetList;
+	return targetListWithoutAggregates;
 }
 
 
