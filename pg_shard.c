@@ -1049,9 +1049,9 @@ SortClauseReferencedByTargetEntry(List *sortClause, TargetEntry *targetEntry)
 static List *
 BuildDistributedTargetListWithoutAggregates(Query *query, List *localRestrictList)
 {
+	List *whereColumnList = NIL;
 	List *projectColumnList = NIL;
 	List *havingClauseColumnList = NIL;
-	List *whereColumnList = NIL;
 	List *requiredColumnList = NIL;
 	ListCell *columnCell = NULL;
 	List *uniqueColumnList = NIL;
@@ -1059,13 +1059,13 @@ BuildDistributedTargetListWithoutAggregates(Query *query, List *localRestrictLis
 	PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
 	PVCPlaceHolderBehavior placeHolderBehavior = PVC_REJECT_PLACEHOLDERS;
 
-	/* as well as any used in projections (GROUP BY, etc.) */
-	projectColumnList = pull_var_clause((Node *) query->targetList, aggregateBehavior,
-										placeHolderBehavior);
-
 	/* must retrieve all columns referenced by local WHERE clauses... */
 	whereColumnList = pull_var_clause((Node *) localRestrictList, aggregateBehavior,
 									  placeHolderBehavior);
+
+	/* as well as any used in projections (GROUP BY, etc.) */
+	projectColumnList = pull_var_clause((Node *) query->targetList, aggregateBehavior,
+										placeHolderBehavior);
 
 	/* finally, need those used in any HAVING quals */
 	havingClauseColumnList = pull_var_clause(query->havingQual, aggregateBehavior,
