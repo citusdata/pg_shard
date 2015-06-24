@@ -1968,8 +1968,8 @@ ExecuteMultipleShardSelect(DistributedPlan *distributedPlan,
 	List *taskList = distributedPlan->taskList;
 	List *targetList = distributedPlan->targetList;
 
-	/* ExecType instead of ExecCleanType so we don't ignore junk columns */
-	TupleDesc tupleStoreDescriptor = ExecTypeFromTL(targetList, false);
+	/* ExecCleanType instead of ExecType so we ignore junk columns */
+	TupleDesc tupleStoreDescriptor = ExecCleanTypeFromTL(targetList, false);
 
 	ListCell *taskCell = NULL;
 	foreach(taskCell, taskList)
