@@ -16,6 +16,7 @@
 #include "funcapi.h"
 #include "libpq-fe.h"
 #include "miscadmin.h"
+#include "plpgsql.h"
 
 #include "pg_shard.h"
 #include "connection.h"
@@ -137,6 +138,15 @@ static void PgShardProcessUtility(Node *parsetree, const char *queryString,
 								  DestReceiver *dest, char *completionTag);
 static void ErrorOnDropIfDistributedTablesExist(DropStmt *dropStatement);
 
+/* PL/pgSQL plugin declarations */
+static void SetupPLErrorTransformation(PLpgSQL_execstate *estate, PLpgSQL_function *func);
+static void TeardownPLErrorTransformation(PLpgSQL_execstate *estate,
+										  PLpgSQL_function *func);
+static void PgShardErrorTransform(void *arg);
+static PLpgSQL_plugin PluginFuncs = {
+	.func_beg = SetupPLErrorTransformation,
+	.func_end = TeardownPLErrorTransformation
+};
 
 /* declarations for dynamic loading */
 PG_MODULE_MAGIC;
@@ -159,6 +169,8 @@ static ProcessUtility_hook_type PreviousProcessUtilityHook = NULL;
 void
 _PG_init(void)
 {
+	PLpgSQL_plugin **plugin_ptr = NULL;
+
 	PreviousPlannerHook = planner_hook;
 	planner_hook = PgShardPlanner;
 
@@ -193,6 +205,79 @@ _PG_init(void)
 							 NULL, NULL);
 
 	EmitWarningsOnPlaceholders("pg_shard");
+
+	/* install error transformation handler for PL/pgSQL invocations */
+	plugin_ptr = (PLpgSQL_plugin **) find_rendezvous_variable("PLpgSQL_plugin");
+	*plugin_ptr = &PluginFuncs;
+}
+
+
+/*
+ * SetupPLErrorTransformation is intended to run before entering PL/pgSQL
+ * functions. It pushes an error transform onto the error context stack.
+ */
+static void
+SetupPLErrorTransformation(PLpgSQL_execstate *estate, PLpgSQL_function *func)
+{
+	ErrorContextCallback *pgShardErrorContext = NULL;
+	pgShardErrorContext = MemoryContextAllocZero(TopTransactionContext,
+												 sizeof(ErrorContextCallback));
+
+	pgShardErrorContext->previous = error_context_stack;
+	pgShardErrorContext->callback = PgShardErrorTransform;
+	pgShardErrorContext->arg = NULL;
+
+	error_context_stack = pgShardErrorContext;
+}
+
+
+/*
+ * TeardownPLErrorTransformation is intended to run after a PL/pgSQL function
+ * successfully returns. It pops the error context stack in order to remove and
+ * free the transform placed on that stack by SetupPLErrorTransformation.
+ */
+static void
+TeardownPLErrorTransformation(PLpgSQL_execstate *estate, PLpgSQL_function *func)
+{
+	ErrorContextCallback *pgShardErrorContext = error_context_stack;
+
+	error_context_stack = pgShardErrorContext->previous;
+	pfree(pgShardErrorContext);
+}
+
+
+/*
+ * PgShardErrorTransform detects an uninformative error message produced when
+ * a pg_shard-distributed relation is referenced in bare SQL within a PL/pgSQL
+ * function and replaces it with a more specific message to help the user work
+ * around the underlying issue.
+ */
+static void
+PgShardErrorTransform(void *arg)
+{
+	int sqlCode = geterrcode();
+	MemoryContext errorContext = NULL;
+	ErrorData *errorData = NULL;
+
+	/* short-circuit if it's not an internal error */
+	if (sqlCode != ERRCODE_INTERNAL_ERROR)
+	{
+		return;
+	}
+
+	/* get current error data */
+	errorContext = MemoryContextSwitchTo(TopTransactionContext);
+	errorData = CopyErrorData();
+	MemoryContextSwitchTo(errorContext);
+
+	/* if it's an error about a distributed plan, clean up the fields */
+	if (strcmp("unrecognized node type: 2100", errorData->message) == 0)
+	{
+		errcode(ERRCODE_FEATURE_NOT_SUPPORTED);
+		errmsg("cannot cache distributed plan");
+		errdetail("PL/pgSQL's statement caching is unsupported by pg_shard.");
+		errhint("Bypass caching by using the EXECUTE keyword instead.");
+	}
 }
 
 

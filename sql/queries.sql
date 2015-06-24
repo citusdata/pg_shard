@@ -149,6 +149,21 @@ SET pg_shard.use_citusdb_select_logic TO true;
 SELECT title, authors.name FROM authors, articles WHERE authors.id = articles.author_id;
 SET pg_shard.use_citusdb_select_logic TO false;
 
+-- test use of EXECUTE statements within plpgsql
+DO $sharded_execute$
+	BEGIN
+		EXECUTE 'SELECT COUNT(*) FROM articles ' ||
+				'WHERE author_id = $1 AND author_id = $2' USING 1, 2;
+	END
+$sharded_execute$;
+
+-- test use of bare SQL within plpgsql
+DO $sharded_sql$
+	BEGIN
+		SELECT COUNT(*) FROM articles WHERE author_id = 1 AND author_id = 2;
+	END
+$sharded_sql$;
+
 -- test cross-shard queries
 SELECT COUNT(*) FROM articles;
 
