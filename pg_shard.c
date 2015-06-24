@@ -931,7 +931,7 @@ BuildDistributedQuery(Query *query, List *remoteRestrictList, List *localRestric
 
 
 /*
- * BuildDistributedTargetListWithAggregates returns a list of TargetEntry for the
+ * BuildDistributedTargetListWithAggregates returns a TargetEntry list for the
  * distributed query when aggregates are pushed down. This function leaves
  * AggRefs as it is in the target list. Also, WHERE clause columns pushed down.
  */
