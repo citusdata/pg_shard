@@ -812,25 +812,32 @@ DetermineRemoteAndLocalAggregatePresence(Query *query, bool *remoteQueryHasAggre
  * the partition column of the distributed table identified by the second argument.
  * This function returns false if the query has no GROUP BY clause whatsoever. To
  * work around a restriction in sequential scans, this function will also return
- * false if the query's target list has more elements than the number of columns
- * in the specified table.
+ * false if the total number of columns that are fetched are greater than
+ * the number of columns in the specified table.
  */
 static bool
 SafeToPushDownAggregate(Query *query, Oid distributedTableId)
 {
+	PVCAggregateBehavior aggregateBehavior = PVC_INCLUDE_AGGREGATES;
+	PVCPlaceHolderBehavior placeHolderBehavior = PVC_INCLUDE_PLACEHOLDERS;
+
 	bool safeToPushDownAggregates = false;
 	List *targetList = query->targetList;
 	List *groupClauseList = query->groupClause;
 	List *rangeTableList = query->rtable;
 	RangeTblEntry *rangeTableEntry = (RangeTblEntry *) linitial(rangeTableList);
+	List *targetVarList = pull_var_clause((Node *) targetList, aggregateBehavior,
+										  placeHolderBehavior);
+	List *sortVarList = pull_var_clause((Node *) query->sortClause, aggregateBehavior,
+										placeHolderBehavior);
 	int tableColumnCount = list_length(rangeTableEntry->eref->colnames);
-	int targetListCount = list_length(targetList);
+	int toBefetchedVarCount = list_length(targetVarList) + list_length(sortVarList);
 
 	/*
-	 * Return false if the target list has more elements than the table has columns or
-	 * if there is no GROUP BY clause.
+	 * Return false if the total number of columns that would be fetched from workers
+	 * is greater than the table column count or if there is no GROUP BY clause.
 	 */
-	if ((targetListCount > tableColumnCount) || groupClauseList == NIL)
+	if ((toBefetchedVarCount > tableColumnCount) || groupClauseList == NIL)
 	{
 		safeToPushDownAggregates = false;
 	}
