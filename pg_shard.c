@@ -110,10 +110,13 @@ static Query * BuildDistributedQuery(Query *query, List *remoteRestrictList,
 									 List *localRestrictList,
 									 bool aggregatesPushedDown);
 static List * BuildDistributedTargetListWithAggregates(Query *query,
-													   List *localRestrictList);
+													   List *localRestrictList,
+													   List **updatedGroupByClause);
 static List * BuildDistributedTargetListWithoutAggregates(Query *query,
 														  List *localRestrictList);
 static bool SortClauseReferencedByTargetEntry(List *sortClause, TargetEntry *targetEntry);
+static bool GroupClauseReferencedByTargetEntry(List *groupClause,
+											   TargetEntry *targetEntry);
 static Query * BuildLocalQuery(Query *query, List *localRestrictList,
 							   bool aggregatesPushedDown);
 static List * BuildLocalTargetListWithoutAggregates(List *targetListWithAggregates);
@@ -810,10 +813,10 @@ DetermineRemoteAndLocalAggregatePresence(Query *query, bool *remoteQueryHasAggre
 /*
  * SafeToPushDownAggregate determines whether a query's GROUP BY clause includes
  * the partition column of the distributed table identified by the second argument.
- * This function returns false if the query has no GROUP BY clause whatsoever. To
- * work around a restriction in sequential scans, this function will also return
- * false if the total number of columns that are fetched are greater than
- * the number of columns in the specified table.
+ * This function returns false if the query has no GROUP BY clause or it includes
+ * anything except for partition column. To work around a restriction in sequential
+ * scans, this function will also return false if the total number of columns that
+ * are fetched are greater than the number of columns in the specified table.
  */
 static bool
 SafeToPushDownAggregate(Query *query, Oid distributedTableId)
@@ -830,14 +833,18 @@ SafeToPushDownAggregate(Query *query, Oid distributedTableId)
 										  placeHolderBehavior);
 	List *sortVarList = pull_var_clause((Node *) query->sortClause, aggregateBehavior,
 										placeHolderBehavior);
+	int groupClauseLength = list_length(groupClauseList);
 	int tableColumnCount = list_length(rangeTableEntry->eref->colnames);
 	int toBefetchedVarCount = list_length(targetVarList) + list_length(sortVarList);
 
 	/*
 	 * Return false if the total number of columns that would be fetched from workers
-	 * is greater than the table column count or if there is no GROUP BY clause.
+	 * is greater than the table column count or if there is no GROUP BY or GROUP BY
+	 * clause consists of more than one elements.
 	 */
-	if ((toBefetchedVarCount > tableColumnCount) || groupClauseList == NIL)
+	if ((toBefetchedVarCount > tableColumnCount) ||
+		groupClauseList == NIL ||
+		groupClauseLength != 1)
 	{
 		safeToPushDownAggregates = false;
 	}
@@ -911,9 +918,12 @@ BuildDistributedQuery(Query *query, List *remoteRestrictList, List *localRestric
 
 	if (aggregatesPushedDown)
 	{
+		List *updatedGroupClause = NIL;
+
 		distributedQuery->hasAggs = true;
-		distributedQuery->groupClause = list_copy(query->groupClause);
-		targetList = BuildDistributedTargetListWithAggregates(query, localRestrictList);
+		targetList = BuildDistributedTargetListWithAggregates(query, localRestrictList,
+															  &updatedGroupClause);
+		distributedQuery->groupClause = updatedGroupClause;
 
 		/*
 		 * Note that havingQual is in implicitly-ANDed-list form
@@ -941,14 +951,19 @@ BuildDistributedQuery(Query *query, List *remoteRestrictList, List *localRestric
  * BuildDistributedTargetListWithAggregates returns a TargetEntry list for the
  * distributed query when aggregates are pushed down. This function leaves
  * AggRefs as it is in the target list. Also, WHERE clause columns pushed down.
+ * This function also fills third parameter (ie: updatedGroupByClause) with
+ * the updated groupClause of the query.
  */
 static List *
-BuildDistributedTargetListWithAggregates(Query *query, List *localRestrictList)
+BuildDistributedTargetListWithAggregates(Query *query, List *localRestrictList,
+										 List **updatedGroupByClause)
 {
 	List *targetList = query->targetList;
 	List *newTargetList = NIL;
 	ListCell *targetListCell = NULL;
 	List *sortClause = query->sortClause;
+	List *groupClause = query->groupClause;
+	Index targetListIndex = 1;
 	PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
 	PVCPlaceHolderBehavior placeHolderBehavior = PVC_REJECT_PLACEHOLDERS;
 
@@ -960,16 +975,60 @@ BuildDistributedTargetListWithAggregates(Query *query, List *localRestrictList)
 	/* add WHERE clause list */
 	targetList = list_concat(targetList, whereTargetList);
 
+	*updatedGroupByClause = NIL;
+	Assert(list_length(query->groupClause) == 1);
+
+	/*
+	 *  Sort columns which does not appear in the final
+	 *  target list must be pulled from the worker nodes.
+	 */
+	foreach(targetListCell, targetList)
+	{
+		TargetEntry *targetListEntry = (TargetEntry *) lfirst(targetListCell);
+
+		if (targetListEntry->resjunk)
+		{
+			bool sortTargetEntry = SortClauseReferencedByTargetEntry(sortClause,
+																	 targetListEntry);
+
+			if (sortTargetEntry)
+			{
+				targetListEntry->resjunk = false;
+			}
+			else
+			{
+				targetListEntry->resjunk = true;
+			}
+		}
+	}
+
+	/* build new target list and generate group clause accordingly */
 	foreach(targetListCell, targetList)
 	{
 		TargetEntry *targetListEntry = (TargetEntry *) lfirst(targetListCell);
 		Expr *targetExpression = (Expr *) targetListEntry->expr;
 		TargetEntry *newTargetEntry = NULL;
+		bool sortTargetEntry = SortClauseReferencedByTargetEntry(sortClause,
+																 targetListEntry);
+		bool groupTargetEntry = GroupClauseReferencedByTargetEntry(groupClause,
+																   targetListEntry);
 
 		if (contain_agg_clause((Node *) targetExpression))
 		{
 			newTargetEntry = copyObject(targetListEntry);
+
+			/* aggregates show up on ORDER BY clause, not on GROUP BY clause */
+			if (sortTargetEntry)
+			{
+				newTargetEntry->ressortgroupref = targetListIndex;
+			}
+			else
+			{
+				newTargetEntry->ressortgroupref = 0;
+			}
+
 			newTargetList = lappend(newTargetList, newTargetEntry);
+			++targetListIndex;
 		}
 		else
 		{
@@ -988,32 +1047,39 @@ BuildDistributedTargetListWithAggregates(Query *query, List *localRestrictList)
 												 targetListEntry->resname,
 												 targetListEntry->resjunk);
 
-				newTargetEntry->ressortgroupref = targetListEntry->ressortgroupref;
+				/*
+				 * Here we update ressortgroupref of the new target elements. Also, build
+				 * groupClause with respect to the new target list. We push down GROUP BY
+				 * if and only if it is on the partition column. Thus, we can safely
+				 * access its head (and its only) element.
+				 * We do not need to build sortClause, since ORDER BY is not pushed down
+				 * to the workers.
+				 */
+				if (groupTargetEntry)
+				{
+					ListCell *groupClauseListCell = list_head(groupClause);
+					SortGroupClause *groupClauseElement =
+						(SortGroupClause *) lfirst(groupClauseListCell);
+					SortGroupClause *updatedGroupClauseElement =
+						copyObject(groupClauseElement);
+
+					updatedGroupClauseElement->tleSortGroupRef = targetListIndex;
+					newTargetEntry->ressortgroupref = targetListIndex;
+
+					*updatedGroupByClause = lappend(*updatedGroupByClause,
+													updatedGroupClauseElement);
+				}
+				else if (sortTargetEntry)
+				{
+					newTargetEntry->ressortgroupref = targetListIndex;
+				}
+				else
+				{
+					newTargetEntry->ressortgroupref = 0;
+				}
+
 				newTargetList = lappend(newTargetList, newTargetEntry);
-			}
-		}
-	}
-
-	/*
-	 *  Sort columns which does not appear in the final
-	 *  target list must be pulled from the worker nodes.
-	 */
-	foreach(targetListCell, newTargetList)
-	{
-		TargetEntry *targetListEntry = (TargetEntry *) lfirst(targetListCell);
-
-		if (targetListEntry->resjunk)
-		{
-			bool sortTargetEntry = SortClauseReferencedByTargetEntry(sortClause,
-																	 targetListEntry);
-
-			if (sortTargetEntry)
-			{
-				targetListEntry->resjunk = false;
-			}
-			else
-			{
-				targetListEntry->resjunk = true;
+				++targetListIndex;
 			}
 		}
 	}
@@ -1035,9 +1101,35 @@ SortClauseReferencedByTargetEntry(List *sortClause, TargetEntry *targetEntry)
 	ListCell *sortClauseCell = NULL;
 	foreach(sortClauseCell, sortClause)
 	{
-		SortGroupClause *sortClause = (SortGroupClause *) lfirst(sortClauseCell);
+		SortGroupClause *sortClauseElement = (SortGroupClause *) lfirst(sortClauseCell);
 
-		if (targetEntryReference == sortClause->tleSortGroupRef)
+		if (targetEntryReference == sortClauseElement->tleSortGroupRef)
+		{
+			referencedByTargetEntry = true;
+			break;
+		}
+	}
+
+	return referencedByTargetEntry;
+}
+
+
+/*
+ * GroupClauseReferencedByTargetEntry returns true if targetEntry references one
+ * of the elements in the sortClause.
+ */
+static bool
+GroupClauseReferencedByTargetEntry(List *groupClause, TargetEntry *targetEntry)
+{
+	bool referencedByTargetEntry = false;
+	Index targetEntryReference = targetEntry->ressortgroupref;
+
+	ListCell *groupClauseCell = NULL;
+	foreach(groupClauseCell, groupClause)
+	{
+		SortGroupClause *groupClauseElement = (SortGroupClause *) lfirst(groupClauseCell);
+
+		if (targetEntryReference == groupClauseElement->tleSortGroupRef)
 		{
 			referencedByTargetEntry = true;
 			break;
