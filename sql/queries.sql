@@ -205,15 +205,11 @@ SELECT author_id FROM articles
 	ORDER BY author_id;
 
 -- a query with GROUP BY on partition column where ORDER BY column(s) must be pulled
-SELECT 
-	id, count(*) as cnt FROM articles
-WHERE
-	author_id  > 0
-GROUP BY 
-	author_id, id
-ORDER BY 
-	max(word_count), author_id  DESC 
-LIMIT 5;
+SELECT  min(id), count(*) as cnt FROM articles
+	WHERE author_id  > 0
+	GROUP BY author_id
+	ORDER BY max(word_count), author_id  DESC 
+	LIMIT 5;
 
 -- an aggregate query with GROUP BY on partition column
 SELECT author_id, count(*) FROM articles
@@ -254,10 +250,11 @@ SELECT author_id, count(*) as cnt, sum_two_ints(7, author_id::int) as summed_val
 	LIMIT 3;
 	
 -- a query with WHERE, HAVING, function call on data and GROUP BY on two columns including partition column
-SELECT author_id, word_count, count(*) as cnt FROM articles
-	WHERE author_id > 8 AND word_count > 8000
-	GROUP BY author_id, word_count
-	ORDER BY word_count DESC;	
+SELECT author_id, sum(word_count), avg(word_count), count(*) as cnt FROM articles
+	WHERE author_id > 3
+	GROUP BY author_id
+	HAVING sum(word_count) > 8000 AND max(word_count) > 15000
+	ORDER BY sum(word_count) DESC;	
 	
 -- GROUP BY on partition column where total number of projections are more than column count
 -- In this case, we do not push down GROUP BY
