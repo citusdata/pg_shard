@@ -30,9 +30,15 @@ BEGIN
 			PERFORM sync_table_metadata_to_citus(relation_id::regclass);
 		END LOOP;
 
-		DROP TABLE pgs_distribution_metadata.partition,
-				   pgs_distribution_metadata.shard,
-				   pgs_distribution_metadata.shard_placement;
+		-- clean up dependencies on configuration objects
+		ALTER EXTENSION pg_shard DROP SEQUENCE pgs_distribution_metadata.shard_placement_id_sequence;
+		ALTER EXTENSION pg_shard DROP SEQUENCE pgs_distribution_metadata.shard_id_sequence;
+		ALTER EXTENSION pg_shard DROP TABLE pgs_distribution_metadata.partition;
+		ALTER EXTENSION pg_shard DROP TABLE pgs_distribution_metadata.shard_placement;
+		ALTER EXTENSION pg_shard DROP TABLE pgs_distribution_metadata.shard;
+		ALTER EXTENSION pg_shard DROP SCHEMA pgs_distribution_metadata;
+
+		DROP SCHEMA pgs_distribution_metadata CASCADE;
 
 		CREATE FUNCTION adapt_and_insert_shard() RETURNS TRIGGER AS $aais$
 		BEGIN
@@ -91,43 +97,58 @@ BEGIN
 		END
 		$aaip$ LANGUAGE plpgsql;
 
+		CREATE FUNCTION adapt_and_update_partition() RETURNS trigger AS $aaup$
+		BEGIN
+			UPDATE pg_dist_partition
+			SET    logicalrelid = NEW.relation_id,
+			       partmethod = NEW.partition_method,
+			       partkey = column_name_to_column(NEW.relation_id, NEW.key)
+			WHERE  logicalrelid = OLD.relation_id;
+
+			RETURN NEW;
+		END
+		$aaup$ LANGUAGE plpgsql;
+
 		-- metadata relations are views under CitusDB
-		CREATE VIEW pgs_distribution_metadata.shard AS
-			SELECT shardid       AS id,
-				   logicalrelid  AS relation_id,
-				   shardstorage  AS storage,
-				   shardminvalue AS min_value,
-				   shardmaxvalue AS max_value
-			FROM   pg_dist_shard;
+		CREATE SCHEMA pgs_distribution_metadata
+			CREATE VIEW shard AS
+				SELECT shardid       AS id,
+					   logicalrelid  AS relation_id,
+					   shardstorage  AS storage,
+					   shardminvalue AS min_value,
+					   shardmaxvalue AS max_value
+				FROM   pg_dist_shard
 
-		CREATE TRIGGER shard_insert
-		INSTEAD OF INSERT ON pgs_distribution_metadata.shard
-			FOR EACH ROW
-			EXECUTE PROCEDURE adapt_and_insert_shard();
+			CREATE TRIGGER shard_insert INSTEAD OF INSERT ON shard
+				FOR EACH ROW
+				EXECUTE PROCEDURE adapt_and_insert_shard()
 
-		CREATE VIEW pgs_distribution_metadata.shard_placement AS
-			SELECT oid::bigint AS id,
-				   shardid     AS shard_id,
-				   shardstate  AS shard_state,
-				   nodename    AS node_name,
-				   nodeport    AS node_port
-			FROM   pg_dist_shard_placement;
+			CREATE VIEW shard_placement AS
+				SELECT oid::bigint AS id,
+					   shardid     AS shard_id,
+					   shardstate  AS shard_state,
+					   nodename    AS node_name,
+					   nodeport    AS node_port
+				FROM   pg_dist_shard_placement
 
-		CREATE TRIGGER shard_placement_insert
-		INSTEAD OF INSERT ON pgs_distribution_metadata.shard_placement
-			FOR EACH ROW
-			EXECUTE PROCEDURE adapt_and_insert_shard_placement();
+			CREATE TRIGGER shard_placement_insert INSTEAD OF INSERT ON shard_placement
+				FOR EACH ROW
+				EXECUTE PROCEDURE adapt_and_insert_shard_placement()
 
-		CREATE VIEW pgs_distribution_metadata.partition AS
-			SELECT logicalrelid AS relation_id,
-				   partmethod   AS partition_method,
-				   column_to_column_name(logicalrelid, partkey) AS key
-			FROM   pg_dist_partition;
+			CREATE VIEW partition AS
+				SELECT logicalrelid AS relation_id,
+					   partmethod   AS partition_method,
+					   column_to_column_name(logicalrelid, partkey) AS key
+				FROM   pg_dist_partition
 
-		CREATE TRIGGER partition_insert
-		INSTEAD OF INSERT ON pgs_distribution_metadata.partition
-			FOR EACH ROW
-			EXECUTE PROCEDURE adapt_and_insert_partition();
+			CREATE TRIGGER partition_insert INSTEAD OF INSERT ON partition
+				FOR EACH ROW
+				EXECUTE PROCEDURE adapt_and_insert_partition()
+
+			CREATE TRIGGER partition_update INSTEAD OF UPDATE ON partition
+				FOR EACH ROW
+				EXECUTE PROCEDURE adapt_and_update_partition();
+
 	ELSE
 		-- add default values to id columns
 		ALTER TABLE pgs_distribution_metadata.shard
