@@ -23,6 +23,7 @@
 #include "access/htup.h"
 #include "access/tupdesc.h"
 #include "executor/spi.h"
+#include "catalog/catalog.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
 #include "nodes/makefuncs.h"
@@ -369,24 +370,37 @@ PartitionType(Oid distributedTableId)
 
 
 /*
- * IsDistributedTable simply returns whether the specified table is distributed.
+ * IsDistributedTable returns whether the specified table is distributed. It
+ * returns false if the input is InvalidOid.
  */
 bool
 IsDistributedTable(Oid tableId)
 {
 	Oid metadataNamespaceOid = get_namespace_oid("pgs_distribution_metadata", false);
-	Oid partitionMetadataTableOid = get_relname_relid("partition", metadataNamespaceOid);
+	Oid tableNamespaceOid = InvalidOid;
+	Oid partitionMetadataTableOid = InvalidOid;
 	bool isDistributedTable = false;
 	Oid argTypes[] = { OIDOID };
 	Datum argValues[] = { ObjectIdGetDatum(tableId) };
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
 
+	/* short-circuit if the input is invalid */
+	if (tableId == InvalidOid)
+	{
+		return false;
+	}
+
 	/*
 	 * The query below hits the partition metadata table, so if we don't detect
 	 * that and short-circuit, we'll get infinite recursion in the planner.
+	 *
+	 * Within CitusDB, a view rewrite the query to reference CitusDB catalogs,
+	 * so we also need to catch whether the table exists in a system namespace.
 	 */
-	if (tableId == partitionMetadataTableOid)
+	tableNamespaceOid = get_rel_namespace(tableId);
+	partitionMetadataTableOid = get_relname_relid("partition", metadataNamespaceOid);
+	if (IsSystemNamespace(tableNamespaceOid) || tableId == partitionMetadataTableOid)
 	{
 		return false;
 	}
@@ -519,19 +533,33 @@ TupleToShardInterval(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 	Oid relationId = DatumGetObjectId(relationIdDatum);
 
 	char partitionType = DatumGetChar(partitionTypeDatum);
-	if (partitionType == HASH_PARTITION_TYPE)
+	switch (partitionType)
 	{
-		intervalTypeId = INT4OID;
-	}
-	else
-	{
-		Datum keyDatum = SPI_getbinval(heapTuple, tupleDescriptor,
-									   TLIST_NUM_SHARD_KEY, &isNull);
-		char *partitionColumnName = TextDatumGetCString(keyDatum);
+		case APPEND_PARTITION_TYPE:
+		case RANGE_PARTITION_TYPE:
+		{
+			Datum keyDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+										   TLIST_NUM_SHARD_KEY, &isNull);
+			char *partitionColumnName = TextDatumGetCString(keyDatum);
 
-		Var *partitionColumn = ColumnNameToColumn(relationId, partitionColumnName);
-		intervalTypeId = partitionColumn->vartype;
-		intervalTypeMod = partitionColumn->vartypmod;
+			Var *partitionColumn = ColumnNameToColumn(relationId, partitionColumnName);
+			intervalTypeId = partitionColumn->vartype;
+			intervalTypeMod = partitionColumn->vartypmod;
+			break;
+		}
+
+		case HASH_PARTITION_TYPE:
+		{
+			intervalTypeId = INT4OID;
+			break;
+		}
+
+		default:
+		{
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("unsupported table partition type: %c",
+								   partitionType)));
+		}
 	}
 
 	getTypeInputInfo(intervalTypeId, &inputFunctionId, &typeIoParam);

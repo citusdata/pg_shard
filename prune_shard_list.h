@@ -20,9 +20,6 @@
 #include "nodes/primnodes.h"
 
 
-/* character used to indicate a hash-partitioned table */
-#define DISTRIBUTE_BY_HASH 'h'
-
 /*
  * Column ID used to signify that a partition column value has been replaced by
  * its hashed value.

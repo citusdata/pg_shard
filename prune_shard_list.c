@@ -80,23 +80,34 @@ PruneShardList(Oid relationId, List *whereClauseList, List *shardIntervalList)
 	char partitionMethod = PartitionType(relationId);
 
 	/* build the filter clause list for the partition method */
-	if (partitionMethod == DISTRIBUTE_BY_HASH)
+	switch (partitionMethod)
 	{
-		Node *hashedNode = HashableClauseMutator((Node *) whereClauseList,
-												 partitionColumn);
+		case APPEND_PARTITION_TYPE:
+		case RANGE_PARTITION_TYPE:
+		{
+			restrictInfoList = BuildRestrictInfoList(whereClauseList);
+			break;
+		}
 
-		List *hashedClauseList = (List *) hashedNode;
-		restrictInfoList = BuildRestrictInfoList(hashedClauseList);
-	}
-	else
-	{
-		restrictInfoList = BuildRestrictInfoList(whereClauseList);
-	}
+		case HASH_PARTITION_TYPE:
+		{
+			Node *hashedNode = HashableClauseMutator((Node *) whereClauseList,
+													 partitionColumn);
 
-	/* override the partition column for hash partitioning */
-	if (partitionMethod == DISTRIBUTE_BY_HASH)
-	{
-		partitionColumn = MakeInt4Column();
+			List *hashedClauseList = (List *) hashedNode;
+			restrictInfoList = BuildRestrictInfoList(hashedClauseList);
+
+			/* override the partition column for hash partitioning */
+			partitionColumn = MakeInt4Column();
+			break;
+		}
+
+		default:
+		{
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("unsupported table partition type: %c",
+								   partitionMethod)));
+		}
 	}
 
 	/* build the base expression for constraint */

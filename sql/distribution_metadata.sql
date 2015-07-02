@@ -58,12 +58,12 @@ CREATE FUNCTION create_healthy_local_shard_placement_row(bigint)
 	LANGUAGE C STRICT;
 
 CREATE FUNCTION delete_shard_placement_row(bigint)
-	RETURNS void
+	RETURNS bool
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 
 CREATE FUNCTION update_shard_placement_row_state(bigint, int)
-	RETURNS void
+	RETURNS bool
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 
@@ -150,18 +150,6 @@ SELECT load_shard_placement_array(6, false);
 -- should see column id of 'name'
 SELECT partition_column_id('events');
 
-BEGIN;
-	UPDATE pgs_distribution_metadata.partition
-	SET    key = REPEAT('a', 1024)
-	WHERE  relation_id = 'events' :: regclass;
-
-	---- should see error that partition column is too long
-	SELECT Partition_column_id('events');
-ROLLBACK;
-
--- should see error (catalog is not distributed)
-SELECT partition_column_id('pg_type');
-
 -- should see hash partition type and fail for non-distributed tables
 SELECT partition_type('events');
 SELECT partition_type('pg_type');
@@ -219,7 +207,8 @@ WHERE id = :new_shard_id;
 -- add a placement and manually inspect row
 SELECT create_healthy_local_shard_placement_row(:new_shard_id) AS new_placement_id
 \gset
-SELECT * FROM pgs_distribution_metadata.shard_placement WHERE id = :new_placement_id;
+SELECT shard_state, node_name, node_port FROM pgs_distribution_metadata.shard_placement
+WHERE id = :new_placement_id;
 
 -- mark it as unhealthy and inspect
 SELECT update_shard_placement_row_state(:new_placement_id, 3);

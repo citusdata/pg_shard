@@ -149,8 +149,11 @@ WITH limit_order_placements AS (
 		AND    s.relation_id = 'limit_orders'::regclass
 	)
 INSERT INTO pgs_distribution_metadata.shard_placement
-SELECT nextval('pgs_distribution_metadata.shard_placement_id_sequence'),
-	   shard_id,
+			(shard_id,
+			 shard_state,
+			 node_name,
+			 node_port)
+SELECT shard_id,
 	   shard_state,
 	   'badhost',
 	   54321

@@ -77,7 +77,7 @@ INSERT INTO articles VALUES (50, 10, 'anjanette', 19519);
 -- first, test zero-shard SELECT, which should return zero rows
 SELECT COUNT(*) FROM articles WHERE author_id = 1 AND author_id = 2;
 
--- zero-shard modifications should be no-ops but not fail
+-- zero-shard modifications should be no-ops in pg_shard, fail in CitusDB
 UPDATE articles SET title = '' WHERE author_id = 1 AND author_id = 2;
 DELETE FROM articles WHERE author_id = 1 AND author_id = 2;
 
@@ -140,9 +140,6 @@ SELECT title, authors.name FROM authors, articles WHERE authors.id = articles.au
 -- joins are not supported in FROM clause
 SELECT * FROM  (articles INNER JOIN authors ON articles.id = authors.id);
 
--- test CitusDB code path (this will error out in normal PostgreSQL)
-SELECT sync_table_metadata_to_citus('articles');
-
 -- with normal PostgreSQL, expect error about CitusDB being missing
 -- with CitusDB, expect an error about JOINing local table with distributed
 SET pg_shard.use_citusdb_select_logic TO true;
@@ -177,7 +174,8 @@ SELECT author_id, sum(word_count) AS corpus_size FROM articles
 -- cross-shard queries on a foreign table should fail
 -- we'll just point the article shards to a foreign table
 BEGIN;
-	CREATE FOREIGN TABLE foreign_articles (author_id bigint) SERVER fake_fdw_server;
+	CREATE FOREIGN TABLE foreign_articles (id bigint, author_id bigint)
+	SERVER fake_fdw_server;
 
 	UPDATE pgs_distribution_metadata.partition
 	SET relation_id='foreign_articles'::regclass

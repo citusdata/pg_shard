@@ -19,6 +19,8 @@
 
 /* function declarations for syncing metadata with CitusDB */
 extern Datum partition_column_to_node_string(PG_FUNCTION_ARGS);
+extern Datum column_name_to_column(PG_FUNCTION_ARGS);
+extern Datum column_to_column_name(PG_FUNCTION_ARGS);
 
 
 #endif /* PG_SHARD_CITUS_METADATA_SYNC_H */

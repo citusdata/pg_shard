@@ -18,15 +18,19 @@
 
 #include <stddef.h>
 
+#include "access/attnum.h"
 #include "nodes/nodes.h"
 #include "nodes/primnodes.h"
 #include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/errcodes.h"
+#include "utils/lsyscache.h"
 
 
 /* declarations for dynamic loading */
 PG_FUNCTION_INFO_V1(partition_column_to_node_string);
+PG_FUNCTION_INFO_V1(column_name_to_column);
+PG_FUNCTION_INFO_V1(column_to_column_name);
 
 
 /*
@@ -56,4 +60,79 @@ partition_column_to_node_string(PG_FUNCTION_ARGS)
 	partitionColumnText = cstring_to_text(partitionColumnString);
 
 	PG_RETURN_TEXT_P(partitionColumnText);
+}
+
+
+/*
+ * column_name_to_column is an internal UDF to obtain a textual representation
+ * of a particular column node (Var), given a relation identifier and column
+ * name. There is no requirement that the table be distributed; this function
+ * simply returns the textual representation of a Var representing a column.
+ * This function will raise an ERROR if no such column can be found or if the
+ * provided name refers to a system column.
+ */
+Datum
+column_name_to_column(PG_FUNCTION_ARGS)
+{
+	Oid relationId = PG_GETARG_OID(0);
+	text *columnText = PG_GETARG_TEXT_P(1);
+	char *columnName = text_to_cstring(columnText);
+	Var *column = NULL;
+	char *columnNodeString = NULL;
+	text *columnNodeText = NULL;
+
+	column = ColumnNameToColumn(relationId, columnName);
+	columnNodeString = nodeToString(column);
+	columnNodeText = cstring_to_text(columnNodeString);
+
+	PG_RETURN_TEXT_P(columnNodeText);
+}
+
+
+/*
+ * column_to_column_name is an internal UDF to obtain the human-readable name
+ * of a column given a relation identifier and the column's internal textual
+ * (Var) representation. This function will raise an ERROR if no such column
+ * can be found or if the provided Var refers to a system column.
+ */
+Datum
+column_to_column_name(PG_FUNCTION_ARGS)
+{
+	Oid relationId = PG_GETARG_OID(0);
+	text *columnNodeText = PG_GETARG_TEXT_P(1);
+	char *columnNodeString = text_to_cstring(columnNodeText);
+	Node *columnNode = NULL;
+	Var *column = NULL;
+	AttrNumber columnNumber = InvalidAttrNumber;
+	char *columnName = NULL;
+	text *columnText = NULL;
+
+	columnNode = stringToNode(columnNodeString);
+
+	Assert(IsA(columnNode, Var));
+	column = (Var *) columnNode;
+
+	columnNumber = column->varattno;
+	if (!AttrNumberIsForUserDefinedAttr(columnNumber))
+	{
+		char *relationName = get_rel_name(relationId);
+
+		ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
+						errmsg("attribute %d of relation \"%s\" is a system column",
+							   columnNumber, relationName)));
+	}
+
+	columnName = get_attname(relationId, column->varattno);
+	if (columnName == NULL)
+	{
+		char *relationName = get_rel_name(relationId);
+
+		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_COLUMN),
+						errmsg("attribute %d of relation \"%s\" does not exist",
+							   columnNumber, relationName)));
+	}
+
+	columnText = cstring_to_text(columnName);
+
+	PG_RETURN_TEXT_P(columnText);
 }
