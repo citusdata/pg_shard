@@ -79,6 +79,18 @@ BEGIN
 		END
 		$aaip$ LANGUAGE plpgsql;
 
+		CREATE FUNCTION adapt_and_update_partition() RETURNS trigger AS $aaup$
+		BEGIN
+			UPDATE pg_dist_partition
+			SET    logicalrelid = NEW.relation_id,
+			       partmethod = NEW.partition_method,
+			       partkey = column_name_to_column(NEW.relation_id, NEW.key)
+			WHERE  logicalrelid = OLD.relation_id;
+
+			RETURN NEW;
+		END
+		$aaup$ LANGUAGE plpgsql;
+
 		-- metadata relations are views under CitusDB
 		CREATE SCHEMA pgs_distribution_metadata
 			CREATE VIEW shard AS
@@ -113,7 +125,11 @@ BEGIN
 
 			CREATE TRIGGER partition_insert INSTEAD OF INSERT ON partition
 				FOR EACH ROW
-				EXECUTE PROCEDURE adapt_and_insert_partition();
+				EXECUTE PROCEDURE adapt_and_insert_partition()
+
+			CREATE TRIGGER partition_update INSTEAD OF UPDATE ON partition
+				FOR EACH ROW
+				EXECUTE PROCEDURE adapt_and_update_partition();
 
 	ELSE
 		-- the pgs_distribution_metadata schema stores data distribution information
