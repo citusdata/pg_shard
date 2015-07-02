@@ -3,6 +3,7 @@ cache: apt
 env:
   global:
     - enable_coverage=yes
+    - PG_PRELOAD=pg_shard
   matrix:
     - PGVERSION=9.3
     - PGVERSION=9.4
