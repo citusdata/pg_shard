@@ -31,7 +31,7 @@ SCRIPTS = bin/copy_to_distributed_table
 REGRESS = init connection distribution_metadata extend_ddl_commands \
 		  generate_ddl_commands create_shards prune_shard_list repair_shards \
 		  modifications queries utilities citus_metadata_sync create_insert_proxy \
-                  data_types
+		  data_types
 
 # The launcher regression flag lets us specify a special wrapper to handle
 # testing rather than psql directly. Our wrapper swaps in a known worker list.
