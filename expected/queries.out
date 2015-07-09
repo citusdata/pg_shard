@@ -234,21 +234,6 @@ SELECT COUNT(*) FROM articles;
     50
 (1 row)
 
--- try query with more SQL features
-SELECT author_id, sum(word_count) AS corpus_size FROM articles
-	GROUP BY author_id
-	HAVING sum(word_count) > 25000
-	ORDER BY sum(word_count) DESC
-	LIMIT 5;
- author_id | corpus_size 
------------+-------------
-         4 |       66325
-         2 |       61782
-        10 |       59955
-         8 |       55410
-         6 |       50867
-(5 rows)
-
 -- cross-shard queries on a foreign table should fail
 -- we'll just point the article shards to a foreign table
 BEGIN;
@@ -275,22 +260,229 @@ LOG:  distributed statement: SELECT NULL::unknown FROM ONLY articles_102046 WHER
     23
 (1 row)
 
-SET client_min_messages = DEFAULT;
-SET pg_shard.log_distributed_statements = DEFAULT;
--- use HAVING without its variable in target list
-SELECT author_id FROM articles
-	GROUP BY author_id
-	HAVING sum(word_count) > 50000
-	ORDER BY author_id;
- author_id 
------------
-         2
-         4
-         6
-         8
-        10
+-- function for tests
+CREATE OR REPLACE FUNCTION sum_two_ints(int,int) RETURNS int
+    AS $$ SELECT $1 + $2 $$
+    LANGUAGE SQL IMMUTABLE;
+-- function for tests
+CREATE OR REPLACE FUNCTION double_single_int(int) RETURNS int
+    AS $$ SELECT $1 * $1 $$
+    LANGUAGE SQL IMMUTABLE;
+-- use HAVING without its variable in target list when GROUP BY non-partition column
+SELECT title FROM articles
+	GROUP BY title
+	HAVING sum(word_count) > 18000
+	ORDER BY title;
+LOG:  distributed statement: SELECT title, word_count FROM ONLY articles_10037 WHERE true
+LOG:  distributed statement: SELECT title, word_count FROM ONLY articles_10038 WHERE true
+   title    
+------------
+ alkylic
+ andesite
+ anjanette
+ archiblast
+ arsenous
 (5 rows)
 
+-- try query with more SQL features when GROUP BY non-partition column
+SELECT title, sum(word_count) AS corpus_size FROM articles
+	GROUP BY title
+	HAVING sum(word_count) > 2000
+	ORDER BY sum(word_count) DESC
+	LIMIT 5;
+LOG:  distributed statement: SELECT title, word_count FROM ONLY articles_10037 WHERE true
+LOG:  distributed statement: SELECT title, word_count FROM ONLY articles_10038 WHERE true
+   title    | corpus_size 
+------------+-------------
+ anjanette  |       19519
+ andesite   |       19094
+ alkylic    |       18610
+ arsenous   |       18188
+ archiblast |       18185
+(5 rows)
+
+-- a simple query with GROUP BY on partition column
+SELECT author_id FROM articles
+	GROUP BY author_id
+	ORDER BY author_id;
+LOG:  distributed statement: SELECT author_id FROM ONLY articles_10037 WHERE true GROUP BY author_id HAVING true
+LOG:  distributed statement: SELECT author_id FROM ONLY articles_10038 WHERE true GROUP BY author_id HAVING true
+ author_id 
+-----------
+         1
+         2
+         3
+         4
+         5
+         6
+         7
+         8
+         9
+        10
+(10 rows)
+
+-- a query with GROUP BY on partition column where ORDER BY column(s) must be pulled
+SELECT  min(id), count(*) as cnt FROM articles
+	WHERE author_id  > 0
+	GROUP BY author_id
+	ORDER BY max(word_count), author_id  DESC 
+	LIMIT 5;
+LOG:  distributed statement: SELECT min(id) AS min, count(*) AS cnt, max(word_count), author_id FROM ONLY articles_10037 WHERE (author_id > 0) GROUP BY author_id HAVING true
+LOG:  distributed statement: SELECT min(id) AS min, count(*) AS cnt, max(word_count), author_id FROM ONLY articles_10038 WHERE (author_id > 0) GROUP BY author_id HAVING true
+ min | cnt 
+-----+-----
+   9 |   5
+   5 |   5
+   1 |   5
+   7 |   5
+   3 |   5
+(5 rows)
+
+-- an aggregate query with GROUP BY on partition column
+SELECT author_id, count(*) FROM articles
+	GROUP BY author_id
+	ORDER BY author_id;
+LOG:  distributed statement: SELECT author_id, count(*) AS count FROM ONLY articles_10037 WHERE true GROUP BY author_id HAVING true
+LOG:  distributed statement: SELECT author_id, count(*) AS count FROM ONLY articles_10038 WHERE true GROUP BY author_id HAVING true
+ author_id | count 
+-----------+-------
+         1 |     5
+         2 |     5
+         3 |     5
+         4 |     5
+         5 |     5
+         6 |     5
+         7 |     5
+         8 |     5
+         9 |     5
+        10 |     5
+(10 rows)
+
+-- a query with HAVING and GROUP BY on partition column
+-- project column includes an aggregate in an operator expression 
+SELECT author_id, (count(*) + author_id) as cnt FROM articles
+	GROUP BY author_id
+	HAVING (count(*) + author_id) > 4
+	ORDER BY author_id;
+LOG:  distributed statement: SELECT author_id, (count(*) + author_id) AS cnt FROM ONLY articles_10037 WHERE true GROUP BY author_id HAVING ((count(*) + author_id) > 4)
+LOG:  distributed statement: SELECT author_id, (count(*) + author_id) AS cnt FROM ONLY articles_10038 WHERE true GROUP BY author_id HAVING ((count(*) + author_id) > 4)
+ author_id | cnt 
+-----------+-----
+         1 |   6
+         2 |   7
+         3 |   8
+         4 |   9
+         5 |  10
+         6 |  11
+         7 |  12
+         8 |  13
+         9 |  14
+        10 |  15
+(10 rows)
+
+-- a query with multiple HAVING clauses
+SELECT author_id, count(*) as cnt FROM articles
+	GROUP BY author_id
+	HAVING count(*) > 4 AND sum(author_id) > 30
+	ORDER BY author_id;
+LOG:  distributed statement: SELECT author_id, count(*) AS cnt FROM ONLY articles_10037 WHERE true GROUP BY author_id HAVING ((count(*) > 4) AND (sum(author_id) > 30::numeric))
+LOG:  distributed statement: SELECT author_id, count(*) AS cnt FROM ONLY articles_10038 WHERE true GROUP BY author_id HAVING ((count(*) > 4) AND (sum(author_id) > 30::numeric))
+ author_id | cnt 
+-----------+-----
+         7 |   5
+         8 |   5
+         9 |   5
+        10 |   5
+(4 rows)
+
+-- a query with WHERE, HAVING and GROUP BY on partition column
+SELECT author_id, count(*) as cnt FROM articles
+	WHERE author_id > 8
+	GROUP BY author_id
+	HAVING count(*) >= 5
+	ORDER BY author_id DESC;
+LOG:  distributed statement: SELECT author_id, count(*) AS cnt FROM ONLY articles_10037 WHERE (author_id > 8) GROUP BY author_id HAVING (count(*) >= 5)
+LOG:  distributed statement: SELECT author_id, count(*) AS cnt FROM ONLY articles_10038 WHERE (author_id > 8) GROUP BY author_id HAVING (count(*) >= 5)
+ author_id | cnt 
+-----------+-----
+        10 |   5
+         9 |   5
+(2 rows)
+
+		
+-- a query with WHERE, function call with const value and GROUP BY on partition column
+SELECT author_id, double_single_int(15) FROM articles
+	WHERE author_id > 5
+	GROUP BY author_id
+	ORDER BY author_id DESC;
+LOG:  distributed statement: SELECT author_id FROM ONLY articles_10037 WHERE (author_id > 5) GROUP BY author_id HAVING true
+LOG:  distributed statement: SELECT author_id FROM ONLY articles_10038 WHERE (author_id > 5) GROUP BY author_id HAVING true
+ author_id | double_single_int 
+-----------+-------------------
+        10 |               225
+         9 |               225
+         8 |               225
+         7 |               225
+         6 |               225
+(5 rows)
+
+		
+-- a query with WHERE, LIMIT, HAVING, function call on data and GROUP BY on partition column
+SELECT author_id, count(*) as cnt, sum_two_ints(7, author_id::int) as summed_value FROM articles
+	WHERE author_id < 9
+	GROUP BY author_id
+	ORDER BY sum_two_ints(7, author_id::int) DESC
+	LIMIT 3;
+LOG:  distributed statement: SELECT author_id, count(*) AS cnt, author_id AS summed_value FROM ONLY articles_10037 WHERE (author_id < 9) GROUP BY author_id HAVING true
+LOG:  distributed statement: SELECT author_id, count(*) AS cnt, author_id AS summed_value FROM ONLY articles_10038 WHERE (author_id < 9) GROUP BY author_id HAVING true
+ author_id | cnt | summed_value 
+-----------+-----+--------------
+         8 |   5 |           15
+         7 |   5 |           14
+         6 |   5 |           13
+(3 rows)
+
+	
+-- a query with WHERE, HAVING, function call on data and GROUP BY on two columns including partition column
+SELECT author_id, sum(word_count), avg(word_count), count(*) as cnt FROM articles
+	WHERE author_id > 3
+	GROUP BY author_id
+	HAVING sum(word_count) > 8000 AND max(word_count) > 15000
+	ORDER BY sum(word_count) DESC;	
+LOG:  distributed statement: SELECT author_id, sum(word_count) AS sum, avg(word_count) AS avg, count(*) AS cnt FROM ONLY articles_10037 WHERE (author_id > 3) GROUP BY author_id HAVING ((sum(word_count) > 8000) AND (max(word_count) > 15000))
+LOG:  distributed statement: SELECT author_id, sum(word_count) AS sum, avg(word_count) AS avg, count(*) AS cnt FROM ONLY articles_10038 WHERE (author_id > 3) GROUP BY author_id HAVING ((sum(word_count) > 8000) AND (max(word_count) > 15000))
+ author_id |  sum  |          avg           | cnt 
+-----------+-------+------------------------+-----
+         4 | 66325 |     13265.000000000000 |   5
+        10 | 59955 | 11991.0000000000000000 |   5
+         8 | 55410 | 11082.0000000000000000 |   5
+         6 | 50867 | 10173.4000000000000000 |   5
+(4 rows)
+
+	
+-- GROUP BY on partition column where total number of projections are more than column count
+-- In this case, we do not push down GROUP BY
+SELECT author_id, count(*), sum(author_id), avg(author_id), max(author_id) FROM articles
+	GROUP BY author_id
+	ORDER BY author_id;
+LOG:  distributed statement: SELECT author_id FROM ONLY articles_10037 WHERE true
+LOG:  distributed statement: SELECT author_id FROM ONLY articles_10038 WHERE true
+ author_id | count | sum |          avg           | max 
+-----------+-------+-----+------------------------+-----
+         1 |     5 |   5 | 1.00000000000000000000 |   1
+         2 |     5 |  10 |     2.0000000000000000 |   2
+         3 |     5 |  15 |     3.0000000000000000 |   3
+         4 |     5 |  20 |     4.0000000000000000 |   4
+         5 |     5 |  25 |     5.0000000000000000 |   5
+         6 |     5 |  30 |     6.0000000000000000 |   6
+         7 |     5 |  35 |     7.0000000000000000 |   7
+         8 |     5 |  40 |     8.0000000000000000 |   8
+         9 |     5 |  45 |     9.0000000000000000 |   9
+        10 |     5 |  50 |    10.0000000000000000 |  10
+(10 rows)
+
+SET client_min_messages = DEFAULT;
+SET pg_shard.log_distributed_statements = DEFAULT;
 -- verify temp tables used by cross-shard queries do not persist
 SELECT COUNT(*) FROM pg_class WHERE relname LIKE 'pg_shard_temp_table%' AND
 									relkind = 'r';

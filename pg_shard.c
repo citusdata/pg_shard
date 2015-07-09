@@ -28,6 +28,7 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "access/attnum.h"
 #include "access/heapam.h"
 #include "access/htup_details.h"
 #include "access/htup.h"
@@ -53,10 +54,12 @@
 #include "nodes/pg_list.h"
 #include "nodes/plannodes.h"
 #include "nodes/primnodes.h"
+#include "nodes/value.h"
 #include "optimizer/clauses.h"
 #include "optimizer/cost.h"
 #include "optimizer/planner.h"
 #include "optimizer/var.h"
+#include "optimizer/tlist.h"
 #include "parser/analyze.h"
 #include "parser/parse_node.h"
 #include "parser/parsetree.h"
@@ -99,9 +102,26 @@ static List * DistributedQueryShardList(Query *query);
 static bool SelectFromMultipleShards(Query *query, List *queryShardList);
 static void ClassifyRestrictions(List *queryRestrictList, List **remoteRestrictList,
 								 List **localRestrictList);
-static Query * RowAndColumnFilterQuery(Query *query, List *remoteRestrictList,
-									   List *localRestrictList);
-static Query * BuildLocalQuery(Query *query, List *localRestrictList);
+static void DetermineRemoteAndLocalAggregatePresence(Query *query,
+													 bool *remoteQueryHasAggregates,
+													 bool *localQueryHasAggregates);
+static bool SafeToPushDownAggregate(Query *query, Oid distributedTableId);
+static bool GroupedByColumn(List *groupClauseList, List *targetList, Var *column);
+static Query * BuildDistributedQuery(Query *query, List *remoteRestrictList,
+									 List *localRestrictList,
+									 bool aggregatesPushedDown);
+static List * BuildDistributedTargetListWithAggregates(Query *query,
+													   List *localRestrictList,
+													   List **updatedGroupByClause);
+static List * BuildDistributedTargetListWithoutAggregates(Query *query,
+														  List *localRestrictList);
+static bool SortClauseReferencedByTargetEntry(List *sortClause, TargetEntry *targetEntry);
+static bool GroupClauseReferencedByTargetEntry(List *groupClause,
+											   TargetEntry *targetEntry);
+static Query * BuildLocalQuery(Query *query, List *localRestrictList,
+							   bool aggregatesPushedDown);
+static List * BuildLocalTargetListWithoutAggregates(List *targetListWithAggregates);
+static Node * AttributeNumberMutator(Node *originalNode, AttrNumber *columnId);
 static PlannedStmt * PlanSequentialScan(Query *query, int cursorOptions,
 										ParamListInfo boundParams);
 static List * QueryRestrictList(Query *query);
@@ -109,7 +129,17 @@ static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
 static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
 static List * QueryFromList(List *rangeTableList);
 static List * TargetEntryList(List *expressionList);
+static CreateStmt * CreateTemporaryTableStmt(Query *distributedQuery,
+											 bool pushDownAggregates);
+static CreateStmt * BuildCreateStatement(StringInfo masterTableName,
+										 List *masterTargetList,
+										 List *masterColumnNameList);
+static List * ValueToStringList(List *valueList);
+static List * MasterTargetList(List *workerTargetList);
+static List * ColumnDefinitionList(List *columnNameList, List *columnTypeList);
 static CreateStmt * CreateTemporaryTableLikeStmt(Oid sourceRelationId);
+static StringInfo CreateUniqueTableName(void);
+static CreateStmt * CreateStatement(RangeVar *relation, List *columnDefinitionList);
 static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalList);
 
 /* executor functions forward declarations */
@@ -314,6 +344,7 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 	{
 		DistributedPlan *distributedPlan = NULL;
 		Query *distributedQuery = copyObject(query);
+		List *distributedPlanTargetList = distributedQuery->targetList;
 		List *queryShardList = NIL;
 		bool selectFromMultipleShards = false;
 		CreateStmt *createTemporaryTableStmt = NULL;
@@ -343,21 +374,53 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 		selectFromMultipleShards = SelectFromMultipleShards(query, queryShardList);
 		if (selectFromMultipleShards)
 		{
-			Oid distributedTableId = InvalidOid;
 			Query *localQuery = NULL;
 			List *queryRestrictList = QueryRestrictList(distributedQuery);
 			List *remoteRestrictList = NIL;
 			List *localRestrictList = NIL;
+			List *distributedQueryTargetList = NIL;
+			bool localQueryHasAggregates = false;
+			bool remoteQueryHasAggregates = false;
+			bool aggregatesPushedDown = false;
 
 			/* partition restrictions into remote and local lists */
 			ClassifyRestrictions(queryRestrictList, &remoteRestrictList,
 								 &localRestrictList);
 
+			/* decide whether remote and local queries will have aggregates */
+			DetermineRemoteAndLocalAggregatePresence(query, &remoteQueryHasAggregates,
+													 &localQueryHasAggregates);
+
+			/*
+			 * Determine whether we will push down aggregates or not. Basically, we are
+			 * "pushing down" aggregates if only the remote query has any. However, we
+			 * keep the second parameter of the AND to emphasize the proper behavior.
+			 */
+			aggregatesPushedDown = (remoteQueryHasAggregates && !localQueryHasAggregates);
+
 			/* build local and distributed query */
-			distributedQuery = RowAndColumnFilterQuery(distributedQuery,
-													   remoteRestrictList,
-													   localRestrictList);
-			localQuery = BuildLocalQuery(query, localRestrictList);
+			distributedQuery = BuildDistributedQuery(distributedQuery,
+													 remoteRestrictList,
+													 localRestrictList,
+													 aggregatesPushedDown);
+			localQuery = BuildLocalQuery(query, localRestrictList, aggregatesPushedDown);
+
+			distributedQueryTargetList = distributedQuery->targetList;
+
+			/*
+			 * The schema of the temporary table must change depending on whether
+			 * aggregates will be pushed down or not. So we calculate a new target
+			 * list based on the output of the pushed down aggregates in the remote
+			 * query. If no push down takes place, the target list is not changed.
+			 */
+			if (aggregatesPushedDown)
+			{
+				distributedPlanTargetList = MasterTargetList(distributedQueryTargetList);
+			}
+			else
+			{
+				distributedPlanTargetList = distributedQueryTargetList;
+			}
 
 			/*
 			 * Force a sequential scan as we change the underlying table to
@@ -366,15 +429,19 @@ PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 			 */
 			plannedStatement = PlanSequentialScan(localQuery, cursorOptions, boundParams);
 
-			/* construct a CreateStmt to clone the existing table */
-			distributedTableId = ExtractFirstDistributedTableId(distributedQuery);
-			createTemporaryTableStmt = CreateTemporaryTableLikeStmt(distributedTableId);
+			/*
+			 * Construct a CREATE statement based on whether aggregates are being
+			 * pushed down.
+			 */
+			createTemporaryTableStmt = CreateTemporaryTableStmt(distributedQuery,
+																aggregatesPushedDown);
 		}
 
 		distributedPlan = BuildDistributedPlan(distributedQuery, queryShardList);
 		distributedPlan->originalPlan = plannedStatement->planTree;
 		distributedPlan->selectFromMultipleShards = selectFromMultipleShards;
 		distributedPlan->createTemporaryTableStmt = createTemporaryTableStmt;
+		distributedPlan->targetList = distributedPlanTargetList;
 
 		plannedStatement->planTree = (Plan *) distributedPlan;
 	}
@@ -798,25 +865,133 @@ ClassifyRestrictions(List *queryRestrictList, List **remoteRestrictList,
 
 
 /*
- * RowAndColumnFilterQuery builds a query which contains the filter clauses from
+ * DetermineRemoteAndLocalAggregatePresence decides whether local and distributed queries
+ * will include aggregates or not. remoteQueryHasAggregates and localQueryHasAggregates
+ * are output parameters to receive these boolean values.
+ */
+static void
+DetermineRemoteAndLocalAggregatePresence(Query *query, bool *remoteQueryHasAggregates,
+										 bool *localQueryHasAggregates)
+{
+	*remoteQueryHasAggregates = false;
+	*localQueryHasAggregates = false;
+
+	if (query->groupClause != NIL)
+	{
+		Oid tableId = ExtractFirstDistributedTableId(query);
+		bool safeToPushDownAggregate = SafeToPushDownAggregate(query, tableId);
+
+		if (safeToPushDownAggregate)
+		{
+			*remoteQueryHasAggregates = true;
+			*localQueryHasAggregates = false;
+		}
+		else
+		{
+			*remoteQueryHasAggregates = false;
+			*localQueryHasAggregates = true;
+		}
+	}
+}
+
+
+/*
+ * SafeToPushDownAggregate determines whether a query's GROUP BY clause includes
+ * the partition column of the distributed table identified by the second argument.
+ * This function returns false if the query has no GROUP BY clause or it includes
+ * anything except for partition column. To work around a restriction in sequential
+ * scans, this function will also return false if the total number of columns that
+ * are fetched are greater than the number of columns in the specified table.
+ */
+static bool
+SafeToPushDownAggregate(Query *query, Oid distributedTableId)
+{
+	PVCAggregateBehavior aggregateBehavior = PVC_INCLUDE_AGGREGATES;
+	PVCPlaceHolderBehavior placeHolderBehavior = PVC_INCLUDE_PLACEHOLDERS;
+
+	bool safeToPushDownAggregates = false;
+	List *targetList = query->targetList;
+	List *groupClauseList = query->groupClause;
+	List *rangeTableList = query->rtable;
+	RangeTblEntry *rangeTableEntry = (RangeTblEntry *) linitial(rangeTableList);
+	List *targetVarList = pull_var_clause((Node *) targetList, aggregateBehavior,
+										  placeHolderBehavior);
+	List *sortVarList = pull_var_clause((Node *) query->sortClause, aggregateBehavior,
+										placeHolderBehavior);
+	int groupClauseLength = list_length(groupClauseList);
+	int tableColumnCount = list_length(rangeTableEntry->eref->colnames);
+	int toBefetchedVarCount = list_length(targetVarList) + list_length(sortVarList);
+
+	/*
+	 * Return false if the total number of columns that would be fetched from workers
+	 * is greater than the table column count or if there is no GROUP BY or GROUP BY
+	 * clause consists of more than one elements.
+	 */
+	if ((toBefetchedVarCount > tableColumnCount) ||
+		groupClauseList == NIL ||
+		groupClauseLength != 1)
+	{
+		safeToPushDownAggregates = false;
+	}
+	else
+	{
+		Var *partitionColumn = PartitionColumn(distributedTableId);
+
+		safeToPushDownAggregates = GroupedByColumn(groupClauseList, targetList,
+												   partitionColumn);
+	}
+
+	return safeToPushDownAggregates;
+}
+
+
+/*
+ * GroupedByColumn walks over group clauses in the given list, and checks if any
+ * of the group clauses is on the given column.
+ */
+static bool
+GroupedByColumn(List *groupClauseList, List *targetList, Var *column)
+{
+	bool groupedByColumn = false;
+	ListCell *groupClauseCell = NULL;
+
+	foreach(groupClauseCell, groupClauseList)
+	{
+		SortGroupClause *groupClause = (SortGroupClause *) lfirst(groupClauseCell);
+		TargetEntry *groupTargetEntry = get_sortgroupclause_tle(groupClause, targetList);
+
+		Expr *groupExpression = (Expr *) groupTargetEntry->expr;
+		if (IsA(groupExpression, Var))
+		{
+			Var *groupColumn = (Var *) groupExpression;
+			if (groupColumn->varno == column->varno &&
+				groupColumn->varattno == column->varattno)
+			{
+				groupedByColumn = true;
+				break;
+			}
+		}
+	}
+
+	return groupedByColumn;
+}
+
+
+/*
+ * BuildDistributedQuery builds a query which contains the filter clauses from
  * the original query and also only selects columns needed for the original
- * query. This new query can then be pushed down to the worker nodes.
+ * query. Moreover, the function updates query fields that are related to
+ * aggregates if necessary.
  */
 static Query *
-RowAndColumnFilterQuery(Query *query, List *remoteRestrictList, List *localRestrictList)
+BuildDistributedQuery(Query *query, List *remoteRestrictList, List *localRestrictList,
+					  bool aggregatesPushedDown)
 {
-	Query *filterQuery = NULL;
 	List *rangeTableList = NIL;
-	List *whereColumnList = NIL;
-	List *projectColumnList = NIL;
-	List *havingClauseColumnList = NIL;
-	List *requiredColumnList = NIL;
-	ListCell *columnCell = NULL;
-	List *uniqueColumnList = NIL;
 	List *targetList = NIL;
 	FromExpr *fromExpr = NULL;
-	PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
-	PVCPlaceHolderBehavior placeHolderBehavior = PVC_REJECT_PLACEHOLDERS;
+	Node *havingQual = NULL;
+	Query *distributedQuery = makeNode(Query);
 
 	ExtractRangeTableEntryWalker((Node *) query, &rangeTableList);
 	Assert(list_length(rangeTableList) == 1);
@@ -825,6 +1000,248 @@ RowAndColumnFilterQuery(Query *query, List *remoteRestrictList, List *localRestr
 	fromExpr = makeNode(FromExpr);
 	fromExpr->quals = (Node *) make_ands_explicit((List *) remoteRestrictList);
 	fromExpr->fromlist = QueryFromList(rangeTableList);
+
+	if (aggregatesPushedDown)
+	{
+		List *updatedGroupClause = NIL;
+
+		distributedQuery->hasAggs = true;
+		targetList = BuildDistributedTargetListWithAggregates(query, localRestrictList,
+															  &updatedGroupClause);
+		distributedQuery->groupClause = updatedGroupClause;
+
+		/*
+		 * Note that havingQual is in implicitly-ANDed-list form
+		 * at this point, even though they are declared as Node.
+		 */
+		havingQual = (Node *) make_ands_explicit((List *) query->havingQual);
+	}
+	else
+	{
+		targetList = BuildDistributedTargetListWithoutAggregates(query,
+																 localRestrictList);
+	}
+
+	distributedQuery->commandType = CMD_SELECT;
+	distributedQuery->rtable = rangeTableList;
+	distributedQuery->jointree = fromExpr;
+	distributedQuery->targetList = targetList;
+	distributedQuery->havingQual = havingQual;
+
+	return distributedQuery;
+}
+
+
+/*
+ * BuildDistributedTargetListWithAggregates returns a TargetEntry list for the
+ * distributed query when aggregates are pushed down. This function leaves
+ * AggRefs as it is in the target list. Also, WHERE clause columns pushed down.
+ * This function also fills third parameter (ie: updatedGroupByClause) with
+ * the updated groupClause of the query.
+ */
+static List *
+BuildDistributedTargetListWithAggregates(Query *query, List *localRestrictList,
+										 List **updatedGroupByClause)
+{
+	List *targetList = query->targetList;
+	List *newTargetList = NIL;
+	ListCell *targetListCell = NULL;
+	List *sortClause = query->sortClause;
+	List *groupClause = query->groupClause;
+	Index targetListIndex = 1;
+	PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
+	PVCPlaceHolderBehavior placeHolderBehavior = PVC_REJECT_PLACEHOLDERS;
+
+	/* must retrieve all columns referenced by local WHERE clauses... */
+	List *whereColumnList = pull_var_clause((Node *) localRestrictList, aggregateBehavior,
+											placeHolderBehavior);
+	List *whereTargetList = TargetEntryList(whereColumnList);
+
+	/* add WHERE clause list */
+	targetList = list_concat(targetList, whereTargetList);
+
+	*updatedGroupByClause = NIL;
+	Assert(list_length(query->groupClause) == 1);
+
+	/*
+	 *  Sort columns which does not appear in the final
+	 *  target list must be pulled from the worker nodes.
+	 */
+	foreach(targetListCell, targetList)
+	{
+		TargetEntry *targetListEntry = (TargetEntry *) lfirst(targetListCell);
+
+		if (targetListEntry->resjunk)
+		{
+			bool sortTargetEntry = SortClauseReferencedByTargetEntry(sortClause,
+																	 targetListEntry);
+
+			if (sortTargetEntry)
+			{
+				targetListEntry->resjunk = false;
+			}
+			else
+			{
+				targetListEntry->resjunk = true;
+			}
+		}
+	}
+
+	/* build new target list and generate group clause accordingly */
+	foreach(targetListCell, targetList)
+	{
+		TargetEntry *targetListEntry = (TargetEntry *) lfirst(targetListCell);
+		Expr *targetExpression = (Expr *) targetListEntry->expr;
+		TargetEntry *newTargetEntry = NULL;
+		bool sortTargetEntry = SortClauseReferencedByTargetEntry(sortClause,
+																 targetListEntry);
+		bool groupTargetEntry = GroupClauseReferencedByTargetEntry(groupClause,
+																   targetListEntry);
+
+		if (contain_agg_clause((Node *) targetExpression))
+		{
+			newTargetEntry = copyObject(targetListEntry);
+
+			/* aggregates show up on ORDER BY clause, not on GROUP BY clause */
+			if (sortTargetEntry)
+			{
+				newTargetEntry->ressortgroupref = targetListIndex;
+			}
+			else
+			{
+				newTargetEntry->ressortgroupref = 0;
+			}
+
+			newTargetList = lappend(newTargetList, newTargetEntry);
+			++targetListIndex;
+		}
+		else
+		{
+			List *targetVarList = NIL;
+			ListCell *targetVarListCell = NULL;
+
+			/* this is equivalent of pulling Vars from non-aggregated expressions */
+			targetVarList = pull_var_clause((Node *) targetExpression, aggregateBehavior,
+											placeHolderBehavior);
+
+			foreach(targetVarListCell, targetVarList)
+			{
+				Var *targetVar = (Var *) lfirst(targetVarListCell);
+
+				newTargetEntry = makeTargetEntry((Expr *) targetVar, -1,
+												 targetListEntry->resname,
+												 targetListEntry->resjunk);
+
+				/*
+				 * Here we update ressortgroupref of the new target elements. Also, build
+				 * groupClause with respect to the new target list. We push down GROUP BY
+				 * if and only if it is on the partition column. Thus, we can safely
+				 * access its head (and its only) element.
+				 * We do not need to build sortClause, since ORDER BY is not pushed down
+				 * to the workers.
+				 */
+				if (groupTargetEntry)
+				{
+					ListCell *groupClauseListCell = list_head(groupClause);
+					SortGroupClause *groupClauseElement =
+						(SortGroupClause *) lfirst(groupClauseListCell);
+					SortGroupClause *updatedGroupClauseElement =
+						copyObject(groupClauseElement);
+
+					updatedGroupClauseElement->tleSortGroupRef = targetListIndex;
+					newTargetEntry->ressortgroupref = targetListIndex;
+
+					*updatedGroupByClause = lappend(*updatedGroupByClause,
+													updatedGroupClauseElement);
+				}
+				else if (sortTargetEntry)
+				{
+					newTargetEntry->ressortgroupref = targetListIndex;
+				}
+				else
+				{
+					newTargetEntry->ressortgroupref = 0;
+				}
+
+				newTargetList = lappend(newTargetList, newTargetEntry);
+				++targetListIndex;
+			}
+		}
+	}
+
+	return newTargetList;
+}
+
+
+/*
+ * SortClauseReferencedByTargetEntry returns true if targetEntry references one
+ * of the elements in the sortClause.
+ */
+static bool
+SortClauseReferencedByTargetEntry(List *sortClause, TargetEntry *targetEntry)
+{
+	bool referencedByTargetEntry = false;
+	Index targetEntryReference = targetEntry->ressortgroupref;
+
+	ListCell *sortClauseCell = NULL;
+	foreach(sortClauseCell, sortClause)
+	{
+		SortGroupClause *sortClauseElement = (SortGroupClause *) lfirst(sortClauseCell);
+
+		if (targetEntryReference == sortClauseElement->tleSortGroupRef)
+		{
+			referencedByTargetEntry = true;
+			break;
+		}
+	}
+
+	return referencedByTargetEntry;
+}
+
+
+/*
+ * GroupClauseReferencedByTargetEntry returns true if targetEntry references one
+ * of the elements in the sortClause.
+ */
+static bool
+GroupClauseReferencedByTargetEntry(List *groupClause, TargetEntry *targetEntry)
+{
+	bool referencedByTargetEntry = false;
+	Index targetEntryReference = targetEntry->ressortgroupref;
+
+	ListCell *groupClauseCell = NULL;
+	foreach(groupClauseCell, groupClause)
+	{
+		SortGroupClause *groupClauseElement = (SortGroupClause *) lfirst(groupClauseCell);
+
+		if (targetEntryReference == groupClauseElement->tleSortGroupRef)
+		{
+			referencedByTargetEntry = true;
+			break;
+		}
+	}
+
+	return referencedByTargetEntry;
+}
+
+
+/*
+ * BuildDistributedTargetListWithoutAggregates returns a list of TargetEntry for the
+ * distributed query when aggregates are not pushed down. This function replaces all
+ * target entries with Vars. Also, WHERE and HAVING clauses columns pushed down.
+ */
+static List *
+BuildDistributedTargetListWithoutAggregates(Query *query, List *localRestrictList)
+{
+	List *whereColumnList = NIL;
+	List *projectColumnList = NIL;
+	List *havingClauseColumnList = NIL;
+	List *requiredColumnList = NIL;
+	ListCell *columnCell = NULL;
+	List *uniqueColumnList = NIL;
+	List *targetList = NIL;
+	PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
+	PVCPlaceHolderBehavior placeHolderBehavior = PVC_REJECT_PLACEHOLDERS;
 
 	/* must retrieve all columns referenced by local WHERE clauses... */
 	whereColumnList = pull_var_clause((Node *) localRestrictList, aggregateBehavior,
@@ -867,23 +1284,17 @@ RowAndColumnFilterQuery(Query *query, List *remoteRestrictList, List *localRestr
 
 	targetList = TargetEntryList(uniqueColumnList);
 
-	filterQuery = makeNode(Query);
-	filterQuery->commandType = CMD_SELECT;
-	filterQuery->rtable = rangeTableList;
-	filterQuery->jointree = fromExpr;
-	filterQuery->targetList = targetList;
-
-	return filterQuery;
+	return targetList;
 }
 
 
 /*
  * BuildLocalQuery returns a copy of query with its quals replaced by those
- * in localRestrictList. Expects queries with a single entry in their FROM
- * list.
+ * in localRestrictList. Also, the function updates query fields that are related to
+ * aggregates if necessary. Expects queries with a single entry in their FROM list.
  */
 static Query *
-BuildLocalQuery(Query *query, List *localRestrictList)
+BuildLocalQuery(Query *query, List *localRestrictList, bool aggregatesPushedDown)
 {
 	Query *localQuery = copyObject(query);
 	FromExpr *joinTree = localQuery->jointree;
@@ -892,7 +1303,96 @@ BuildLocalQuery(Query *query, List *localRestrictList)
 	Assert(list_length(joinTree->fromlist) == 1);
 	joinTree->quals = (Node *) make_ands_explicit((List *) localRestrictList);
 
+	/* if aggregates pushed down, update localQuery accordingly */
+	if (aggregatesPushedDown)
+	{
+		localQuery->hasAggs = false;
+		localQuery->groupClause = NIL;
+		localQuery->havingQual = NULL;
+		localQuery->targetList = BuildLocalTargetListWithoutAggregates(query->targetList);
+	}
+
 	return localQuery;
+}
+
+
+/*
+ * BuildLocalTargetListWithoutAggregates takes an aggregated target list and returns a
+ * newly created non-aggregated target list. The function iterates over the list,
+ * replaces aggregated elements with corresponding non-aggregated ones. Also, updates
+ * attribute numbers of the target list elements accordingly.
+ */
+static List *
+BuildLocalTargetListWithoutAggregates(List *targetListWithAggregates)
+{
+	ListCell *targetListCell = NULL;
+	List *targetListWithoutAggregates = NIL;
+	AttrNumber columnId = 1;
+
+	foreach(targetListCell, targetListWithAggregates)
+	{
+		TargetEntry *originalTargetEntry = (TargetEntry *) lfirst(targetListCell);
+		TargetEntry *newTargetEntry = copyObject(originalTargetEntry);
+		Expr *baseExpression = originalTargetEntry->expr;
+		Expr *newExpression = NULL;
+
+		/* update target list entries which include Aggrefs */
+		if (contain_agg_clause((Node *) baseExpression))
+		{
+			Index masterTableId = 1;
+			Var *column = makeVarFromTargetEntry(masterTableId, originalTargetEntry);
+			baseExpression = (Expr *) column;
+		}
+
+		/*
+		 * Since we update target list elements which are AggRefs, it is necessary
+		 * to update column attribute numbers of the new target entries with respect
+		 * to the order they currently exist.
+		 */
+		newExpression = (Expr *) AttributeNumberMutator((Node *) baseExpression,
+														&columnId);
+
+		newTargetEntry->expr = newExpression;
+		targetListWithoutAggregates = lappend(targetListWithoutAggregates,
+											  newTargetEntry);
+	}
+
+	return targetListWithoutAggregates;
+}
+
+
+/*
+ * AttributeNumberMutator walks over the original target entry expression, and
+ * creates the new expression tree to execute on master node. The function updates the
+ * varattno of the Var expressions and recurses into the expression mutator function
+ * for all other expression types.
+ */
+static Node *
+AttributeNumberMutator(Node *originalNode, AttrNumber *columnId)
+{
+	Node *newNode = NULL;
+	if (originalNode == NULL)
+	{
+		return NULL;
+	}
+
+	if (IsA(originalNode, Var))
+	{
+		uint32 masterTableId = 1; /* one table on the master node */
+		Var *newColumn = copyObject(originalNode);
+		newColumn->varno = masterTableId;
+		newColumn->varattno = (*columnId);
+		(*columnId)++;
+
+		newNode = (Node *) newColumn;
+	}
+	else
+	{
+		newNode = expression_tree_mutator(originalNode, AttributeNumberMutator,
+										  (void *) columnId);
+	}
+
+	return newNode;
 }
 
 
@@ -1089,6 +1589,215 @@ TargetEntryList(List *expressionList)
 
 
 /*
+ * CreateTemporaryTableLikeStmt returns a CreateStmt node depending on whether the
+ * aggregates in the localQuery can be pushed down to the workers or not.
+ */
+static CreateStmt *
+CreateTemporaryTableStmt(Query *distributedQuery, bool pushDownAggregates)
+{
+	CreateStmt *createStmt = NULL;
+
+	if (pushDownAggregates)
+	{
+		List *workerTargetList = distributedQuery->targetList;
+		List *rangeTableList = distributedQuery->rtable;
+		RangeTblEntry *rangeTableEntry = (RangeTblEntry *) linitial(rangeTableList);
+		List *columnNameValueList = rangeTableEntry->eref->colnames;
+		List *columnNameList = ValueToStringList(columnNameValueList);
+		List *targetList = MasterTargetList(workerTargetList);
+		StringInfo tempTableName = CreateUniqueTableName();
+
+		createStmt = BuildCreateStatement(tempTableName, targetList, columnNameList);
+	}
+	else
+	{
+		Oid distributedTableId = ExtractFirstDistributedTableId(distributedQuery);
+
+		createStmt = CreateTemporaryTableLikeStmt(distributedTableId);
+	}
+
+	return createStmt;
+}
+
+
+/*
+ * ValueToStringList walks over the given list of string value types, converts
+ * value types to cstrings, and adds these cstrings into a new list.
+ */
+static List *
+ValueToStringList(List *valueList)
+{
+	List *stringList = NIL;
+	ListCell *valueCell = NULL;
+
+	foreach(valueCell, valueList)
+	{
+		Value *value = (Value *) lfirst(valueCell);
+		char *stringValue = strVal(value);
+
+		stringList = lappend(stringList, stringValue);
+	}
+
+	return stringList;
+}
+
+
+/*
+ * MasterTargetList uses the given worker target list's expressions, and creates
+ * a target target list for the master node. This master target list keeps the
+ * temporary table's columns on the master node.
+ */
+static List *
+MasterTargetList(List *workerTargetList)
+{
+	List *masterTargetList = NIL;
+	const Index tableId = 1;
+	AttrNumber columnId = 1;
+
+	ListCell *workerTargetCell = NULL;
+	foreach(workerTargetCell, workerTargetList)
+	{
+		TargetEntry *workerTargetEntry = (TargetEntry *) lfirst(workerTargetCell);
+		TargetEntry *masterTargetEntry = copyObject(workerTargetEntry);
+
+		Var *masterColumn = makeVarFromTargetEntry(tableId, workerTargetEntry);
+		masterColumn->varattno = columnId;
+		masterColumn->varoattno = columnId;
+		columnId++;
+
+		/*
+		 * The master target entry has two pieces to it. The first piece is the
+		 * target entry's expression, which we set to the newly created column.
+		 * The second piece is sort and group clauses that we implicitly copy
+		 * from the worker target entry. Note that any changes to worker target
+		 * entry's sort and group clauses will *break* us here.
+		 */
+		masterTargetEntry->expr = (Expr *) masterColumn;
+		masterTargetList = lappend(masterTargetList, masterTargetEntry);
+	}
+
+	return masterTargetList;
+}
+
+
+/*
+ * BuildCreateStatement builds the executable create statement for creating a
+ * temporary table on the master; and then returns this create statement. This
+ * function obtains the needed column type information from the target list.
+ */
+static CreateStmt *
+BuildCreateStatement(StringInfo masterTableName, List *masterTargetList,
+					 List *masterColumnNameList)
+{
+	CreateStmt *createStatement = NULL;
+	RangeVar *relation = NULL;
+	char *relationName = NULL;
+	List *columnTypeList = NIL;
+	List *columnDefinitionList = NIL;
+	ListCell *masterTargetCell = NULL;
+
+	/* build rangevar object for temporary table */
+	relationName = masterTableName->data;
+	relation = makeRangeVar(NULL, relationName, -1);
+	relation->relpersistence = RELPERSISTENCE_TEMP;
+
+	/* build the list of column types as cstrings */
+	foreach(masterTargetCell, masterTargetList)
+	{
+		TargetEntry *targetEntry = (TargetEntry *) lfirst(masterTargetCell);
+		Var *column = (Var *) targetEntry->expr;
+		Oid columnTypeId = exprType((Node *) column);
+		int32 columnTypeMod = exprTypmod((Node *) column);
+
+		char *columnTypeName = format_type_with_typemod(columnTypeId, columnTypeMod);
+		columnTypeList = lappend(columnTypeList, columnTypeName);
+	}
+
+	/* build the column definition list */
+	columnDefinitionList = ColumnDefinitionList(masterColumnNameList, columnTypeList);
+
+	/* build the create statement */
+	createStatement = CreateStatement(relation, columnDefinitionList);
+
+	return createStatement;
+}
+
+
+/*
+ * ColumnDefinitionList creates and returns a list of column definition objects
+ * from two lists of column names and types. As an example, this function takes
+ * in two single elements lists: "l_quantity" and "decimal(15, 2)". The function
+ * then returns a list with one column definition, where the column's name is
+ * l_quantity, its type is numeric, and the type modifier represents (15, 2).
+ */
+static List *
+ColumnDefinitionList(List *columnNameList, List *columnTypeList)
+{
+	List *columnDefinitionList = NIL;
+	ListCell *columnNameCell = NULL;
+	ListCell *columnTypeCell = NULL;
+
+	forboth(columnNameCell, columnNameList, columnTypeCell, columnTypeList)
+	{
+		const char *columnName = (const char *) lfirst(columnNameCell);
+		const char *columnType = (const char *) lfirst(columnTypeCell);
+
+		/*
+		 * We should have a SQL compatible column type declaration; we first
+		 * convert this type to PostgreSQL's type identifiers and modifiers.
+		 */
+		Oid columnTypeId = InvalidOid;
+		int32 columnTypeMod = -1;
+		TypeName *typeName = NULL;
+		ColumnDef *columnDefinition = NULL;
+
+#if PG_VERSION_NUM < 90400
+		parseTypeString(columnType, &columnTypeId, &columnTypeMod);
+#else
+		bool missingOK = false;
+		parseTypeString(columnType, &columnTypeId, &columnTypeMod, missingOK);
+#endif
+		typeName = makeTypeNameFromOid(columnTypeId, columnTypeMod);
+
+		/* we then create the column definition */
+		columnDefinition = makeNode(ColumnDef);
+		columnDefinition->colname = (char *) columnName;
+		columnDefinition->typeName = typeName;
+		columnDefinition->is_local = true;
+		columnDefinition->is_not_null = false;
+		columnDefinition->raw_default = NULL;
+		columnDefinition->cooked_default = NULL;
+		columnDefinition->constraints = NIL;
+
+		columnDefinitionList = lappend(columnDefinitionList, columnDefinition);
+	}
+
+	return columnDefinitionList;
+}
+
+
+/*
+ * CreateStatement creates and initializes a simple table create statement that
+ * only has column definitions.
+ */
+static CreateStmt *
+CreateStatement(RangeVar *relation, List *columnDefinitionList)
+{
+	CreateStmt *createStatement = makeNode(CreateStmt);
+	createStatement->relation = relation;
+	createStatement->tableElts = columnDefinitionList;
+	createStatement->inhRelations = NIL;
+	createStatement->constraints = NIL;
+	createStatement->options = NIL;
+	createStatement->oncommit = ONCOMMIT_DROP;
+	createStatement->tablespacename = NULL;
+	createStatement->if_not_exists = false;
+
+	return createStatement;
+}
+
+
+/*
  * CreateTemporaryTableLikeStmt returns a CreateStmt node which will create a
  * clone of the given relation using the CREATE TEMPORARY TABLE LIKE option.
  * Note that the function only creates the table, and doesn't copy over indexes,
@@ -1097,7 +1806,6 @@ TargetEntryList(List *expressionList)
 static CreateStmt *
 CreateTemporaryTableLikeStmt(Oid sourceRelationId)
 {
-	static unsigned long temporaryTableId = 0;
 	CreateStmt *createStmt = NULL;
 	StringInfo clonedTableName = NULL;
 	RangeVar *clonedRelation = NULL;
@@ -1112,10 +1820,7 @@ CreateTemporaryTableLikeStmt(Oid sourceRelationId)
 	tableLikeClause->options = 0; /* don't copy over indexes/constraints etc */
 
 	/* create a unique name for the cloned table */
-	clonedTableName = makeStringInfo();
-	appendStringInfo(clonedTableName, "%s_%d_%lu", TEMPORARY_TABLE_PREFIX, MyProcPid,
-					 temporaryTableId);
-	temporaryTableId++;
+	clonedTableName = CreateUniqueTableName();
 
 	clonedRelation = makeRangeVar(NULL, clonedTableName->data, -1);
 	clonedRelation->relpersistence = RELPERSISTENCE_TEMP;
@@ -1130,6 +1835,23 @@ CreateTemporaryTableLikeStmt(Oid sourceRelationId)
 
 
 /*
+ * CreateUniqueTableName creates a unique table name on every invocation. It takes
+ * no parameters and returns a StringInfo.
+ */
+static StringInfo
+CreateUniqueTableName(void)
+{
+	static unsigned long temporaryTableId = 0;
+	StringInfo uniqueTableName = makeStringInfo();
+	appendStringInfo(uniqueTableName, "%s_%d_%lu", TEMPORARY_TABLE_PREFIX, MyProcPid,
+					 temporaryTableId);
+	temporaryTableId++;
+
+	return uniqueTableName;
+}
+
+
+/*
  * BuildDistributedPlan simply creates the DistributedPlan instance from the
  * provided query and shard interval list.
  */
@@ -1140,7 +1862,6 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 	List *taskList = NIL;
 	DistributedPlan *distributedPlan = palloc0(sizeof(DistributedPlan));
 	distributedPlan->plan.type = (NodeTag) T_DistributedPlan;
-	distributedPlan->targetList = query->targetList;
 
 	foreach(shardIntervalCell, shardIntervalList)
 	{
@@ -1431,8 +2152,8 @@ ExecuteMultipleShardSelect(DistributedPlan *distributedPlan,
 	List *taskList = distributedPlan->taskList;
 	List *targetList = distributedPlan->targetList;
 
-	/* ExecType instead of ExecCleanType so we don't ignore junk columns */
-	TupleDesc tupleStoreDescriptor = ExecTypeFromTL(targetList, false);
+	/* ExecCleanType instead of ExecType so we ignore junk columns */
+	TupleDesc tupleStoreDescriptor = ExecCleanTypeFromTL(targetList, false);
 
 	ListCell *taskCell = NULL;
 	foreach(taskCell, taskList)
