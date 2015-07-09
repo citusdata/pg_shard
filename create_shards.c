@@ -589,8 +589,8 @@ IntegerToText(int32 value)
 /*
  *	SupportFunctionForColumn locates a support function given a column, an access method,
  *	and and id of a support function. This function returns InvalidOid if there is no
- *	support function associated with the data type of the column, but if the data type of
- *	the column has no default operator class whatsoever, this function errors out.
+ *	support function for the operator class family of the column, but if the data type
+ *	of the column has no default operator class whatsoever, this function errors out.
  */
 Oid
 SupportFunctionForColumn(Var *partitionColumn, Oid accessMethodId,
@@ -598,6 +598,7 @@ SupportFunctionForColumn(Var *partitionColumn, Oid accessMethodId,
 {
 	Oid operatorFamilyId = InvalidOid;
 	Oid supportFunctionOid = InvalidOid;
+	Oid operatorClassInputType = InvalidOid;
 	Oid columnOid = partitionColumn->vartype;
 	Oid operatorClassId = GetDefaultOpClass(columnOid, accessMethodId);
 
@@ -613,7 +614,9 @@ SupportFunctionForColumn(Var *partitionColumn, Oid accessMethodId,
 	}
 
 	operatorFamilyId = get_opclass_family(operatorClassId);
-	supportFunctionOid = get_opfamily_proc(operatorFamilyId, columnOid, columnOid,
+	operatorClassInputType = get_opclass_input_type(operatorClassId);
+	supportFunctionOid = get_opfamily_proc(operatorFamilyId, operatorClassInputType,
+										   operatorClassInputType,
 										   supportFunctionNumber);
 
 	return supportFunctionOid;
