@@ -46,7 +46,15 @@
 # = Project-Specific =
 # ====================
 
-!/expected/*.out
+# regression test detritus
+/log/
+/regression.diffs
+/regression.out
+/results/
+/tmp_check*
 
-# header dependency information
-/.deps
+# keep expected output files
+!/test/expected/*.out
+
+# ignore latest install file
+sql/*--*.sql
