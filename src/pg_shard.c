@@ -43,6 +43,7 @@
 #include "executor/executor.h"
 #include "executor/instrument.h"
 #include "executor/tuptable.h"
+#include "lib/stringinfo.h"
 #include "nodes/execnodes.h"
 #include "nodes/makefuncs.h"
 #include "nodes/memnodes.h" /* IWYU pragma: keep */

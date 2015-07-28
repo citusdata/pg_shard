@@ -11,6 +11,7 @@
  */
 
 #include "postgres.h"
+#include "c.h"
 #include "fmgr.h"
 #include "miscadmin.h"
 

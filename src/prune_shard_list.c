@@ -20,6 +20,7 @@
 
 #include <stddef.h>
 
+#include "access/attnum.h"
 #include "access/skey.h"
 #include "catalog/pg_am.h"
 #include "catalog/pg_type.h"
@@ -28,6 +29,7 @@
 #include "nodes/memnodes.h" /* IWYU pragma: keep */
 #include "nodes/nodeFuncs.h"
 #include "nodes/nodes.h"
+#include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
 #include "nodes/relation.h"
 #include "optimizer/clauses.h"
