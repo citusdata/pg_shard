@@ -724,9 +724,10 @@ DistributedQueryShardList(Query *query)
 	List *prunedShardList = NIL;
 
 	Oid distributedTableId = ExtractFirstDistributedTableId(query);
-	List *shardIntervalList = LookupShardIntervalList(distributedTableId);
+	List *shardIntervalList = NIL;
 
-	/* error out if no shards exists for the table */
+	/* error out if no shards exist for the table */
+	shardIntervalList = LookupShardIntervalList(distributedTableId);
 	if (shardIntervalList == NIL)
 	{
 		char *relationName = get_rel_name(distributedTableId);
@@ -1146,16 +1147,23 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 	{
 		ShardInterval *shardInterval = (ShardInterval *) lfirst(shardIntervalCell);
 		int64 shardId = shardInterval->id;
-		List *finalizedPlacementList = LoadFinalizedShardPlacementList(shardId);
+		List *finalizedPlacementList = NIL;
+		FromExpr *joinTree = NULL;
 		Task *task = NULL;
 		StringInfo queryString = makeStringInfo();
+
+		/* grab shared metadata lock to stop concurrent placement additions */
+		LockShardDistributionMetadata(shardId, ShareLock);
+
+		/* now safe to populate placement list */
+		finalizedPlacementList = LoadFinalizedShardPlacementList(shardId);
 
 		/*
 		 * Convert the qualifiers to an explicitly and'd clause, which is needed
 		 * before we deparse the query. This applies to SELECT, UPDATE and
 		 * DELETE statements.
 		 */
-		FromExpr *joinTree = query->jointree;
+		joinTree = query->jointree;
 		if ((joinTree != NULL) && (joinTree->quals != NULL))
 		{
 			Node *whereClause = joinTree->quals;
@@ -1390,7 +1398,7 @@ AcquireExecutorShardLocks(List *taskList, LOCKMODE lockMode)
 		Task *task = (Task *) lfirst(taskCell);
 		int64 shardId = task->shardId;
 
-		LockShard(shardId, lockMode);
+		LockShardData(shardId, lockMode);
 	}
 }
 

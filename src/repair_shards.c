@@ -91,10 +91,16 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 	 * (INSERT, UPDATE, or DELETE) and prevent concurrent repair operations from
 	 * being able to operate on this shard.
 	 */
-	LockShard(shardId, ExclusiveLock);
+	LockShardData(shardId, ExclusiveLock);
+
+	/*
+	 * We've stopped data modifications of this shard, but we plan to move
+	 * a placement to the healthy state, so we need to grab a shard metadata
+	 * lock (in exclusive mode) as well.
+	 */
+	LockShardDistributionMetadata(shardId, ExclusiveLock);
 
 	shardPlacementList = LoadShardPlacementList(shardId);
-
 	sourcePlacement = SearchShardPlacementInList(shardPlacementList, sourceNodeName,
 												 sourceNodePort);
 	if (sourcePlacement->shardState != STATE_FINALIZED)

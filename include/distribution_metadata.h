@@ -114,6 +114,18 @@ typedef struct ShardIntervalListCacheEntry
 } ShardIntervalListCacheEntry;
 
 
+/*
+ * ShardLockType specifies the kinds of locks that can be acquired for a given
+ * shard, i.e. one to change data in that shard or a lock to change placements
+ * of the shard itself (the shard's metadata).
+ */
+typedef enum
+{
+	SHARD_LOCK_INVALID_FIRST = 0,
+	SHARD_LOCK_DATA = 3,
+	SHARD_LOCK_METADATA = 4
+} ShardLockType;
+
 /* function declarations to access and manipulate the metadata */
 extern List * LookupShardIntervalList(Oid distributedTableId);
 extern List * LoadShardIntervalList(Oid distributedTableId);
@@ -133,7 +145,8 @@ extern int64 CreateShardPlacementRow(int64 shardId, ShardState shardState,
 									 char *nodeName, uint32 nodePort);
 extern void DeleteShardPlacementRow(int64 shardPlacementId);
 extern void UpdateShardPlacementRowState(int64 shardPlacementId, ShardState newState);
-extern void LockShard(int64 shardId, LOCKMODE lockMode);
-
+extern void LockShardData(int64 shardId, LOCKMODE lockMode);
+extern void LockShardDistributionMetadata(int64 shardId, LOCKMODE lockMode);
+extern void LockRelationDistributionMetadata(Oid relationId, LOCKMODE lockMode);
 
 #endif /* PG_SHARD_DISTRIBUTION_METADATA_H */

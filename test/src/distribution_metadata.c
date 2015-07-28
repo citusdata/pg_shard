@@ -377,7 +377,7 @@ acquire_shared_shard_lock(PG_FUNCTION_ARGS)
 {
 	int64 shardId = PG_GETARG_INT64(0);
 
-	LockShard(shardId, ShareLock);
+	LockShardData(shardId, ShareLock);
 
 	PG_RETURN_VOID();
 }
