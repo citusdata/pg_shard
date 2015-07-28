@@ -726,9 +726,6 @@ DistributedQueryShardList(Query *query)
 	Oid distributedTableId = ExtractFirstDistributedTableId(query);
 	List *shardIntervalList = NIL;
 
-	/* acquire lock to ensure no shards can be added during execution */
-	LockRelationDistributionMetadata(distributedTableId, ShareLock);
-
 	/* error out if no shards exist for the table */
 	shardIntervalList = LookupShardIntervalList(distributedTableId);
 	if (shardIntervalList == NIL)

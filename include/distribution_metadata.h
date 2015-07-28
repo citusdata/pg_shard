@@ -122,8 +122,8 @@ typedef struct ShardIntervalListCacheEntry
 typedef enum
 {
 	SHARD_LOCK_INVALID_FIRST = 0,
-	SHARD_LOCK_DATA = 1,
-	SHARD_LOCK_METADATA = 2
+	SHARD_LOCK_DATA = 3,
+	SHARD_LOCK_METADATA = 4
 } ShardLockType;
 
 /* function declarations to access and manipulate the metadata */

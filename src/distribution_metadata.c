@@ -827,11 +827,6 @@ LockRelationDistributionMetadata(Oid relationId, LOCKMODE lockMode)
 {
 	Assert(lockMode == ExclusiveLock || lockMode == ShareLock);
 
-	if (lockMode == ExclusiveLock)
-	{
-		lockMode = AccessExclusiveLock;
-	}
-
 	(void) LockRelationOid(relationId, lockMode);
 }
 
@@ -855,7 +850,7 @@ AcquireShardLock(int64 shardId, ShardLockType shardLockType, LOCKMODE lockMode)
 	memset(&lockTag, 0, sizeof(LOCKTAG));
 
 	Assert(lockMode == ExclusiveLock || lockMode == ShareLock);
-	Assert(shardLockType = !SHARD_LOCK_INVALID_FIRST);
+	Assert(shardLockType != SHARD_LOCK_INVALID_FIRST);
 
 	SET_LOCKTAG_ADVISORY(lockTag, MyDatabaseId, keyUpperHalf, keyLowerHalf,
 						 (uint16) shardLockType);
