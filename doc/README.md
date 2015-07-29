@@ -7,9 +7,9 @@
 
 `pg_shard` is a sharding extension for PostgreSQL. It shards and replicates your PostgreSQL tables for horizontal scale and high availability. The extension also seamlessly distributes your SQL statements, without requiring any changes to your application. Join the [mailing list][] to stay on top of the latest developments.
 
-As a standalone extension, `pg_shard` addresses many NoSQL use cases. It also enables real-time analytics, and has an easy upgrade path to [CitusDB](http://citusdata.com/) for complex analytical workloads (distributed joins). Further, the extension provides access to standard SQL tools, and powerful PostgreSQL features, such as diverse set of indexes and semi-structured data types.
+As a standalone extension, `pg_shard` addresses many NoSQL use cases. It also enables real-time analytics, and has an easy upgrade path to [CitusDB](https://citusdata.com/) for complex analytical workloads (distributed joins). Further, the extension provides access to standard SQL tools, and powerful PostgreSQL features, such as diverse set of indexes and semi-structured data types.
 
-This README serves as a quick start guide. We address architectural questions on sharding, shard rebalancing, failure handling, and distributed consistency mechanisms on [our webpage](http://citusdata.com/docs/pg-shard). Also, we're actively working on improving `pg_shard`, and welcome any questions or feedback on our [mailing list][].
+This README serves as a quick start guide. We address architectural questions on sharding, shard rebalancing, failure handling, and distributed consistency mechanisms on [our webpage](https://citusdata.com/docs/pg-shard). Also, we're actively working on improving `pg_shard`, and welcome any questions or feedback on our [mailing list][].
 
 ## Building
 
