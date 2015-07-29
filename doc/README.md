@@ -13,7 +13,7 @@ This README serves as a quick start guide. We address architectural questions on
 
 ## Building
 
-`pg_shard` runs on Linux and OS X. The extension works with PostgreSQL 9.3.4+, PostgreSQL 9.4.0+, and CitusDB 3.2+.
+`pg_shard` runs on Linux and OS X. The extension works with PostgreSQL 9.3.4+, PostgreSQL 9.4.0+, and CitusDB 3.2+. Building `pg_shard` requires GCC 4.6 or greater (or a similarly recent version of Clang).
 
 Once you have PostgreSQL or CitusDB installed, you're ready to build `pg_shard`. For this, you will need to include the `pg_config` directory path in your `make` command. This path is typically the same as your PostgreSQL installation's `bin/` directory path. For example:
 
@@ -148,7 +148,7 @@ SELECT master_copy_shard_placement(12345, 'good_host', 5432, 'bad_host', 5432);
 
 ### Usage with CitusDB
 
-By calling the `sync_table_metadata_to_citus` function on the master you can propagate a particular table's distribution metadata to CitusDB's internal catalog, allowing it to read from `pg_shard`'s worker nodes. Just ensure the `pg_shard.use_citusdb_select_logic` config variable is turned on and you'll be good to go!
+When installed within CitusDB, `pg_shard` will use the distribution metadata catalogs provided by CitusDB. No special syncing step is necessary: your `pg_shard`-distributed tables will be visible to CitusDB and vice versa. Just ensure the `pg_shard.use_citusdb_select_logic` config variable is turned on and you'll be good to go!
 
 ## Look Under the Hood
 
