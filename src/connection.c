@@ -10,6 +10,7 @@
  */
 
 #include "postgres.h" /* IWYU pragma: keep */
+#include "c.h"
 #include "libpq-fe.h"
 #include "miscadmin.h"
 

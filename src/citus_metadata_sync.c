@@ -12,8 +12,9 @@
 
 #include "postgres.h"
 #include "c.h"
+#include "fmgr.h"
 
-#include "citus_metadata_sync.h"
+#include "citus_metadata_sync.h" /* IWYU pragma: keep */
 #include "distribution_metadata.h"
 
 #include <stddef.h>
