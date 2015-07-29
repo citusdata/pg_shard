@@ -1,3 +1,19 @@
+### pg_shard v1.2.0 (July 28, 2015) ###
+
+* Distribution metadata stays continually in sync with CitusDB
+
+* Rejects VOLATILE and MUTABLE functions in modification commands
+
+* Adds support for partitioning by enumeration or composite types
+
+* Fixes deparsing of table constraints during shard creation
+
+* Improves error messages and user experience
+
+* Improves metadata locking behavior
+
+* Enhances project organization and build process
+
 ### pg_shard v1.1.1 (May 29, 2015) ###
 
 * Fixes shard repair bug triggered when indexes present

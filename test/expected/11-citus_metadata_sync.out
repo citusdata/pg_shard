@@ -1,0 +1,195 @@
+-- ===================================================================
+-- test metadata sync functionality
+-- ===================================================================
+-- declare some variables for clarity
+\set finalized 1
+\set inactive 3
+-- set up a table and "distribute" it manually
+CREATE TABLE set_of_ids ( id bigint );
+INSERT INTO pgs_distribution_metadata.shard
+	(id, relation_id, storage, min_value, max_value)
+VALUES
+	(1, 'set_of_ids'::regclass, 't', '0', '10'),
+	(2, 'set_of_ids'::regclass, 't', '10', '20');
+-- two shards, replication factor two
+INSERT INTO pgs_distribution_metadata.shard_placement
+	(id, node_name, node_port, shard_id, shard_state)
+VALUES
+	(101, 'cluster-worker-01', 5432, 1, :finalized),
+	(102, 'cluster-worker-02', 5433, 2, :finalized),
+	(103, 'cluster-worker-03', 5434, 1, :finalized),
+	(104, 'cluster-worker-04', 5435, 2, :finalized);
+INSERT INTO pgs_distribution_metadata.partition (relation_id, partition_method, key)
+VALUES
+	('set_of_ids'::regclass, 'h', 'id');
+-- should get ERROR for NULL, non-existent, or non-distributed table
+SELECT partition_column_to_node_string(NULL);
+ERROR:  table_oid must not be null
+SELECT partition_column_to_node_string(0);
+ERROR:  no partition column is defined for relation "(null)"
+SELECT partition_column_to_node_string('pg_class'::regclass);
+ERROR:  no partition column is defined for relation "pg_class"
+-- should get node representation for distributed table
+SELECT partition_column_to_node_string('set_of_ids'::regclass);
+                                            partition_column_to_node_string                                             
+------------------------------------------------------------------------------------------------------------------------
+ {VAR :varno 1 :varattno 1 :vartype 20 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location -1}
+(1 row)
+
+-- should get error for column names that are too long
+SELECT column_name_to_column('set_of_ids'::regclass, repeat('a', 1024));
+ERROR:  column name too long
+DETAIL:  Column name must be less than 64 characters.
+-- should get error for system or non-existent column
+SELECT column_name_to_column('set_of_ids'::regclass, 'ctid');
+ERROR:  column "ctid" of relation "set_of_ids" is a system column
+SELECT column_name_to_column('set_of_ids'::regclass, 'non_existent');
+ERROR:  column "non_existent" of relation "set_of_ids" does not exist
+-- should get node representation for valid column
+SELECT column_name_to_column('set_of_ids'::regclass, 'id') AS column_var
+\gset
+SELECT replace(:'column_var', ':varattno 1', ':varattno -1') AS ctid_var,
+	   replace(:'column_var', ':varattno 1', ':varattno 2') AS non_ext_var
+\gset
+-- should get error for system or non-existent column
+SELECT column_to_column_name('set_of_ids'::regclass, :'ctid_var');
+ERROR:  attribute -1 of relation "set_of_ids" is a system column
+SELECT column_to_column_name('set_of_ids'::regclass, :'non_ext_var');
+ERROR:  attribute 2 of relation "set_of_ids" does not exist
+-- should get node representation for valid column
+SELECT column_to_column_name('set_of_ids'::regclass, :'column_var');
+ column_to_column_name 
+-----------------------
+ id
+(1 row)
+
+-- create subset of CitusDB metadata schema
+CREATE TABLE pg_dist_partition (
+	logicalrelid oid NOT NULL,
+	partmethod "char" NOT NULL,
+	partkey text
+);
+CREATE TABLE pg_dist_shard (
+	logicalrelid oid NOT NULL,
+	shardid bigint NOT NULL,
+	shardstorage "char" NOT NULL,
+	shardalias text,
+	shardminvalue text,
+	shardmaxvalue text
+);
+CREATE TABLE pg_dist_shard_placement (
+	shardid bigint NOT NULL,
+	shardstate integer NOT NULL,
+	shardlength bigint NOT NULL,
+	nodename text,
+	nodeport integer
+) WITH OIDS;
+-- sync metadata and verify it has transferred
+SELECT sync_table_metadata_to_citus('set_of_ids');
+WARNING:  sync_table_metadata_to_citus is deprecated and will be removed in a future version
+ sync_table_metadata_to_citus 
+------------------------------
+ 
+(1 row)
+
+SELECT partmethod, partkey
+FROM   pg_dist_partition
+WHERE  logicalrelid = 'set_of_ids'::regclass;
+ partmethod |                                                        partkey                                                         
+------------+------------------------------------------------------------------------------------------------------------------------
+ h          | {VAR :varno 1 :varattno 1 :vartype 20 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location -1}
+(1 row)
+
+SELECT shardid, shardstorage, shardalias, shardminvalue, shardmaxvalue
+FROM   pg_dist_shard
+WHERE  logicalrelid = 'set_of_ids'::regclass
+ORDER BY shardid;
+ shardid | shardstorage | shardalias | shardminvalue | shardmaxvalue 
+---------+--------------+------------+---------------+---------------
+       1 | t            |            | 0             | 10
+       2 | t            |            | 10            | 20
+(2 rows)
+
+SELECT * FROM pg_dist_shard_placement
+WHERE  shardid IN (SELECT shardid
+				   FROM   pg_dist_shard
+				   WHERE  logicalrelid = 'set_of_ids'::regclass)
+ORDER BY nodename;
+ shardid | shardstate | shardlength |     nodename      | nodeport 
+---------+------------+-------------+-------------------+----------
+       1 |          1 |           0 | cluster-worker-01 |     5432
+       2 |          1 |           0 | cluster-worker-02 |     5433
+       1 |          1 |           0 | cluster-worker-03 |     5434
+       2 |          1 |           0 | cluster-worker-04 |     5435
+(4 rows)
+
+-- subsequent sync should have no effect
+SELECT sync_table_metadata_to_citus('set_of_ids');
+WARNING:  sync_table_metadata_to_citus is deprecated and will be removed in a future version
+ sync_table_metadata_to_citus 
+------------------------------
+ 
+(1 row)
+
+SELECT partmethod, partkey
+FROM   pg_dist_partition
+WHERE  logicalrelid = 'set_of_ids'::regclass;
+ partmethod |                                                        partkey                                                         
+------------+------------------------------------------------------------------------------------------------------------------------
+ h          | {VAR :varno 1 :varattno 1 :vartype 20 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location -1}
+(1 row)
+
+SELECT shardid, shardstorage, shardalias, shardminvalue, shardmaxvalue
+FROM   pg_dist_shard
+WHERE  logicalrelid = 'set_of_ids'::regclass
+ORDER BY shardid;
+ shardid | shardstorage | shardalias | shardminvalue | shardmaxvalue 
+---------+--------------+------------+---------------+---------------
+       1 | t            |            | 0             | 10
+       2 | t            |            | 10            | 20
+(2 rows)
+
+SELECT * FROM pg_dist_shard_placement
+WHERE  shardid IN (SELECT shardid
+				   FROM   pg_dist_shard
+				   WHERE  logicalrelid = 'set_of_ids'::regclass)
+ORDER BY nodename;
+ shardid | shardstate | shardlength |     nodename      | nodeport 
+---------+------------+-------------+-------------------+----------
+       1 |          1 |           0 | cluster-worker-01 |     5432
+       2 |          1 |           0 | cluster-worker-02 |     5433
+       1 |          1 |           0 | cluster-worker-03 |     5434
+       2 |          1 |           0 | cluster-worker-04 |     5435
+(4 rows)
+
+-- mark a placement as unhealthy and add a new one
+UPDATE pgs_distribution_metadata.shard_placement
+SET    shard_state = :inactive
+WHERE  node_name = 'cluster-worker-02';
+INSERT INTO pgs_distribution_metadata.shard_placement
+	(id, node_name, node_port, shard_id, shard_state)
+VALUES
+	(105, 'cluster-worker-05', 5436, 1, :finalized);
+-- write latest changes to CitusDB tables
+SELECT sync_table_metadata_to_citus('set_of_ids');
+WARNING:  sync_table_metadata_to_citus is deprecated and will be removed in a future version
+ sync_table_metadata_to_citus 
+------------------------------
+ 
+(1 row)
+
+-- should see updated state and new placement
+SELECT * FROM pg_dist_shard_placement
+WHERE  shardid IN (SELECT shardid
+				   FROM   pg_dist_shard
+				   WHERE  logicalrelid = 'set_of_ids'::regclass)
+ORDER BY nodename;
+ shardid | shardstate | shardlength |     nodename      | nodeport 
+---------+------------+-------------+-------------------+----------
+       1 |          1 |           0 | cluster-worker-01 |     5432
+       2 |          3 |           0 | cluster-worker-02 |     5433
+       1 |          1 |           0 | cluster-worker-03 |     5434
+       2 |          1 |           0 | cluster-worker-04 |     5435
+       1 |          1 |           0 | cluster-worker-05 |     5436
+(5 rows)
+

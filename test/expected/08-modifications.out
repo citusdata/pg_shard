@@ -1,0 +1,263 @@
+-- ===================================================================
+-- test end-to-end modification functionality
+-- ===================================================================
+CREATE TYPE order_side AS ENUM ('buy', 'sell');
+CREATE TABLE limit_orders (
+	id bigint PRIMARY KEY,
+	symbol text NOT NULL,
+	bidder_id bigint NOT NULL,
+	placed_at timestamp NOT NULL,
+	kind order_side NOT NULL,
+	limit_price decimal NOT NULL DEFAULT 0.00 CHECK (limit_price >= 0.00)
+);
+CREATE TABLE insufficient_shards ( LIKE limit_orders );
+SELECT master_create_distributed_table('limit_orders', 'id');
+ master_create_distributed_table 
+---------------------------------
+ 
+(1 row)
+
+SELECT master_create_distributed_table('insufficient_shards', 'id');
+ master_create_distributed_table 
+---------------------------------
+ 
+(1 row)
+
+\set VERBOSITY terse
+SELECT master_create_worker_shards('limit_orders', 2, 1);
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+ master_create_worker_shards 
+-----------------------------
+ 
+(1 row)
+
+-- make a single shard that covers no partition values
+SELECT master_create_worker_shards('insufficient_shards', 1, 1);
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+ master_create_worker_shards 
+-----------------------------
+ 
+(1 row)
+
+UPDATE pgs_distribution_metadata.shard SET min_value = 0, max_value = 0
+WHERE relation_id = 'insufficient_shards'::regclass;
+\set VERBOSITY default
+-- basic single-row INSERT
+INSERT INTO limit_orders VALUES (32743, 'AAPL', 9580, '2004-10-19 10:23:54', 'buy',
+								 20.69);
+SELECT COUNT(*) FROM limit_orders WHERE id = 32743;
+ count 
+-------
+     1
+(1 row)
+
+-- try a single-row INSERT with no shard to receive it
+INSERT INTO insufficient_shards VALUES (32743, 'AAPL', 9580, '2004-10-19 10:23:54', 'buy',
+										20.69);
+ERROR:  could not find destination shard for new row
+DETAIL:  Target relation does not contain any shards capable of storing the new row.
+-- INSERT with DEFAULT in the target list
+INSERT INTO limit_orders VALUES (12756, 'MSFT', 10959, '2013-05-08 07:29:23', 'sell',
+								 DEFAULT);
+SELECT COUNT(*) FROM limit_orders WHERE id = 12756;
+ count 
+-------
+     1
+(1 row)
+
+-- INSERT with expressions in target list
+INSERT INTO limit_orders VALUES (430, upper('ibm'), 214, timestamp '2003-01-28 10:31:17' +
+								 interval '5 hours', 'buy', sqrt(2));
+SELECT COUNT(*) FROM limit_orders WHERE id = 430;
+ count 
+-------
+     1
+(1 row)
+
+-- INSERT without partition key
+INSERT INTO limit_orders DEFAULT VALUES;
+ERROR:  cannot plan INSERT using row with NULL value in partition column
+-- squelch WARNINGs that contain worker_port
+SET client_min_messages TO ERROR;
+-- INSERT violating NOT NULL constraint
+INSERT INTO limit_orders VALUES (NULL, 'T', 975234, DEFAULT);
+ERROR:  cannot plan INSERT using row with NULL value in partition column
+-- INSERT violating column constraint
+INSERT INTO limit_orders VALUES (18811, 'BUD', 14962, '2014-04-05 08:32:16', 'sell',
+								 -5.00);
+ERROR:  could not modify any active placements
+-- INSERT violating primary key constraint
+INSERT INTO limit_orders VALUES (32743, 'LUV', 5994, '2001-04-16 03:37:28', 'buy', 0.58);
+ERROR:  could not modify any active placements
+SET client_min_messages TO DEFAULT;
+-- commands with non-constant partition values are unsupported
+INSERT INTO limit_orders VALUES (random() * 100, 'ORCL', 152, '2011-08-25 11:50:45',
+								 'sell', 0.58);
+ERROR:  cannot plan sharded modification containing values which are not constants or constant expressions
+-- commands with expressions that cannot be collapsed are unsupported
+INSERT INTO limit_orders VALUES (2036, 'GOOG', 5634, now(), 'buy', random());
+ERROR:  cannot plan sharded modification containing values which are not constants or constant expressions
+-- commands with mutable functions in their quals
+DELETE FROM limit_orders WHERE id = 246 AND bidder_id = (random() * 1000);
+ERROR:  cannot plan sharded modification containing values which are not constants or constant expressions
+-- commands with mutable but non-volatilte functions(ie: stable func.) in their quals
+DELETE FROM limit_orders WHERE id = 246 AND placed_at = current_timestamp;
+ERROR:  cannot plan sharded modification containing values which are not constants or constant expressions
+-- commands with multiple rows are unsupported
+INSERT INTO limit_orders VALUES (DEFAULT), (DEFAULT);
+ERROR:  cannot perform distributed planning for the given query
+DETAIL:  Multi-row INSERTs to distributed tables are not supported.
+-- INSERT ... SELECT ... FROM commands are unsupported
+INSERT INTO limit_orders SELECT * FROM limit_orders;
+ERROR:  cannot perform distributed planning for the given query
+DETAIL:  Subqueries are not supported in distributed queries.
+-- commands with a RETURNING clause are unsupported
+INSERT INTO limit_orders VALUES (7285, 'AMZN', 3278, '2016-01-05 02:07:36', 'sell', 0.00)
+						 RETURNING *;
+ERROR:  cannot perform distributed planning for the given query
+DETAIL:  RETURNING clauses are not supported in distributed queries.
+-- commands containing a CTE are unsupported
+WITH deleted_orders AS (DELETE FROM limit_orders RETURNING *)
+INSERT INTO limit_orders DEFAULT VALUES;
+ERROR:  cannot perform distributed planning for the given query
+DETAIL:  Common table expressions are not supported in distributed queries.
+-- test simple DELETE
+INSERT INTO limit_orders VALUES (246, 'TSLA', 162, '2007-07-02 16:32:15', 'sell', 20.69);
+SELECT COUNT(*) FROM limit_orders WHERE id = 246;
+ count 
+-------
+     1
+(1 row)
+
+DELETE FROM limit_orders WHERE id = 246;
+SELECT COUNT(*) FROM limit_orders WHERE id = 246;
+ count 
+-------
+     0
+(1 row)
+
+-- DELETE with expression in WHERE clause
+INSERT INTO limit_orders VALUES (246, 'TSLA', 162, '2007-07-02 16:32:15', 'sell', 20.69);
+SELECT COUNT(*) FROM limit_orders WHERE id = 246;
+ count 
+-------
+     1
+(1 row)
+
+DELETE FROM limit_orders WHERE id = (2 * 123);
+SELECT COUNT(*) FROM limit_orders WHERE id = 246;
+ count 
+-------
+     0
+(1 row)
+
+-- commands with no constraints on the partition key are not supported
+DELETE FROM limit_orders WHERE bidder_id = 162;
+ERROR:  cannot modify multiple shards during a single query
+-- commands with a USING clause are unsupported
+CREATE TABLE bidders ( name text, id bigint );
+DELETE FROM limit_orders USING bidders WHERE limit_orders.id = 246 AND
+											 limit_orders.bidder_id = bidders.id AND
+											 bidders.name = 'Bernie Madoff';
+ERROR:  cannot perform distributed planning for the given query
+DETAIL:  Joins are not supported in distributed queries.
+-- commands with a RETURNING clause are unsupported
+DELETE FROM limit_orders WHERE id = 246 RETURNING *;
+ERROR:  cannot perform distributed planning for the given query
+DETAIL:  RETURNING clauses are not supported in distributed queries.
+-- commands containing a CTE are unsupported
+WITH deleted_orders AS (INSERT INTO limit_orders DEFAULT VALUES RETURNING *)
+DELETE FROM limit_orders;
+ERROR:  cannot perform distributed planning for the given query
+DETAIL:  Common table expressions are not supported in distributed queries.
+-- cursors are not supported
+DELETE FROM limit_orders WHERE CURRENT OF cursor_name;
+ERROR:  cannot modify multiple shards during a single query
+INSERT INTO limit_orders VALUES (246, 'TSLA', 162, '2007-07-02 16:32:15', 'sell', 20.69);
+-- simple UPDATE
+UPDATE limit_orders SET symbol = 'GM' WHERE id = 246;
+SELECT symbol FROM limit_orders WHERE id = 246;
+ symbol 
+--------
+ GM
+(1 row)
+
+-- expression UPDATE
+UPDATE limit_orders SET bidder_id = 6 * 3 WHERE id = 246;
+SELECT bidder_id FROM limit_orders WHERE id = 246;
+ bidder_id 
+-----------
+        18
+(1 row)
+
+-- multi-column UPDATE
+UPDATE limit_orders SET (kind, limit_price) = ('buy', DEFAULT) WHERE id = 246;
+SELECT kind, limit_price FROM limit_orders WHERE id = 246;
+ kind | limit_price 
+------+-------------
+ buy  |        0.00
+(1 row)
+
+-- First: Duplicate placements but use a bad hostname
+-- Next: Issue a modification. It will hit a bad placement
+-- Last: Verify that the unreachable placement was marked unhealthy
+WITH limit_order_placements AS (
+		SELECT sp.*
+		FROM   pgs_distribution_metadata.shard_placement AS sp,
+			   pgs_distribution_metadata.shard           AS s
+		WHERE  sp.shard_id = s.id
+		AND    s.relation_id = 'limit_orders'::regclass
+	)
+INSERT INTO pgs_distribution_metadata.shard_placement
+			(shard_id,
+			 shard_state,
+			 node_name,
+			 node_port)
+SELECT shard_id,
+	   shard_state,
+	   'badhost',
+	   54321
+FROM   limit_order_placements;
+\set VERBOSITY terse
+INSERT INTO limit_orders VALUES (275, 'ADR', 140, '2007-07-02 16:32:15', 'sell', 43.67);
+WARNING:  Connection failed to badhost:54321
+\set VERBOSITY default
+SELECT count(*)
+FROM   pgs_distribution_metadata.shard_placement AS sp,
+	   pgs_distribution_metadata.shard           AS s
+WHERE  sp.shard_id = s.id
+AND    sp.node_name = 'badhost'
+AND    sp.shard_state = 3
+AND    s.relation_id = 'limit_orders'::regclass;
+ count 
+-------
+     1
+(1 row)
+
+-- commands with no constraints on the partition key are not supported
+UPDATE limit_orders SET limit_price = 0.00;
+ERROR:  cannot modify multiple shards during a single query
+-- attempting to change the partition key is unsupported
+UPDATE limit_orders SET id = 0 WHERE id = 246;
+ERROR:  modifying the partition value of rows is not allowed
+-- UPDATEs with a FROM clause are unsupported
+UPDATE limit_orders SET limit_price = 0.00 FROM bidders
+					WHERE limit_orders.id = 246 AND
+						  limit_orders.bidder_id = bidders.id AND
+						  bidders.name = 'Bernie Madoff';
+ERROR:  cannot perform distributed planning for the given query
+DETAIL:  Joins are not supported in distributed queries.
+-- commands with a RETURNING clause are unsupported
+UPDATE limit_orders SET symbol = 'GM' WHERE id = 246 RETURNING *;
+ERROR:  cannot perform distributed planning for the given query
+DETAIL:  RETURNING clauses are not supported in distributed queries.
+-- commands containing a CTE are unsupported
+WITH deleted_orders AS (INSERT INTO limit_orders DEFAULT VALUES RETURNING *)
+UPDATE limit_orders SET symbol = 'GM';
+ERROR:  cannot perform distributed planning for the given query
+DETAIL:  Common table expressions are not supported in distributed queries.
+-- cursors are not supported
+UPDATE limit_orders SET symbol = 'GM' WHERE CURRENT OF cursor_name;
+ERROR:  cannot modify multiple shards during a single query
