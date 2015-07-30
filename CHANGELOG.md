@@ -1,3 +1,7 @@
+### pg_shard v1.2.1 (July 30, 2015) ###
+
+* Fixes update script bug triggered when running in CitusDB
+
 ### pg_shard v1.2.0 (July 28, 2015) ###
 
 * Distribution metadata stays continually in sync with CitusDB
