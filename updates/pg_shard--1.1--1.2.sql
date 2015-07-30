@@ -12,7 +12,7 @@ LANGUAGE C STABLE STRICT;
 DO $$
 DECLARE
 	use_citus_metadata boolean := false;
-	relation_name oid;
+	relation_name text;
 BEGIN
 	BEGIN
 		PERFORM 'pg_catalog.pg_dist_partition'::regclass;
@@ -27,7 +27,7 @@ BEGIN
 		LOCK TABLE pgs_distribution_metadata.partition IN EXCLUSIVE MODE;
 		FOR relation_name IN SELECT relation_id::regclass::text
 		FROM pgs_distribution_metadata.partition LOOP
-			PERFORM sync_table_metadata_to_citus(relation_id::regclass);
+			PERFORM sync_table_metadata_to_citus(relation_name);
 		END LOOP;
 
 		-- clean up dependencies on configuration objects
