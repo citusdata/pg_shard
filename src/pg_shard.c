@@ -197,8 +197,8 @@ _PG_init(void)
 
 	DefineCustomBoolVariable("pg_shard.use_citusdb_select_logic",
 							 "Informs pg_shard to use CitusDB's select logic", NULL,
-							 &UseCitusDBSelectLogic, false, PGC_USERSET, 0, NULL,
-							 NULL, NULL);
+							 &UseCitusDBSelectLogic, BUILT_AGAINST_CITUSDB, PGC_USERSET,
+							 0, NULL, NULL, NULL);
 
 	DefineCustomBoolVariable("pg_shard.log_distributed_statements",
 							 "Logs each statement used in a distributed plan", NULL,
