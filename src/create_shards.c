@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/errno.h>
 
 #include "access/hash.h"
 #include "access/nbtree.h"
@@ -37,6 +38,7 @@
 #include "lib/stringinfo.h"
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
+#include "postmaster/postmaster.h"
 #include "storage/fd.h"
 #include "storage/lock.h"
 #include "utils/builtins.h"
@@ -378,6 +380,8 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 	char workerNodeLine[MAXPGPATH];
 	char *workerFilePath = make_absolute_path(workerNodeFilename);
 	char workerLinePattern[1024];
+	const int WorkerNameIndex = 0;
+	const int WorkerPortIndex = 1;
 	memset(workerLinePattern, '\0', sizeof(workerLinePattern));
 
 	workerFileStream = AllocateFile(workerFilePath, PG_BINARY_R);
@@ -389,17 +393,19 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 	}
 
 	/* build pattern to contain node name length limit */
-	snprintf(workerLinePattern, sizeof(workerLinePattern), "%%%us%%*[ \t]%%10u",
-			 MAX_NODE_LENGTH);
+	snprintf(workerLinePattern, sizeof(workerLinePattern), "%%%us%%*[ \t]%%%us",
+			 MAX_NODE_LENGTH, MAX_PORT_LENGTH);
 
 	while (fgets(workerNodeLine, sizeof(workerNodeLine), workerFileStream) != NULL)
 	{
 		WorkerNode *workerNode = NULL;
 		char *linePointer = NULL;
-		uint32 nodePort = 0;
-		int parsedValues = 0;
+		uint32 nodePort = PostPortNumber; /* default port number */
+		int fieldCount = 0;
 		char nodeName[MAX_NODE_LENGTH + 1];
+		char nodePortString[MAX_PORT_LENGTH + 1];
 		memset(nodeName, '\0', sizeof(nodeName));
+		memset(nodePortString, '\0', sizeof(nodePortString));
 
 		if (strnlen(workerNodeLine, MAXPGPATH) == MAXPGPATH - 1)
 		{
@@ -422,16 +428,43 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 			continue;
 		}
 
-		/* parse out the node name and node port */
-		parsedValues = sscanf(workerNodeLine, workerLinePattern, nodeName, &nodePort);
-		if (parsedValues != 2)
+		/* parse line; node name is required, but port is optional */
+		fieldCount = sscanf(workerNodeLine, workerLinePattern, nodeName, nodePortString);
+
+		/* adjust field count for zero based indexes */
+		fieldCount--;
+
+		/* raise error if no fields were assigned */
+		if (fieldCount < WorkerNameIndex)
 		{
 			ereport(ERROR, (errcode(ERRCODE_CONFIG_FILE_ERROR),
 							errmsg("could not parse worker node line: %s",
 								   workerNodeLine),
 							errhint("Lines in the worker node file consist of a node "
-									"name and port separated by whitespace. Lines that "
-									"start with a '#' character are skipped.")));
+									"name and optional port separated by whitespace. "
+									"Lines starting with a '#' character are skipped.")));
+		}
+
+		/* no special treatment for nodeName: already parsed by sscanf */
+
+		/* if a second token was specified, convert to integer port */
+		if (fieldCount >= WorkerPortIndex && *nodePortString != '#')
+		{
+			char *nodePortEnd = NULL;
+
+			errno = 0;
+			nodePort = strtoul(nodePortString, &nodePortEnd, 0);
+
+			if (errno != 0 || (*nodePortEnd) != '\0')
+			{
+				ereport(ERROR, (errcode(ERRCODE_CONFIG_FILE_ERROR),
+								errmsg("could not parse worker node line: %s",
+									   workerNodeLine),
+								errhint("Lines in the worker node file consist of a node "
+										"name and optional port separated by whitespace. "
+										"Lines starting with a '#' character are "
+										"skipped.")));
+			}
 		}
 
 		/* allocate worker node structure and set fields */

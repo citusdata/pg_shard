@@ -20,8 +20,9 @@
 /* maximum duration to wait for connection */
 #define CLIENT_CONNECT_TIMEOUT_SECONDS "5"
 
-/* maximum (textual) lengths of hostname */
+/* maximum (textual) lengths of hostname and port */
 #define MAX_NODE_LENGTH 255
+#define MAX_PORT_LENGTH 10
 
 /* times to attempt connection (or reconnection) */
 #define MAX_CONNECT_ATTEMPTS 2
