@@ -95,14 +95,17 @@ This table will not be used to store any data on the master but serves as a prot
 
 ```sql
 -- Specify the table to distribute and the column to distribute it on
-SELECT master_create_distributed_table('customer_reviews', 'customer_id');
+SELECT master_create_distributed_table(table_name := 'customer_reviews',
+                                       partition_column := 'customer_id');
 ```
 
 This function informs `pg_shard` that the table `customer_reviews` should be hash partitioned on the `customer_id` column. Now, let's create shards for this table on the worker nodes:
 
 ```sql
 -- Specify the table name, total shard count and replication factor
-SELECT master_create_worker_shards('customer_reviews', 16, 2);
+SELECT master_create_worker_shards(table_name := 'customer_reviews',
+                                   shard_count := 16,
+                                   replication_factor := 2);
 ```
 
 This function creates a total of 16 shards. Each shard owns a portion of a hash token space, and gets replicated on 2 worker nodes. The shard replicas created on the worker nodes have the same table schema, index, and constraint definitions as the table on the master node. Once all replicas are created, this function saves all distributed metadata on the master node.
@@ -143,7 +146,11 @@ Call the script with the `-h` for more usage information.
 If for whatever reason a shard placement fails to be updated during a modification command, it will be marked as inactive. The `master_copy_shard_placement` function can be called to repair an inactive shard placement using data from a healthy placement. In order for this function to operate, `pg_shard` must be installed on _all_ worker nodes and not just the master node. The shard will be protected from any concurrent modifications during the repair.
 
 ```sql
-SELECT master_copy_shard_placement(12345, 'good_host', 5432, 'bad_host', 5432);
+SELECT master_copy_shard_placement(shard_id := 12345,
+                                   source_node_name := 'good_host',
+                                   source_node_port := 5432,
+                                   target_node_name := 'bad_host',
+                                   target_node_port := 5432);
 ```
 
 ### Usage with CitusDB
