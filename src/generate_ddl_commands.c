@@ -23,6 +23,9 @@
 #include "access/htup.h"
 #include "access/htup_details.h"
 #include "access/skey.h"
+#if (PG_VERSION_NUM >= 90500 && PG_VERSION_NUM < 90600)
+#include "access/stratnum.h"
+#endif
 #include "access/tupdesc.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"

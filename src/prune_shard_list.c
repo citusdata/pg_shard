@@ -21,7 +21,11 @@
 #include <stddef.h>
 
 #include "access/attnum.h"
+#if (PG_VERSION_NUM >= 90500 && PG_VERSION_NUM < 90600)
+#include "access/stratnum.h"
+#else
 #include "access/skey.h"
+#endif
 #include "catalog/pg_am.h"
 #include "catalog/pg_type.h"
 #include "commands/defrem.h"

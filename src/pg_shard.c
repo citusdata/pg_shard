@@ -32,7 +32,11 @@
 #include "access/htup_details.h"
 #include "access/htup.h"
 #include "access/sdir.h"
+#if (PG_VERSION_NUM >= 90500 && PG_VERSION_NUM < 90600)
+#include "access/stratnum.h"
+#else
 #include "access/skey.h"
+#endif
 #include "access/tupdesc.h"
 #include "access/xact.h"
 #include "catalog/namespace.h"
