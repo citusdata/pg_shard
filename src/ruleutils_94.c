@@ -15,17 +15,17 @@
  *
  *-------------------------------------------------------------------------
  */
-#include "postgres.h"
 #include "c.h"
+
+#if (PG_VERSION_NUM >= 90400 && PG_VERSION_NUM < 90500)
+
+#include "postgres.h"
 #include "fmgr.h"
 #include "funcapi.h"
 #include "miscadmin.h"
 
-#if (PG_VERSION_NUM >= 90400 && PG_VERSION_NUM < 90500)
-
-#include "ruleutils.h" /* IWYU pragma: keep */
-#include "ruleutils.h" /* IWYU pragma: keep */
 #include "ddl_commands.h"
+#include "ruleutils.h" /* IWYU pragma: keep */
 
 #include <stddef.h>
 #include <stdio.h>
@@ -33,8 +33,8 @@
 
 #include "access/attnum.h"
 #include "access/heapam.h"
-#include "access/htup.h"
 #include "access/htup_details.h"
+#include "access/htup.h"
 #include "access/tupdesc.h"
 #include "catalog/pg_aggregate.h"
 #include "catalog/pg_attribute.h"
@@ -52,11 +52,11 @@
 #include "nodes/primnodes.h"
 #include "nodes/value.h"
 #include "optimizer/tlist.h"
-#include "parser/parser.h"
-#include "parser/parsetree.h"
 #include "parser/parse_agg.h"
 #include "parser/parse_func.h"
 #include "parser/parse_oper.h"
+#include "parser/parser.h"
+#include "parser/parsetree.h"
 #include "rewrite/rewriteHandler.h"
 #include "storage/lock.h"
 #include "utils/builtins.h"
