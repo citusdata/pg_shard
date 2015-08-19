@@ -105,7 +105,12 @@ FakeGetForeignPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid,
 	Index scan_relid = baserel->relid;
 	scan_clauses = extract_actual_clauses(scan_clauses, false);
 
+	/* make_foreignscan adds a parameter in PostgreSQL 9.5 */
+#if (PG_VERSION_NUM < 90500)
 	return make_foreignscan(tlist, scan_clauses, scan_relid, NIL, NIL);
+#else
+	return make_foreignscan(tlist, scan_clauses, scan_relid, NIL, NIL, NIL);
+#endif
 }
 
 

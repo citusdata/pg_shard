@@ -43,6 +43,10 @@
 #include "utils/lsyscache.h"
 #include "utils/palloc.h"
 #include "utils/rel.h"
+/* this file only exists in PostgreSQL 9.5 and higher */
+#if (PG_VERSION_NUM >= 90500 && PG_VERSION_NUM < 90600)
+#include "utils/ruleutils.h"
+#endif
 #include "utils/relcache.h"
 #include "utils/syscache.h"
 #include "utils/tqual.h"
