@@ -455,7 +455,7 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 		/* no special treatment for nodeName: already parsed by sscanf */
 
 		/* if a second token was specified, convert to integer port */
-		if (fieldCount >= workerPortIndex && *nodePortString != '#')
+		if (fieldCount >= workerPortIndex)
 		{
 			char *nodePortEnd = NULL;
 
