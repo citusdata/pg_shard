@@ -33,7 +33,7 @@ then
 fi
 
 sed -i.bak -e's/^/#/g' -e"\$a\\
-localhost $PGPORT # added by installcheck\\
+localhost # added by installcheck\\
 adeadhost 5432 # added by installcheck" $PG_WORKER_LIST_CONF
 
 shift
