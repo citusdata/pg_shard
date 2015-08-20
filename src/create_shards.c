@@ -399,9 +399,10 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 
 	while (fgets(workerNodeLine, sizeof(workerNodeLine), workerFileStream) != NULL)
 	{
+		const int workerLineLength = strnlen(workerNodeLine, MAXPGPATH);
 		WorkerNode *workerNode = NULL;
 		char *linePointer = NULL;
-		uint32 nodePort = PostPortNumber; /* default port number */
+		int32 nodePort = PostPortNumber; /* default port number */
 		int fieldCount = 0;
 		bool lineIsInvalid = false;
 		char nodeName[MAX_NODE_LENGTH + 1];
@@ -409,11 +410,19 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 		memset(nodeName, '\0', sizeof(nodeName));
 		memset(nodePortString, '\0', sizeof(nodePortString));
 
-		if (strnlen(workerNodeLine, MAXPGPATH) == MAXPGPATH - 1)
+		if (workerLineLength == MAXPGPATH - 1)
 		{
 			ereport(ERROR, (errcode(ERRCODE_CONFIG_FILE_ERROR),
 							errmsg("worker node list file line exceeds the maximum "
 								   "length of %d", MAXPGPATH)));
+		}
+
+		/* trim trailing newlines preserved by fgets, if any */
+		linePointer = workerNodeLine + workerLineLength - 1;
+		while (linePointer >= workerNodeLine &&
+			   (*linePointer == '\n' || *linePointer == '\r'))
+		{
+			*linePointer-- = '\0';
 		}
 
 		/* skip leading whitespace */
@@ -451,9 +460,9 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 			char *nodePortEnd = NULL;
 
 			errno = 0;
-			nodePort = strtoul(nodePortString, &nodePortEnd, 0);
+			nodePort = strtol(nodePortString, &nodePortEnd, 10);
 
-			if (errno != 0 || (*nodePortEnd) != '\0')
+			if (errno != 0 || (*nodePortEnd) != '\0' || nodePort <= 0)
 			{
 				lineIsInvalid = true;
 			}
@@ -464,8 +473,8 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 			ereport(ERROR, (errcode(ERRCODE_CONFIG_FILE_ERROR),
 							errmsg("could not parse worker node line: %s",
 								   workerNodeLine),
-							errhint("Lines in the worker node file consist of a node "
-									"name and optional port separated by whitespace. "
+							errhint("Lines in the worker node file must contain a valid "
+									"node name and, optionally, a positive port number. "
 									"Comments begin with a '#' character and extend to "
 									"the end of their line.")));
 		}
