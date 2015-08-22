@@ -174,7 +174,7 @@ static ProcessUtility_hook_type PreviousProcessUtilityHook = NULL;
 void
 _PG_init(void)
 {
-	PLpgSQL_plugin **plugin_ptr = NULL;
+	PLpgSQL_plugin **plPluginHookPointer = NULL;
 
 	PreviousPlannerHook = planner_hook;
 	planner_hook = PgShardPlanner;
@@ -212,8 +212,8 @@ _PG_init(void)
 	EmitWarningsOnPlaceholders("pg_shard");
 
 	/* install error transformation handler for PL/pgSQL invocations */
-	plugin_ptr = (PLpgSQL_plugin **) find_rendezvous_variable("PLpgSQL_plugin");
-	*plugin_ptr = &PluginFuncs;
+	plPluginHookPointer = (PLpgSQL_plugin **) find_rendezvous_variable("PLpgSQL_plugin");
+	*plPluginHookPointer = &PluginFuncs;
 }
 
 
