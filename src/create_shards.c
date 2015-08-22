@@ -253,8 +253,8 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 		text *maxHashTokenText = NULL;
 		int64 minHashTokenOffset = (shardIndex * HASH_TOKEN_COUNT) / shardCount;
 		int64 maxHashTokenOffset = ((shardIndex + 1) * HASH_TOKEN_COUNT) / shardCount - 1;
-		int32 shardMinHashToken = INT32_MIN + minHashTokenOffset;
-		int32 shardMaxHashToken = INT32_MIN + maxHashTokenOffset;
+		int32 shardMinHashToken = (int32) (INT32_MIN + minHashTokenOffset);
+		int32 shardMaxHashToken = (int32) (INT32_MIN + maxHashTokenOffset);
 
 		/* insert the shard metadata row along with its min/max values */
 		minHashTokenText = IntegerToText(shardMinHashToken);
@@ -390,7 +390,7 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 
 	while (fgets(workerNodeLine, sizeof(workerNodeLine), workerFileStream) != NULL)
 	{
-		const int workerLineLength = strnlen(workerNodeLine, MAXPGPATH);
+		const Size workerLineLength = strnlen(workerNodeLine, MAXPGPATH);
 		WorkerNode *workerNode = NULL;
 		char *linePointer = NULL;
 		int32 nodePort = PostPortNumber; /* default port number */
@@ -451,7 +451,7 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 			char *nodePortEnd = NULL;
 
 			errno = 0;
-			nodePort = strtol(nodePortString, &nodePortEnd, 10);
+			nodePort = (int32) strtol(nodePortString, &nodePortEnd, 10);
 
 			if (errno != 0 || (*nodePortEnd) != '\0' || nodePort <= 0)
 			{
