@@ -611,7 +611,7 @@ TupleToShardPlacement(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 	shardPlacement = palloc0(sizeof(ShardPlacement));
 	shardPlacement->id = DatumGetInt64(idDatum);
 	shardPlacement->shardId = DatumGetInt64(shardIdDatum);
-	shardPlacement->shardState = DatumGetInt32(shardStateDatum);
+	shardPlacement->shardState = (ShardState) DatumGetInt32(shardStateDatum);
 	shardPlacement->nodeName = TextDatumGetCString(nodeNameDatum);
 	shardPlacement->nodePort = DatumGetInt32(nodePortDatum);
 
@@ -693,7 +693,7 @@ CreateShardRow(Oid distributedTableId, char shardStorage, text *shardMinValue,
  */
 int64
 CreateShardPlacementRow(int64 shardId, ShardState shardState, char *nodeName,
-						uint32 nodePort)
+						int32 nodePort)
 {
 	int64 newShardPlacementId = -1;
 	Oid argTypes[] = { INT8OID, INT4OID, TEXTOID, INT4OID };

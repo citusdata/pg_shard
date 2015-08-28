@@ -171,8 +171,8 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 	List *workerNodeList = NIL;
 	List *ddlCommandList = NIL;
 	int32 workerNodeCount = 0;
-	uint32 placementAttemptCount = 0;
-	uint64 hashTokenIncrement = 0;
+	int32 placementAttemptCount = 0;
+	int64 hashTokenIncrement = 0;
 	List *existingShardList = NIL;
 
 	/* make sure table is hash partitioned */
@@ -228,7 +228,7 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 	}
 
 	/* if we have enough nodes, add an extra placement attempt for backup */
-	placementAttemptCount = (uint32) replicationFactor;
+	placementAttemptCount = replicationFactor;
 	if (workerNodeCount > replicationFactor)
 	{
 		placementAttemptCount++;
@@ -249,8 +249,7 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 		List *extendedDDLCommands = NIL;
 		int64 shardId = -1;
 		int32 placementCount = 0;
-		uint32 placementIndex = 0;
-		uint32 roundRobinNodeIndex = shardIndex % workerNodeCount;
+		int32 roundRobinNodeIndex = shardIndex % workerNodeCount;
 
 		/* initialize the hash token space for this shard */
 		text *minHashTokenText = NULL;
@@ -281,14 +280,14 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 		 */
 		LockShardDistributionMetadata(shardId, ExclusiveLock);
 
-		for (placementIndex = 0; placementIndex < placementAttemptCount; placementIndex++)
+		for (int32 placementIndex = 0; placementIndex < placementAttemptCount; placementIndex++)
 		{
 			int32 candidateNodeIndex =
 				(roundRobinNodeIndex + placementIndex) % workerNodeCount;
 			WorkerNode *candidateNode = (WorkerNode *) list_nth(workerNodeList,
 																candidateNodeIndex);
 			char *nodeName = candidateNode->nodeName;
-			uint32 nodePort = candidateNode->nodePort;
+			int32 nodePort = candidateNode->nodePort;
 
 			bool created = ExecuteRemoteCommandList(nodeName, nodePort,
 													extendedDDLCommands);
@@ -556,7 +555,7 @@ CompareWorkerNodes(const void *leftElement, const void *rightElement)
  * on the specified node.
  */
 bool
-ExecuteRemoteCommandList(char *nodeName, uint32 nodePort, List *sqlCommandList)
+ExecuteRemoteCommandList(char *nodeName, int32 nodePort, List *sqlCommandList)
 {
 	bool commandListExecuted = true;
 	ListCell *sqlCommandCell = NULL;

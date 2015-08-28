@@ -31,7 +31,7 @@ extern void AppendOptionListToString(StringInfo stringBuffer, List *optionList);
 extern List * ExtendedDDLCommandList(Oid masterRelationId, int64 shardId,
 									 List *sqlCommandList);
 extern void AppendShardIdToName(char **name, int64 shardId);
-extern bool ExecuteRemoteCommandList(char *nodeName, uint32 nodePort,
+extern bool ExecuteRemoteCommandList(char *nodeName, int32 nodePort,
 									 List *sqlCommandList);
 
 

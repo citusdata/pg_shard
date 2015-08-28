@@ -182,8 +182,7 @@ pg_shard_get_tableschemadef_string(Oid tableRelationId)
 	int attributeIndex = 0;
 	bool firstAttributePrinted = false;
 	AttrNumber defaultValueIndex = 0;
-	AttrNumber constraintIndex = 0;
-	AttrNumber constraintCount = 0;
+	int32 constraintCount = 0;
 	StringInfoData buffer = { NULL, 0, 0, 0 };
 
 	/*
@@ -294,7 +293,7 @@ pg_shard_get_tableschemadef_string(Oid tableRelationId)
 		constraintCount = tupleConstraints->num_check;
 	}
 
-	for (constraintIndex = 0; constraintIndex < constraintCount; constraintIndex++)
+	for (int32 constraintIndex = 0; constraintIndex < constraintCount; constraintIndex++)
 	{
 		ConstrCheck *checkConstraintList = tupleConstraints->check;
 		ConstrCheck *checkConstraint = &(checkConstraintList[constraintIndex]);
