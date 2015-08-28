@@ -20,8 +20,8 @@ SCRIPTS = $(wildcard bin/*)
 # compilation configuration
 MODULE_big = $(EXTENSION)
 OBJS = $(patsubst %.c,%.o,$(wildcard src/*.c))
-PG_CPPFLAGS = -std=c99 -Wall -Wextra -Wshorten-64-to-32 -Wshadow -Werror \
-			  -Wno-unused-parameter -Iinclude -I$(libpq_srcdir)
+PG_CPPFLAGS = -std=c99 -Wall -Wextra -Werror -Wshorten-64-to-32 -Wshadow \
+			  -Wsign-conversion -Wno-unused-parameter -Iinclude -I$(libpq_srcdir)
 SHLIB_LINK = $(libpq)
 EXTRA_CLEAN += $(addprefix src/,*.gcno *.gcda) # clean up after profiling runs
 

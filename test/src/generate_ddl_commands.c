@@ -47,7 +47,7 @@ table_ddl_command_array(PG_FUNCTION_ARGS)
 	ArrayType *ddlCommandArrayType = NULL;
 	List *ddlCommandList = TableDDLCommandList(distributedTableId);
 	int ddlCommandCount = list_length(ddlCommandList);
-	Datum *ddlCommandDatumArray = palloc0(ddlCommandCount * sizeof(Datum));
+	Datum *ddlCommandDatumArray = palloc0((Size) ddlCommandCount * sizeof(Datum));
 
 	ListCell *ddlCommandCell = NULL;
 	int ddlCommandIndex = 0;

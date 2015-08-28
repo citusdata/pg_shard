@@ -80,7 +80,7 @@ load_shard_id_array(PG_FUNCTION_ARGS)
 	}
 
 	shardIdCount = list_length(shardList);
-	shardIdDatumArray = palloc0(shardIdCount * sizeof(Datum));
+	shardIdDatumArray = palloc0((Size) shardIdCount * sizeof(Datum));
 
 	foreach(shardCell, shardList)
 	{
@@ -153,7 +153,7 @@ load_shard_placement_array(PG_FUNCTION_ARGS)
 	}
 
 	placementCount = list_length(placementList);
-	placementDatumArray = palloc0(placementCount * sizeof(Datum));
+	placementDatumArray = palloc0((Size) placementCount * sizeof(Datum));
 
 	foreach(placementCell, placementList)
 	{

@@ -34,7 +34,7 @@
 /* in-memory representation of a worker node */
 typedef struct WorkerNode
 {
-	uint32 nodePort;
+	int32 nodePort;
 	char *nodeName;
 } WorkerNode;
 
