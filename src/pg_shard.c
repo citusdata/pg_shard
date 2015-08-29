@@ -84,13 +84,13 @@
 
 
 /* controls use of locks to enforce safe commutativity */
-bool AllModificationsCommutative = false;
+static bool AllModificationsCommutative = false;
 
 /* informs pg_shard to use the CitusDB planner */
-bool UseCitusDBSelectLogic = false;
+static bool UseCitusDBSelectLogic = false;
 
 /* logs each statement used in a distributed plan */
-bool LogDistributedStatements = false;
+static bool LogDistributedStatements = false;
 
 
 /* planner functions forward declarations */
