@@ -148,7 +148,7 @@ SELECT master_copy_shard_placement(12345, 'good_host', 5432, 'bad_host', 5432);
 
 ### Usage with CitusDB
 
-When installed within CitusDB, `pg_shard` will use the distribution metadata catalogs provided by CitusDB. No special syncing step is necessary: your `pg_shard`-distributed tables will be visible to CitusDB and vice versa. Just ensure the `pg_shard.use_citusdb_select_logic` config variable is turned on and you'll be good to go!
+When installed within CitusDB, `pg_shard` will use the distribution metadata catalogs provided by CitusDB. No special syncing step is necessary: your `pg_shard`-distributed tables will be visible to CitusDB and vice versa. Just ensure the `pg_shard.use_citusdb_select_logic` config variable is turned on (the default when running within CitusDB) and you'll be good to go!
 
 ## Look Under the Hood
 
