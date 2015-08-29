@@ -4,6 +4,9 @@
 
 CREATE EXTENSION pg_shard;
 
+-- ensure the test DB defaults to pg_shard select logic
+ALTER DATABASE :DBNAME SET pg_shard.use_citusdb_select_logic TO false;
+
 -- create fake fdw for use in tests
 CREATE FUNCTION fake_fdw_handler()
 RETURNS fdw_handler

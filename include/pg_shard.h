@@ -15,12 +15,20 @@
 #include "c.h"
 
 #include "access/tupdesc.h"
+#include "catalog/indexing.h"
 #include "nodes/parsenodes.h"
 #include "nodes/pg_list.h"
 #include "nodes/plannodes.h"
 #include "lib/stringinfo.h"
 #include "utils/tuplestore.h"
 
+
+/* detect when building against CitusDB */
+#ifdef DistPartitionLogicalRelidIndexId
+#define BUILT_AGAINST_CITUSDB true
+#else
+#define BUILT_AGAINST_CITUSDB false
+#endif
 
 /* prefix used for temporary tables created on the master node */
 #define TEMPORARY_TABLE_PREFIX "pg_shard_temp_table"
