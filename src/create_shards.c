@@ -245,7 +245,7 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 		List *extendedDDLCommands = NIL;
 		int64 shardId = -1;
 		int32 placementCount = 0;
-		int32 roundRobinNodeIndex = shardIndex % workerNodeCount;
+		int32 roundRobinNodeIndex = (int32) shardIndex % workerNodeCount;
 
 		/* initialize the hash token space for this shard */
 		text *minHashTokenText = NULL;
