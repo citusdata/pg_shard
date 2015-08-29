@@ -1,3 +1,7 @@
+### pg_shard v1.2.2 (August 28, 2015) ###
+
+* Changes default planner when running within CitusDB
+
 ### pg_shard v1.2.1 (July 30, 2015) ###
 
 * Fixes update script bug triggered when running in CitusDB
