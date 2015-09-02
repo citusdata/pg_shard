@@ -174,7 +174,7 @@ SELECT key FROM pgs_distribution_metadata.partition;
 
 -- observe that shards and placements still exist for simple_table
 SELECT
-    s.id, node_name, node_port
+    s.id, node_name
 FROM
     pgs_distribution_metadata.shard s LEFT OUTER JOIN pg_class c ON s.relation_id = c.oid,
     pgs_distribution_metadata.shard_placement p

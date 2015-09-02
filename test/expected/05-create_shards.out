@@ -300,17 +300,17 @@ SELECT key FROM pgs_distribution_metadata.partition;
 
 -- observe that shards and placements still exist for simple_table
 SELECT
-    s.id, node_name, node_port
+    s.id, node_name
 FROM
     pgs_distribution_metadata.shard s LEFT OUTER JOIN pg_class c ON s.relation_id = c.oid,
     pgs_distribution_metadata.shard_placement p
 WHERE
     c.oid IS NULL AND s.id = p.shard_id;
-   id   | node_name | node_port 
---------+-----------+-----------
- 102042 | localhost |      5432
- 102043 | localhost |      5432
- 102044 | localhost |      5432
- 102045 | localhost |      5432
+   id   | node_name 
+--------+-----------
+ 102042 | localhost
+ 102043 | localhost
+ 102044 | localhost
+ 102045 | localhost
 (4 rows)
 
