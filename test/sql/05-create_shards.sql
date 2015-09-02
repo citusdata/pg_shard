@@ -153,3 +153,35 @@ DELETE FROM pgs_distribution_metadata.shard
 	
 DELETE FROM pgs_distribution_metadata.partition
 	WHERE relation_id = 'foreign_table_to_distribute'::regclass;	
+
+-- test DROP TABLE
+CREATE TABLE simple_table (
+	id int
+);
+
+SELECT master_create_distributed_table('simple_table', 'id');
+
+SELECT master_create_worker_shards('simple_table', 4, 1);
+
+-- we cannot drop distributed table without CASCADE modifier
+DROP TABLE simple_table;
+
+-- now drop with CASCADE
+DROP TABLE simple_table CASCADE;
+
+-- observe that no partitions exists for simple_table
+SELECT pg_class.relname FROM pgs_distribution_metadata.partition
+	LEFT OUTER JOIN pg_class ON (relation_id = oid)
+	WHERE pg_class.relname = 'simple_table';
+
+-- observe that no shards exists for simple_table
+SELECT DISTINCT(pg_class.relname) FROM pgs_distribution_metadata.shard
+	LEFT OUTER JOIN pg_class ON (relation_id = oid)
+	WHERE pg_class.relname = 'simple_table';
+
+-- observe that no shard placements exists for simple_table
+SELECT * FROM pgs_distribution_metadata.shard_placement
+	WHERE shard_id NOT IN (SELECT pg_class.oid FROM pgs_distribution_metadata.shard
+			       LEFT OUTER JOIN pg_class ON (relation_id = oid)
+			       WHERE pg_class.relname = 'simple_table');
+

@@ -138,6 +138,7 @@ static void PgShardProcessUtility(Node *parsetree, const char *queryString,
 								  ProcessUtilityContext context, ParamListInfo params,
 								  DestReceiver *dest, char *completionTag);
 static void ErrorOnDropIfDistributedTablesExist(DropStmt *dropStatement);
+static void ErrorOnDropDistributedTable(DropStmt *dropStatement);
 
 /* PL/pgSQL plugin declarations */
 static void SetupPLErrorTransformation(PLpgSQL_execstate *estate, PLpgSQL_function *func);
@@ -2149,7 +2150,27 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 	else if (statementType == T_DropStmt)
 	{
 		DropStmt *dropStatement = (DropStmt *) parsetree;
-		ErrorOnDropIfDistributedTablesExist(dropStatement);
+		Oid extensionOid = InvalidOid;
+		bool missingOK = true;
+
+		/*
+		 * Execute pg_shard related DROP commands only if the extension has been
+		 * created (CREATE EXTENSION). This check is required because it's possible
+		 * to load the hooks in an extension without formally "creating" it.
+		 */
+		extensionOid = get_extension_oid(PG_SHARD_EXTENSION_NAME, missingOK);
+		if (extensionOid != InvalidOid)
+		{
+			if (dropStatement->removeType == OBJECT_EXTENSION)
+			{
+				ErrorOnDropIfDistributedTablesExist(dropStatement);
+			}
+			else if (dropStatement->removeType == OBJECT_TABLE ||
+					 dropStatement->removeType == OBJECT_FOREIGN_TABLE)
+			{
+				ErrorOnDropDistributedTable(dropStatement);
+			}
+		}
 	}
 
 	if (PreviousProcessUtilityHook != NULL)
@@ -2174,27 +2195,8 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 static void
 ErrorOnDropIfDistributedTablesExist(DropStmt *dropStatement)
 {
-	Oid extensionOid = InvalidOid;
-	bool missingOK = true;
 	ListCell *dropStatementObject = NULL;
 	bool distributedTablesExist = false;
-
-	/* we're only worried about dropping extensions */
-	if (dropStatement->removeType != OBJECT_EXTENSION)
-	{
-		return;
-	}
-
-	extensionOid = get_extension_oid(PG_SHARD_EXTENSION_NAME, missingOK);
-	if (extensionOid == InvalidOid)
-	{
-		/*
-		 * Exit early if the extension has not been created (CREATE EXTENSION).
-		 * This check is required because it's possible to load the hooks in an
-		 * extension without formally "creating" it.
-		 */
-		return;
-	}
 
 	/* nothing to do if no distributed tables are present */
 	distributedTablesExist = DistributedTablesExist();
@@ -2229,6 +2231,62 @@ ErrorOnDropIfDistributedTablesExist(DropStmt *dropStatement)
 								   " because other objects depend on it"),
 							errdetail("Existing distributed tables depend on extension "
 									  PG_SHARD_EXTENSION_NAME),
+							errhint("Use DROP ... CASCADE to drop the dependent "
+									"objects too.")));
+		}
+	}
+}
+
+
+/*
+ * ErrorOnDropDistributedTable prevents attempts to DROP distributed tables.
+ * This prevention will be circumvented if the user includes the CASCADE
+ * option in their DROP command, in which case metadata belonging to the distributed
+ * table is deleted, a notice is printed and the DROP is allowed to proceed.
+ */
+static void
+ErrorOnDropDistributedTable(DropStmt *dropStatement)
+{
+	ListCell *dropStatementObject = NULL;
+
+	foreach(dropStatementObject, dropStatement->objects)
+	{
+		RangeVar *relation = makeRangeVarFromNameList((List *) lfirst(dropStatementObject));
+		char *relationName = relation->relname;
+		Oid tableId = RelnameGetRelid(relationName);
+		bool tableIsDistributed = IsDistributedTable(tableId);
+		char partitionType = HASH_PARTITION_TYPE;
+
+		if (!tableIsDistributed)
+		{
+			continue;
+		}
+
+		/* for append/range partitioned tables, let CitusDB drop the metadata */
+		partitionType = PartitionType(tableId);
+		if (partitionType != HASH_PARTITION_TYPE)
+		{
+			continue;
+		}
+
+		if (dropStatement->behavior == DROP_CASCADE)
+		{
+			/* delete the metadata belonging to the table */
+			DeleteDistributedTableMetadata(tableId);
+
+			/* if CASCADE was used, emit NOTICE and proceed with DROP */
+			ereport(NOTICE, (errmsg("shards remain on worker nodes"),
+							 errdetail("Shards created by %s table are not removed by "
+									   "DROP TABLE.", relationName)));
+		}
+		else
+		{
+			/* without CASCADE, error if the distributed table present */
+			ereport(ERROR, (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+							errmsg("cannot drop distributed table %s"
+								   " because other objects depend on it", relationName),
+							errdetail("Existing metadata depends on table %s",
+									  relationName),
 							errhint("Use DROP ... CASCADE to drop the dependent "
 									"objects too.")));
 		}
