@@ -2241,7 +2241,7 @@ ErrorOnDropIfDistributedTablesExist(DropStmt *dropStatement)
 /*
  * ErrorOnDropDistributedTable prevents attempts to DROP distributed tables.
  * This prevention will be circumvented if the user includes the CASCADE
- * option in their DROP command, in which case metadata belonging to the distributed
+ * option in their DROP command, in which case partition row belonging to the distributed
  * table is deleted, a notice is printed and the DROP is allowed to proceed.
  */
 static void
@@ -2271,8 +2271,8 @@ ErrorOnDropDistributedTable(DropStmt *dropStatement)
 
 		if (dropStatement->behavior == DROP_CASCADE)
 		{
-			/* delete the metadata belonging to the table */
-			DeleteDistributedTableMetadata(tableId);
+			/* delete the partition row belonging to the table */
+			DeletePartitionMetadata(tableId);
 
 			/* if CASCADE was used, emit NOTICE and proceed with DROP */
 			ereport(NOTICE, (errmsg("shards remain on worker nodes"),

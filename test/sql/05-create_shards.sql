@@ -156,10 +156,10 @@ DELETE FROM pgs_distribution_metadata.partition
 
 -- test DROP TABLE
 CREATE TABLE simple_table (
-	id int
+	simple_table_key int
 );
 
-SELECT master_create_distributed_table('simple_table', 'id');
+SELECT master_create_distributed_table('simple_table', 'simple_table_key');
 
 SELECT master_create_worker_shards('simple_table', 4, 1);
 
@@ -170,18 +170,14 @@ DROP TABLE simple_table;
 DROP TABLE simple_table CASCADE;
 
 -- observe that no partitions exists for simple_table
-SELECT pg_class.relname FROM pgs_distribution_metadata.partition
-	LEFT OUTER JOIN pg_class ON (relation_id = oid)
-	WHERE pg_class.relname = 'simple_table';
+SELECT key FROM pgs_distribution_metadata.partition;
 
--- observe that no shards exists for simple_table
-SELECT DISTINCT(pg_class.relname) FROM pgs_distribution_metadata.shard
-	LEFT OUTER JOIN pg_class ON (relation_id = oid)
-	WHERE pg_class.relname = 'simple_table';
-
--- observe that no shard placements exists for simple_table
-SELECT * FROM pgs_distribution_metadata.shard_placement
-	WHERE shard_id NOT IN (SELECT pg_class.oid FROM pgs_distribution_metadata.shard
-			       LEFT OUTER JOIN pg_class ON (relation_id = oid)
-			       WHERE pg_class.relname = 'simple_table');
+-- observe that shards and placements still exist for simple_table
+SELECT
+    s.id, node_name, node_port
+FROM
+    pgs_distribution_metadata.shard s LEFT OUTER JOIN pg_class c ON s.relation_id = c.oid,
+    pgs_distribution_metadata.shard_placement p
+WHERE
+    c.oid IS NULL AND s.id = p.shard_id;
 

@@ -55,9 +55,7 @@ static ShardPlacement * TupleToShardPlacement(HeapTuple heapTuple,
 											  TupleDesc tupleDescriptor);
 static void AcquireShardLock(int64 shardId, ShardLockType shardLockType,
 							 LOCKMODE lockMode);
-static void DeleteShardPlacementMetadata(Oid relationId);
-static void DeleteShardMetadata(Oid relationId);
-static void DeletePartitionMetadata(Oid relationId);
+
 
 
 /*
@@ -836,68 +834,10 @@ LockRelationDistributionMetadata(Oid relationId, LOCKMODE lockMode)
 
 
 /*
- * DeleteDistributedTableMetadata removes all the metadata including partition,
- * shard(s) and shard placement(s) that belong to the distributed table identified by
- * relationId.
- */
-void
-DeleteDistributedTableMetadata(Oid relationId)
-{
-	/* order of the calls is important due to foreign keys on metadata tables */
-	DeleteShardPlacementMetadata(relationId);
-	DeleteShardMetadata(relationId);
-	DeletePartitionMetadata(relationId);
-}
-
-
-/*
- * DeleteShardPlacementMetadata removes the row(s) from shard_placement table
- * which belongs to the distributed table identified by relationId.
- */
-static void
-DeleteShardPlacementMetadata(Oid relationId)
-{
-	Oid argTypes[] = { OIDOID };
-	Datum argValues[] = { DatumGetUInt32(relationId) };
-	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-
-	SPI_connect();
-
-	SPI_execute_with_args("DELETE FROM pgs_distribution_metadata.shard_placement WHERE "
-						  "shard_id IN (SELECT id FROM pgs_distribution_metadata.shard "
-						  "WHERE relation_id = $1)", argCount, argTypes, argValues, NULL,
-						  false, 0);
-
-	SPI_finish();
-}
-
-
-/*
- * DeleteShardMetadata removes the row(s) from shard table which belongs to the
- * distributed table identified by relationId.
- */
-static void
-DeleteShardMetadata(Oid relationId)
-{
-	Oid argTypes[] = { OIDOID };
-	Datum argValues[] = { DatumGetUInt32(relationId) };
-	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-
-	SPI_connect();
-
-	SPI_execute_with_args("DELETE FROM pgs_distribution_metadata.shard WHERE "
-						  "relation_id = $1", argCount, argTypes, argValues, NULL,
-						  false, 0);
-
-	SPI_finish();
-}
-
-
-/*
  * DeletePartitionMetadata removes the row from partition table which belongs to the
  * distributed table identified by relationId.
  */
-static void
+void
 DeletePartitionMetadata(Oid relationId)
 {
 	Oid argTypes[] = { OIDOID };
