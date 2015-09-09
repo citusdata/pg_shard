@@ -171,7 +171,7 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 	List *workerNodeList = NIL;
 	List *ddlCommandList = NIL;
 	int32 workerNodeCount = 0;
-	uint32 placementAttemptCount = 0;
+	int32 placementAttemptCount = 0;
 	List *existingShardList = NIL;
 
 	/* make sure table is hash partitioned */
@@ -224,7 +224,7 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 	}
 
 	/* if we have enough nodes, add an extra placement attempt for backup */
-	placementAttemptCount = (uint32) replicationFactor;
+	placementAttemptCount = replicationFactor;
 	if (workerNodeCount > replicationFactor)
 	{
 		placementAttemptCount++;
@@ -245,16 +245,15 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 		List *extendedDDLCommands = NIL;
 		int64 shardId = -1;
 		int32 placementCount = 0;
-		uint32 placementIndex = 0;
-		uint32 roundRobinNodeIndex = shardIndex % workerNodeCount;
+		int32 roundRobinNodeIndex = (int32) shardIndex % workerNodeCount;
 
 		/* initialize the hash token space for this shard */
 		text *minHashTokenText = NULL;
 		text *maxHashTokenText = NULL;
 		int64 minHashTokenOffset = (shardIndex * HASH_TOKEN_COUNT) / shardCount;
 		int64 maxHashTokenOffset = ((shardIndex + 1) * HASH_TOKEN_COUNT) / shardCount - 1;
-		int32 shardMinHashToken = INT32_MIN + minHashTokenOffset;
-		int32 shardMaxHashToken = INT32_MIN + maxHashTokenOffset;
+		int32 shardMinHashToken = (int32) (INT32_MIN + minHashTokenOffset);
+		int32 shardMaxHashToken = (int32) (INT32_MIN + maxHashTokenOffset);
 
 		/* insert the shard metadata row along with its min/max values */
 		minHashTokenText = IntegerToText(shardMinHashToken);
@@ -273,14 +272,14 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 		 */
 		LockShardDistributionMetadata(shardId, ExclusiveLock);
 
-		for (placementIndex = 0; placementIndex < placementAttemptCount; placementIndex++)
+		for (int32 placementIndex = 0; placementIndex < placementAttemptCount; placementIndex++)
 		{
 			int32 candidateNodeIndex =
 				(roundRobinNodeIndex + placementIndex) % workerNodeCount;
 			WorkerNode *candidateNode = (WorkerNode *) list_nth(workerNodeList,
 																candidateNodeIndex);
 			char *nodeName = candidateNode->nodeName;
-			uint32 nodePort = candidateNode->nodePort;
+			int32 nodePort = candidateNode->nodePort;
 
 			bool created = ExecuteRemoteCommandList(nodeName, nodePort,
 													extendedDDLCommands);
@@ -390,7 +389,7 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 
 	while (fgets(workerNodeLine, sizeof(workerNodeLine), workerFileStream) != NULL)
 	{
-		const int workerLineLength = strnlen(workerNodeLine, MAXPGPATH);
+		const Size workerLineLength = strnlen(workerNodeLine, MAXPGPATH);
 		WorkerNode *workerNode = NULL;
 		char *linePointer = NULL;
 		int32 nodePort = PostPortNumber; /* default port number */
@@ -451,7 +450,7 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 			char *nodePortEnd = NULL;
 
 			errno = 0;
-			nodePort = strtol(nodePortString, &nodePortEnd, 10);
+			nodePort = (int32) strtol(nodePortString, &nodePortEnd, 10);
 
 			if (errno != 0 || (*nodePortEnd) != '\0' || nodePort <= 0)
 			{
@@ -548,7 +547,7 @@ CompareWorkerNodes(const void *leftElement, const void *rightElement)
  * on the specified node.
  */
 bool
-ExecuteRemoteCommandList(char *nodeName, uint32 nodePort, List *sqlCommandList)
+ExecuteRemoteCommandList(char *nodeName, int32 nodePort, List *sqlCommandList)
 {
 	bool commandListExecuted = true;
 	ListCell *sqlCommandCell = NULL;

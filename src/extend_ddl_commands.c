@@ -289,7 +289,7 @@ void
 AppendShardIdToName(char **name, int64 shardId)
 {
 	char extendedName[NAMEDATALEN];
-	uint32 extendedNameLength = 0;
+	Size extendedNameLength = 0;
 
 	snprintf(extendedName, NAMEDATALEN, "%s%c" INT64_FORMAT,
 			 (*name), SHARD_NAME_SEPARATOR, shardId);
@@ -425,7 +425,7 @@ DeparseAlterTableStmt(AlterTableStmt *alterTableStmt)
 			case AT_SetStatistics:
 			{
 				StringInfo setStatisticsString = makeStringInfo();
-				int newStatsTarget = 0;
+				long newStatsTarget = 0;
 				char *columnName = alterTableCommand->name;
 
 				Assert(IsA(alterTableCommand->def, Integer));
@@ -433,7 +433,7 @@ DeparseAlterTableStmt(AlterTableStmt *alterTableStmt)
 
 				appendStringInfo(setStatisticsString, "ALTER COLUMN %s ",
 								 quote_identifier(columnName));
-				appendStringInfo(setStatisticsString, "SET STATISTICS %d",
+				appendStringInfo(setStatisticsString, "SET STATISTICS %ld",
 								 newStatsTarget);
 
 				deparsedCommandList = lappend(deparsedCommandList,
@@ -807,9 +807,10 @@ DeparseIndexStmt(IndexStmt *indexStmt, Oid masterRelationId)
 		if (indexElem->collation != NIL)
 		{
 			char *collationName = NULL;
-			char *schemaName = NULL;
+			char *collationSchemaName = NULL;
 
-			DeconstructQualifiedName(indexElem->collation, &schemaName, &collationName);
+			DeconstructQualifiedName(indexElem->collation, &collationSchemaName,
+			                         &collationName);
 			appendStringInfo(deparsedIndexStmt, " COLLATE %s",
 							 quote_identifier(collationName));
 		}
@@ -818,9 +819,9 @@ DeparseIndexStmt(IndexStmt *indexStmt, Oid masterRelationId)
 		if (indexElem->opclass != NIL)
 		{
 			char *opClassName = NULL;
-			char *schemaName = NULL;
+			char *opSchemaName = NULL;
 
-			DeconstructQualifiedName(indexElem->opclass, &schemaName, &opClassName);
+			DeconstructQualifiedName(indexElem->opclass, &opSchemaName, &opClassName);
 			appendStringInfo(deparsedIndexStmt, " %s", opClassName);
 		}
 

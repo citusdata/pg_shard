@@ -84,13 +84,13 @@
 
 
 /* controls use of locks to enforce safe commutativity */
-bool AllModificationsCommutative = false;
+static bool AllModificationsCommutative = false;
 
 /* informs pg_shard to use the CitusDB planner */
-bool UseCitusDBSelectLogic = false;
+static bool UseCitusDBSelectLogic = false;
 
 /* logs each statement used in a distributed plan */
-bool LogDistributedStatements = false;
+static bool LogDistributedStatements = false;
 
 
 /* planner functions forward declarations */
@@ -132,7 +132,7 @@ static bool StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 static void TupleStoreToTable(RangeVar *tableRangeVar, List *remoteTargetList,
 							  TupleDesc storeTupleDescriptor, Tuplestorestate *store);
 static void PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count);
-static int32 ExecuteDistributedModify(DistributedPlan *distributedPlan);
+static uint32 ExecuteDistributedModify(DistributedPlan *distributedPlan);
 static void ExecuteSingleShardSelect(DistributedPlan *distributedPlan,
 									 EState *executorState, TupleDesc tupleDescriptor,
 									 DestReceiver *destination);
@@ -174,7 +174,7 @@ static ProcessUtility_hook_type PreviousProcessUtilityHook = NULL;
 void
 _PG_init(void)
 {
-	PLpgSQL_plugin **plugin_ptr = NULL;
+	PLpgSQL_plugin **plPluginHookPointer = NULL;
 
 	PreviousPlannerHook = planner_hook;
 	planner_hook = PgShardPlanner;
@@ -212,8 +212,8 @@ _PG_init(void)
 	EmitWarningsOnPlaceholders("pg_shard");
 
 	/* install error transformation handler for PL/pgSQL invocations */
-	plugin_ptr = (PLpgSQL_plugin **) find_rendezvous_variable("PLpgSQL_plugin");
-	*plugin_ptr = &PluginFuncs;
+	plPluginHookPointer = (PLpgSQL_plugin **) find_rendezvous_variable("PLpgSQL_plugin");
+	*plPluginHookPointer = &PluginFuncs;
 }
 
 
@@ -1057,10 +1057,9 @@ static List *
 QueryFromList(List *rangeTableList)
 {
 	List *fromList = NIL;
-	Index rangeTableIndex = 1;
-	uint32 rangeTableCount = (uint32) list_length(rangeTableList);
+	int rangeTableCount = list_length(rangeTableList);
 
-	for (rangeTableIndex = 1; rangeTableIndex <= rangeTableCount; rangeTableIndex++)
+	for (int rangeTableIndex = 1; rangeTableIndex <= rangeTableCount; rangeTableIndex++)
 	{
 		RangeTblRef *rangeTableReference = makeNode(RangeTblRef);
 		rangeTableReference->rtindex = rangeTableIndex;
@@ -1569,8 +1568,8 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 				 Tuplestorestate *tupleStore)
 {
 	AttInMetadata *attributeInputMetadata = TupleDescGetAttInMetadata(tupleDescriptor);
-	uint32 expectedColumnCount = tupleDescriptor->natts;
-	char **columnArray = (char **) palloc0(expectedColumnCount * sizeof(char *));
+	int expectedColumnCount = tupleDescriptor->natts;
+	char **columnArray = (char **) palloc0((Size) expectedColumnCount * sizeof(char *));
 	MemoryContext ioContext = AllocSetContextCreate(CurrentMemoryContext,
 													"StoreQueryResult",
 													ALLOCSET_DEFAULT_MINSIZE,
@@ -1581,10 +1580,8 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 
 	for (;;)
 	{
-		uint32 rowIndex = 0;
-		uint32 columnIndex = 0;
-		uint32 rowCount = 0;
-		uint32 columnCount = 0;
+		int rowCount = 0;
+		int columnCount = 0;
 		ExecStatusType resultStatus = 0;
 
 		PGresult *result = PQgetResult(connection);
@@ -1606,13 +1603,13 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 		columnCount = PQnfields(result);
 		Assert(columnCount == expectedColumnCount);
 
-		for (rowIndex = 0; rowIndex < rowCount; rowIndex++)
+		for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
 		{
 			HeapTuple heapTuple = NULL;
 			MemoryContext oldContext = NULL;
-			memset(columnArray, 0, columnCount * sizeof(char *));
+			memset(columnArray, 0, (Size) columnCount * sizeof(char *));
 
-			for (columnIndex = 0; columnIndex < columnCount; columnIndex++)
+			for (int columnIndex = 0; columnIndex < columnCount; columnIndex++)
 			{
 				if (PQgetisnull(result, rowIndex, columnIndex))
 				{
@@ -1662,12 +1659,12 @@ TupleStoreToTable(RangeVar *tableRangeVar, List *storeToTableColumnList,
 	TupleDesc tableTupleDescriptor = RelationGetDescr(table);
 
 	int tableColumnCount = tableTupleDescriptor->natts;
-	Datum *tableTupleValues = palloc0(tableColumnCount * sizeof(Datum));
-	bool *tableTupleNulls = palloc0(tableColumnCount * sizeof(bool));
+	Datum *tableTupleValues = palloc0((Size) tableColumnCount * sizeof(Datum));
+	bool *tableTupleNulls = palloc0((Size) tableColumnCount * sizeof(bool));
 
 	int storeColumnCount = storeTupleDescriptor->natts;
-	Datum *storeTupleValues = palloc0(storeColumnCount * sizeof(Datum));
-	bool *storeTupleNulls = palloc0(storeColumnCount * sizeof(bool));
+	Datum *storeTupleValues = palloc0((Size) storeColumnCount * sizeof(Datum));
+	bool *storeTupleNulls = palloc0((Size) storeColumnCount * sizeof(bool));
 	TupleTableSlot *storeTableSlot = MakeSingleTupleTableSlot(storeTupleDescriptor);
 
 	for (;;)
@@ -1687,7 +1684,7 @@ TupleStoreToTable(RangeVar *tableRangeVar, List *storeToTableColumnList,
 						  storeTupleValues, storeTupleNulls);
 
 		/* set all values to null for the table tuple */
-		memset(tableTupleNulls, true, tableColumnCount * sizeof(bool));
+		memset(tableTupleNulls, true, (Size) tableColumnCount * sizeof(bool));
 
 		/*
 		 * Extract values from the returned tuple and set them in the right
@@ -1780,7 +1777,7 @@ PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
 		if (operation == CMD_INSERT || operation == CMD_UPDATE ||
 			operation == CMD_DELETE)
 		{
-			int32 affectedRowCount = ExecuteDistributedModify(plan);
+			uint32 affectedRowCount = ExecuteDistributedModify(plan);
 			estate->es_processed = affectedRowCount;
 		}
 		else if (operation == CMD_SELECT)
@@ -1826,7 +1823,7 @@ PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
  * of modified rows in that case and errors in all others. This function will
  * also generate warnings for individual placement failures.
  */
-static int32
+static uint32
 ExecuteDistributedModify(DistributedPlan *plan)
 {
 	int32 affectedTupleCount = -1;
@@ -1905,7 +1902,9 @@ ExecuteDistributedModify(DistributedPlan *plan)
 		UpdateShardPlacementRowState(failedPlacement->id, STATE_INACTIVE);
 	}
 
-	return affectedTupleCount;
+	Assert(affectedTupleCount > 0);
+
+	return (uint32) affectedTupleCount;
 }
 
 
@@ -2077,7 +2076,7 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 			ParseState *parseState = make_parsestate(NULL);
 			parseState->p_sourcetext = queryString;
 
-			argumentTypeArray = (Oid *) palloc0(argumentCount * sizeof(Oid));
+			argumentTypeArray = (Oid *) palloc0((Size) argumentCount * sizeof(Oid));
 
 			foreach(argumentTypeCell, argumentTypeList)
 			{

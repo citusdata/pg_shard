@@ -235,7 +235,7 @@ OpExpr *
 MakeOpExpression(Var *variable, int16 strategyNumber)
 {
 	Oid typeId = variable->vartype;
-	Oid typeModId = variable->vartypmod;
+	int32 typeModId = variable->vartypmod;
 	Oid collationId = variable->varcollid;
 
 	Oid accessMethodId = BTREE_AM_OID;
