@@ -9,6 +9,7 @@ env:
     - PGVERSION=9.4
     - PGVERSION=9.5
     - PGVERSION=40.0
+    - PGVERSION=41.0
 before_install:
   - git clone --depth 1 https://gist.github.com/9963879.git tools
   - tools/setup_apt.sh
