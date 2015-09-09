@@ -7,11 +7,11 @@ env:
   matrix:
     - PGVERSION=9.3
     - PGVERSION=9.4
+    - PGVERSION=9.5
     - PGVERSION=40.0
 before_install:
-  - sudo apt-get update -qq
-  - sudo update-alternatives --remove-all postmaster.1.gz
   - git clone --depth 1 https://gist.github.com/9963879.git tools
+  - tools/setup_apt.sh
   - tools/nuke_pg.sh
 install:
   - sudo pip install cpp-coveralls
@@ -21,7 +21,7 @@ before_script: tools/config_and_start_cluster.sh
 script: tools/pg_travis_test.sh
 after_success:
   - sudo chmod 666 *.gcda
-  - coveralls --exclude test/include --exclude test/src --exclude src/ruleutils_93.c --exclude src/ruleutils_94.c --gcov-options '\-lp'
+  - coveralls --exclude test/include --exclude test/src --exclude src/ruleutils_93.c --exclude src/ruleutils_94.c --exclude src/ruleutils_95.c --gcov-options '\-lp'
 cache:
   directories:
     - $HOME/.cache/pip

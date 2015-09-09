@@ -23,6 +23,9 @@
 #include "access/htup.h"
 #include "access/htup_details.h"
 #include "access/skey.h"
+#if (PG_VERSION_NUM >= 90500 && PG_VERSION_NUM < 90600)
+#include "access/stratnum.h"
+#endif
 #include "access/tupdesc.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
@@ -43,6 +46,10 @@
 #include "utils/lsyscache.h"
 #include "utils/palloc.h"
 #include "utils/rel.h"
+/* PostgreSQL 9.5 moved some builtins.h functions to this new file */
+#if (PG_VERSION_NUM >= 90500 && PG_VERSION_NUM < 90600)
+#include "utils/ruleutils.h"
+#endif
 #include "utils/relcache.h"
 #include "utils/syscache.h"
 #include "utils/tqual.h"
