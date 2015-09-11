@@ -258,3 +258,59 @@ DELETE FROM pgs_distribution_metadata.shard
 	
 DELETE FROM pgs_distribution_metadata.partition
 	WHERE relation_id = 'foreign_table_to_distribute'::regclass;	
+-- test DROP TABLE
+CREATE TABLE simple_table (
+	simple_table_key int
+);
+SELECT master_create_distributed_table('simple_table', 'simple_table_key');
+ master_create_distributed_table 
+---------------------------------
+ 
+(1 row)
+
+SELECT master_create_worker_shards('simple_table', 4, 1);
+WARNING:  Connection failed to adeadhost:5432
+DETAIL:  Remote message: could not translate host name "adeadhost" to address: Name or service not known
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+DETAIL:  Remote message: could not translate host name "adeadhost" to address: Name or service not known
+WARNING:  could not create shard on "adeadhost:5432"
+ master_create_worker_shards 
+-----------------------------
+ 
+(1 row)
+
+-- we cannot drop distributed table without CASCADE modifier
+DROP TABLE simple_table;
+ERROR:  cannot drop distributed table simple_table because other objects depend on it
+DETAIL:  Existing metadata depends on table simple_table
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+-- now drop with CASCADE
+DROP TABLE simple_table CASCADE;
+NOTICE:  shards remain on worker nodes
+DETAIL:  Shards created by simple_table table are not removed by DROP TABLE.
+-- observe that no partitions exists for simple_table
+SELECT key FROM pgs_distribution_metadata.partition;
+ key  
+------
+ name
+ id
+ name
+(3 rows)
+
+-- observe that shards and placements still exist for simple_table
+SELECT
+    s.id, node_name
+FROM
+    pgs_distribution_metadata.shard s LEFT OUTER JOIN pg_class c ON s.relation_id = c.oid,
+    pgs_distribution_metadata.shard_placement p
+WHERE
+    c.oid IS NULL AND s.id = p.shard_id;
+   id   | node_name 
+--------+-----------
+ 102042 | localhost
+ 102043 | localhost
+ 102044 | localhost
+ 102045 | localhost
+(4 rows)
+

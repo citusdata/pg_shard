@@ -148,5 +148,6 @@ extern void UpdateShardPlacementRowState(int64 shardPlacementId, ShardState newS
 extern void LockShardData(int64 shardId, LOCKMODE lockMode);
 extern void LockShardDistributionMetadata(int64 shardId, LOCKMODE lockMode);
 extern void LockRelationDistributionMetadata(Oid relationId, LOCKMODE lockMode);
+extern void DeletePartitionMetadata(Oid relationId);
 
 #endif /* PG_SHARD_DISTRIBUTION_METADATA_H */
