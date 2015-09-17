@@ -1261,9 +1261,8 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 			if (!UseDTMTransactions)
 			{
 				PreventTransactionChain(topLevel, "distributed commands");
+				eflags |= EXEC_FLAG_SKIP_TRIGGERS;
 			}
-
-			eflags |= EXEC_FLAG_SKIP_TRIGGERS;
 
 			/* build empty executor state to obtain per-query memory context */
 			executorState = CreateExecutorState();
