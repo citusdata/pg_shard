@@ -90,7 +90,7 @@ bool AllModificationsCommutative = false;
 bool UseCitusDBSelectLogic = false;
 
 /* informs pg_shard to use the distributed transaction manager */
-bool UseDTMTransactions = false;
+bool UseDtmTransactions = false;
 
 /* logs each statement used in a distributed plan */
 bool LogDistributedStatements = false;
@@ -136,8 +136,12 @@ static void TupleStoreToTable(RangeVar *tableRangeVar, List *remoteTargetList,
 							  TupleDesc storeTupleDescriptor, Tuplestorestate *store);
 static void PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count);
 static int32 ExecuteDistributedModify(DistributedPlan *distributedPlan);
-static void PrepareDTMTransaction(List *taskList);
-static void FinishDTMTransaction(XactEvent event, void *arg);
+static void PrepareDtmTransaction(List *taskList);
+static bool SendDtmGetSnapshot(PGconn *connection);
+static bool SendDtmBeginTransaction(PGconn *connection, StringInfo nodeArrayString,
+									StringInfo xidArrayString);
+static bool SendCommand(PGconn *connection, char *command);
+static void FinishDtmTransaction(XactEvent event, void *arg);
 static void ExecuteSingleShardSelect(DistributedPlan *distributedPlan,
 									 EState *executorState, TupleDesc tupleDescriptor,
 									 DestReceiver *destination);
@@ -213,7 +217,7 @@ _PG_init(void)
 
 	DefineCustomBoolVariable("pg_shard.use_dtm_transactions",
 							 "Informs pg_shard to use distributed transaction manager", NULL,
-							 &UseDTMTransactions, false, PGC_USERSET, 0, NULL,
+							 &UseDtmTransactions, false, PGC_USERSET, 0, NULL,
 							 NULL, NULL);
 
 	DefineCustomBoolVariable("pg_shard.log_distributed_statements",
@@ -1258,7 +1262,7 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 			EState *executorState = NULL;
 
 			/* disallow transactions and triggers during distributed commands */
-			if (!UseDTMTransactions)
+			if (!UseDtmTransactions)
 			{
 				PreventTransactionChain(topLevel, "distributed commands");
 				eflags |= EXEC_FLAG_SKIP_TRIGGERS;
@@ -1525,6 +1529,21 @@ ExecuteTaskAndStoreResults(Task *task, TupleDesc tupleDescriptor,
 			continue;
 		}
 
+		if (UseDtmTransactions)
+		{
+			if (!SendCommand(connection, "BEGIN"))
+			{
+				PurgeConnection(connection);
+				continue;
+			}
+
+			if (!SendDtmGetSnapshot(connection))
+			{
+				PurgeConnection(connection);
+				continue;
+			}
+		}
+
 		queryOK = SendQueryInSingleRowMode(connection, task->queryString);
 		if (!queryOK)
 		{
@@ -1535,6 +1554,15 @@ ExecuteTaskAndStoreResults(Task *task, TupleDesc tupleDescriptor,
 		storedOK = StoreQueryResult(connection, tupleDescriptor, tupleStore);
 		if (storedOK)
 		{
+			if (UseDtmTransactions)
+			{
+				if (!SendCommand(connection, "END"))
+				{
+					PurgeConnection(connection);
+					continue;
+				}
+			}
+
 			resultsOK = true;
 			break;
 		}
@@ -1863,9 +1891,9 @@ ExecuteDistributedModify(DistributedPlan *plan)
 						errmsg("cannot modify multiple shards during a single query")));
 	}
 
-	if (UseDTMTransactions)
+	if (UseDtmTransactions)
 	{
-		PrepareDTMTransaction(plan->taskList);
+		PrepareDtmTransaction(plan->taskList);
 	}
 
 	foreach(taskPlacementCell, task->taskPlacementList)
@@ -1881,7 +1909,7 @@ ExecuteDistributedModify(DistributedPlan *plan)
 
 		Assert(taskPlacement->shardState == STATE_FINALIZED);
 
-		connection = GetConnection(nodeName, nodePort, !UseDTMTransactions);
+		connection = GetConnection(nodeName, nodePort, !UseDtmTransactions);
 		if (connection == NULL)
 		{
 			failedPlacementList = lappend(failedPlacementList, taskPlacement);
@@ -1936,11 +1964,11 @@ ExecuteDistributedModify(DistributedPlan *plan)
 
 
 /*
- * PrepareDTMTransaction sends the necessary commands to the nodes to perform
+ * PrepareDtmTransaction sends the necessary commands to the nodes to perform
  * a global transaction.
  */
 static void
-PrepareDTMTransaction(List *taskList)
+PrepareDtmTransaction(List *taskList)
 {
 	Task *task = (Task *) linitial(taskList);
 	ListCell *taskPlacementCell = NULL;
@@ -1975,17 +2003,12 @@ PrepareDTMTransaction(List *taskList)
 			continue;
 		}
 
-		result = PQexec(connection, "BEGIN");
-		if (PQresultStatus(result) != PGRES_COMMAND_OK)
+		if (!SendCommand(connection, "BEGIN"))
 		{
-			ReportRemoteError(connection, result);
-			/* close the connection to avoid sending END without BEGIN */
-			PQfinish(connection);
+			PurgeConnection(connection);
 			abortTransaction = true;
 			continue;
 		}
-
-		PQclear(result);
 
 		result = PQexec(connection, "SELECT txid_current()");
 		if (PQresultStatus(result) != PGRES_TUPLES_OK)
@@ -2019,7 +2042,7 @@ PrepareDTMTransaction(List *taskList)
 		 * Since pg_shard reuses connections across transactions on the master,
 		 * we need to abort pending transactions on the workers.
 		 */
-		FinishDTMTransaction(XACT_EVENT_ABORT, (void*) taskList);
+		FinishDtmTransaction(XACT_EVENT_ABORT, (void*) taskList);
 		ereport(ERROR, (errmsg("aborting distributed transaction due to failures")));
 	}
 
@@ -2032,8 +2055,6 @@ PrepareDTMTransaction(List *taskList)
 		char *nodeName = taskPlacement->nodeName;
 		int32 nodePort = taskPlacement->nodePort;
 		PGconn *connection = NULL;
-		PGresult *result = NULL;
-		StringInfo beginQuery = makeStringInfo();
 
 		connection = GetConnection(nodeName, nodePort, false);
 		if (connection == NULL)
@@ -2044,30 +2065,17 @@ PrepareDTMTransaction(List *taskList)
 			continue;
 		}
 
-		appendStringInfo(beginQuery, "SELECT dtm_begin_transaction(%s,%s)",
-						 nodeArrayString->data, xidArrayString->data);
-
-		result = PQexec(connection, beginQuery->data);
-		if (PQresultStatus(result) != PGRES_TUPLES_OK)
+		if (!SendDtmBeginTransaction(connection, nodeArrayString, xidArrayString))
 		{
-			ReportRemoteError(connection, result);
-			PQclear(result);
 			abortTransaction = true;
 			continue;
 		}
 
-		PQclear(result);
-
-		result = PQexec(connection, "SELECT dtm_get_snapshot()");
-		if (PQresultStatus(result) != PGRES_TUPLES_OK)
+		if (!SendDtmGetSnapshot(connection))
 		{
-			ReportRemoteError(connection, result);
-			PQclear(result);
 			abortTransaction = true;
 			continue;
 		}
-
-		PQclear(result);
 	}
 
 	if (abortTransaction)
@@ -2076,17 +2084,79 @@ PrepareDTMTransaction(List *taskList)
 		 * Since pg_shard reuses connections across transactions on the master,
 		 * we need to abort pending transactions on the workers.
 		 */
-		FinishDTMTransaction(XACT_EVENT_ABORT, (void*) taskList);
+		FinishDtmTransaction(XACT_EVENT_ABORT, (void*) taskList);
 		ereport(ERROR, (errmsg("aborting distributed transaction due to failures")));
 	}
 
-	RegisterXactCallback(FinishDTMTransaction, taskList);
+	RegisterXactCallback(FinishDtmTransaction, taskList);
 	dtmTransactionActive = true;
 }
 
 
+static bool
+SendDtmBeginTransaction(PGconn *connection, StringInfo nodeArrayString,
+						StringInfo xidArrayString)
+{
+	PGresult *result = NULL;
+	StringInfo beginQuery = makeStringInfo();
+	bool resultOK = true;
+
+	appendStringInfo(beginQuery, "SELECT dtm_begin_transaction(%s,%s)",
+					 nodeArrayString->data, xidArrayString->data);
+
+	result = PQexec(connection, beginQuery->data);
+	if (PQresultStatus(result) != PGRES_TUPLES_OK)
+	{
+		ReportRemoteError(connection, result);
+		resultOK = false;
+	}
+
+	PQclear(result);
+
+	return resultOK;
+}
+
+
+static bool
+SendDtmGetSnapshot(PGconn *connection)
+{
+	PGresult *result = NULL;
+	bool resultOK = true;
+
+	result = PQexec(connection, "SELECT dtm_get_snapshot()");
+	if (PQresultStatus(result) != PGRES_TUPLES_OK)
+	{
+		ReportRemoteError(connection, result);
+		resultOK = false;
+	}
+
+	PQclear(result);
+
+	return resultOK;
+}
+
+
+static bool
+SendCommand(PGconn *connection, char *command)
+{
+	PGresult *result = NULL;
+	bool resultOK = true;
+
+	result = PQexec(connection, command);
+	if (PQresultStatus(result) != PGRES_COMMAND_OK)
+	{
+		ReportRemoteError(connection, result);
+		resultOK = false;
+	}
+
+	PQclear(result);
+
+	return resultOK;
+}
+
+
 static void
-FinishDTMTransaction(XactEvent event, void *arg)
+FinishDtmTransaction(XactEvent event, void *arg)
 {
 	List *taskList = (List *) arg;
 	Task *task = (Task *) linitial(taskList);
@@ -2130,7 +2200,7 @@ FinishDTMTransaction(XactEvent event, void *arg)
         PQclear(result);
 	}
 
-	UnregisterXactCallback(FinishDTMTransaction, taskList);
+	UnregisterXactCallback(FinishDtmTransaction, taskList);
 	dtmTransactionActive = false;
 }
 
