@@ -621,7 +621,7 @@ ExecuteRemoteCommand(PGconn *connection, const char *sqlCommand)
 	if (PQresultStatus(result) != PGRES_COMMAND_OK &&
 		PQresultStatus(result) != PGRES_TUPLES_OK)
 	{
-		ReportRemoteError(connection, result, WARNING);
+		ReportRemoteError(connection, result);
 		commandSuccessful = false;
 	}
 
