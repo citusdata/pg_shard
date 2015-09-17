@@ -564,7 +564,7 @@ ExecuteRemoteCommandList(char *nodeName, uint32 nodePort, List *sqlCommandList)
 	bool sqlCommandIssued = false;
 	bool beginIssued = false;
 
-	PGconn *connection = GetConnection(nodeName, nodePort);
+	PGconn *connection = GetConnection(nodeName, nodePort, true);
 	if (connection == NULL)
 	{
 		return false;
@@ -621,7 +621,7 @@ ExecuteRemoteCommand(PGconn *connection, const char *sqlCommand)
 	if (PQresultStatus(result) != PGRES_COMMAND_OK &&
 		PQresultStatus(result) != PGRES_TUPLES_OK)
 	{
-		ReportRemoteError(connection, result);
+		ReportRemoteError(connection, result, WARNING);
 		commandSuccessful = false;
 	}
 
