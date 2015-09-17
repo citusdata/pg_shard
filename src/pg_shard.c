@@ -1523,25 +1523,10 @@ ExecuteTaskAndStoreResults(Task *task, TupleDesc tupleDescriptor,
 		bool queryOK = false;
 		bool storedOK = false;
 
-		PGconn *connection = GetConnection(nodeName, nodePort, true);
+		PGconn *connection = GetConnection(nodeName, nodePort, !UseDtmTransactions);
 		if (connection == NULL)
 		{
 			continue;
-		}
-
-		if (UseDtmTransactions)
-		{
-			if (!SendCommand(connection, "BEGIN"))
-			{
-				PurgeConnection(connection);
-				continue;
-			}
-
-			if (!SendDtmGetSnapshot(connection))
-			{
-				PurgeConnection(connection);
-				continue;
-			}
 		}
 
 		queryOK = SendQueryInSingleRowMode(connection, task->queryString);
@@ -1554,15 +1539,6 @@ ExecuteTaskAndStoreResults(Task *task, TupleDesc tupleDescriptor,
 		storedOK = StoreQueryResult(connection, tupleDescriptor, tupleStore);
 		if (storedOK)
 		{
-			if (UseDtmTransactions)
-			{
-				if (!SendCommand(connection, "END"))
-				{
-					PurgeConnection(connection);
-					continue;
-				}
-			}
-
 			resultsOK = true;
 			break;
 		}
@@ -2221,6 +2197,11 @@ ExecuteSingleShardSelect(DistributedPlan *distributedPlan, EState *executorState
 
 	List *taskList = distributedPlan->taskList;
 	Assert(list_length(taskList) == 1);
+
+	if (UseDtmTransactions)
+	{
+		PrepareDtmTransaction(taskList);
+	}
 
 	task = (Task *) linitial(taskList);
 	tupleStore = tuplestore_begin_heap(false, false, work_mem);
