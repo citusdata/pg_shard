@@ -174,7 +174,8 @@ static ExecutorFinish_hook_type PreviousExecutorFinishHook = NULL;
 static ExecutorEnd_hook_type PreviousExecutorEndHook = NULL;
 static ProcessUtility_hook_type PreviousProcessUtilityHook = NULL;
 
-static bool dtmTransactionActive = false;
+static List *connectionsWithDtmTransactions = NIL;
+static bool commitCallbackSet = false;
 
 
 /*
@@ -1158,15 +1159,11 @@ CreateTemporaryTableLikeStmt(Oid sourceRelationId)
 static DistributedPlan *
 BuildDistributedPlan(Query *query, List *shardIntervalList)
 {
-	MemoryContext oldContext = NULL;
 	ListCell *shardIntervalCell = NULL;
 	List *taskList = NIL;
 	DistributedPlan *distributedPlan = palloc0(sizeof(DistributedPlan));
 	distributedPlan->plan.type = (NodeTag) T_DistributedPlan;
 	distributedPlan->targetList = query->targetList;
-
-	/* we may need the task list at commit time */
-	oldContext = MemoryContextSwitchTo(TopTransactionContext);
 
 	foreach(shardIntervalCell, shardIntervalList)
 	{
@@ -1214,8 +1211,6 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 	}
 
 	distributedPlan->taskList = taskList;
-
-	MemoryContextSwitchTo(oldContext);
 
 	return distributedPlan;
 }
@@ -1947,16 +1942,15 @@ static void
 PrepareDtmTransaction(List *taskList)
 {
 	Task *task = (Task *) linitial(taskList);
+	MemoryContext oldContext = NULL;
 	ListCell *taskPlacementCell = NULL;
 	StringInfo nodeArrayString = makeStringInfo();
 	StringInfo xidArrayString = makeStringInfo();
 	char *delimiter = "";
 	bool abortTransaction = false;
+	List *newTransactions = NIL;
 
-	if (dtmTransactionActive)
-	{
-		return;
-	}
+	oldContext = MemoryContextSwitchTo(TopTransactionContext);
 
 	appendStringInfo(nodeArrayString, "ARRAY[");
 	appendStringInfo(xidArrayString, "ARRAY[");
@@ -1980,12 +1974,20 @@ PrepareDtmTransaction(List *taskList)
 			continue;
 		}
 
+		if (list_member_ptr(connectionsWithDtmTransactions, connection))
+		{
+			/* already started a transaction */
+			continue;
+		}
+
 		if (!SendCommand(connection, "BEGIN"))
 		{
 			PurgeConnection(connection);
 			abortTransaction = true;
 			continue;
 		}
+
+		newTransactions = lappend(newTransactions, connection);
 
 		result = PQexec(connection, "SELECT setting, txid_current() FROM pg_settings WHERE name = 'dtm.node_id' ");
 		if (PQresultStatus(result) != PGRES_TUPLES_OK)
@@ -2025,11 +2027,16 @@ PrepareDtmTransaction(List *taskList)
 
 	if (abortTransaction)
 	{
+		/* make sure we abort all pending transactions */
+		connectionsWithDtmTransactions = newTransactions;
+
+		MemoryContextSwitchTo(oldContext);
+
 		/*
 		 * Since pg_shard reuses connections across transactions on the master,
 		 * we need to abort pending transactions on the workers.
 		 */
-		FinishDtmTransaction(XACT_EVENT_ABORT, (void*) taskList);
+		FinishDtmTransaction(XACT_EVENT_ABORT, NULL);
 		ereport(ERROR, (errmsg("aborting distributed transaction due to failures")));
 	}
 
@@ -2052,6 +2059,12 @@ PrepareDtmTransaction(List *taskList)
 			continue;
 		}
 
+		if (list_member_ptr(connectionsWithDtmTransactions, connection))
+		{
+			/* already started a transaction */
+			continue;
+		}
+
 		if (!SendDtmBeginTransaction(connection, nodeArrayString, xidArrayString))
 		{
 			abortTransaction = true;
@@ -2065,18 +2078,26 @@ PrepareDtmTransaction(List *taskList)
 		}
 	}
 
+	connectionsWithDtmTransactions = list_union(connectionsWithDtmTransactions,
+						    					newTransactions);
+
+	MemoryContextSwitchTo(oldContext);
+
 	if (abortTransaction)
 	{
 		/*
 		 * Since pg_shard reuses connections across transactions on the master,
 		 * we need to abort pending transactions on the workers.
 		 */
-		FinishDtmTransaction(XACT_EVENT_ABORT, (void*) taskList);
+		FinishDtmTransaction(XACT_EVENT_ABORT, NULL);
 		ereport(ERROR, (errmsg("aborting distributed transaction due to failures")));
 	}
 
-	RegisterXactCallback(FinishDtmTransaction, taskList);
-	dtmTransactionActive = true;
+	if (!commitCallbackSet)
+	{
+		RegisterXactCallback(FinishDtmTransaction, NULL);
+		commitCallbackSet = true;
+	}
 }
 
 
@@ -2145,9 +2166,7 @@ SendCommand(PGconn *connection, char *command)
 static void
 FinishDtmTransaction(XactEvent event, void *arg)
 {
-	List *taskList = (List *) arg;
-	Task *task = (Task *) linitial(taskList);
-	ListCell *taskPlacementCell = NULL;
+	ListCell *connectionCell = NULL;
 	char *endQuery = NULL;
 
 	if (event == XACT_EVENT_COMMIT)
@@ -2163,22 +2182,10 @@ FinishDtmTransaction(XactEvent event, void *arg)
 		return;
 	}
 
-	foreach(taskPlacementCell, task->taskPlacementList)
+	foreach(connectionCell, connectionsWithDtmTransactions)
 	{
-		ShardPlacement *taskPlacement = (ShardPlacement *) lfirst(taskPlacementCell);
-		char *nodeName = taskPlacement->nodeName;
-		int32 nodePort = taskPlacement->nodePort;
-		PGconn *connection = NULL;
-		int querySent = 0;
-
-		connection = GetConnection(nodeName, nodePort, false);
-		if (connection == NULL)
-		{
-			/* transaction must already be aborted */
-			continue;
-		}
-
-		querySent = PQsendQuery(connection, endQuery);
+		PGconn *connection = (PGconn *) lfirst(connectionCell);
+		int querySent = PQsendQuery(connection, endQuery);
 		if (querySent == 0)
 		{
 			ReportRemoteError(connection, NULL);
@@ -2187,22 +2194,10 @@ FinishDtmTransaction(XactEvent event, void *arg)
 		}
 	}
 
-	foreach(taskPlacementCell, task->taskPlacementList)
+	foreach(connectionCell, connectionsWithDtmTransactions)
 	{
-		ShardPlacement *taskPlacement = (ShardPlacement *) lfirst(taskPlacementCell);
-		char *nodeName = taskPlacement->nodeName;
-		int32 nodePort = taskPlacement->nodePort;
-		PGconn *connection = NULL;
-		PGresult *result = NULL;
-
-		connection = GetConnection(nodeName, nodePort, false);
-		if (connection == NULL)
-		{
-			/* transaction must already be aborted */
-			continue;
-		}
-
-		result = PQgetResult(connection);
+		PGconn *connection = (PGconn *) lfirst(connectionCell);
+		PGresult *result = PQgetResult(connection);
 		if (PQresultStatus(result) != PGRES_COMMAND_OK)
 		{
 			ReportRemoteError(connection, result);
@@ -2214,8 +2209,8 @@ FinishDtmTransaction(XactEvent event, void *arg)
 		PQgetResult(connection);
 	}
 
-	UnregisterXactCallback(FinishDtmTransaction, taskList);
-	dtmTransactionActive = false;
+	UnregisterXactCallback(FinishDtmTransaction, NULL);
+	connectionsWithDtmTransactions = NIL;
 }
 
 
