@@ -168,12 +168,10 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 	char relationKind = get_rel_relkind(distributedTableId);
 	char *tableName = text_to_cstring(tableNameText);
 	char shardStorageType = '\0';
-	int32 shardIndex = 0;
 	List *workerNodeList = NIL;
 	List *ddlCommandList = NIL;
 	int32 workerNodeCount = 0;
 	uint32 placementAttemptCount = 0;
-	uint32 hashTokenIncrement = 0;
 	List *existingShardList = NIL;
 
 	/* make sure table is hash partitioned */
@@ -204,9 +202,6 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 						errmsg("replication_factor must be positive")));
 	}
-
-	/* calculate the split of the hash space */
-	hashTokenIncrement = UINT_MAX / shardCount;
 
 	/* load and sort the worker node list for deterministic placement */
 	workerNodeList = ParseWorkerNodeFile(WORKER_LIST_FILENAME);
@@ -245,7 +240,7 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 		shardStorageType = SHARD_STORAGE_TABLE;
 	}
 
-	for (shardIndex = 0; shardIndex < shardCount; shardIndex++)
+	for (int64 shardIndex = 0; shardIndex < shardCount; shardIndex++)
 	{
 		List *extendedDDLCommands = NIL;
 		int64 shardId = -1;
@@ -256,14 +251,10 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 		/* initialize the hash token space for this shard */
 		text *minHashTokenText = NULL;
 		text *maxHashTokenText = NULL;
-		int32 shardMinHashToken = INT_MIN + (shardIndex * hashTokenIncrement);
-		int32 shardMaxHashToken = shardMinHashToken + hashTokenIncrement - 1;
-
-		/* if we are at the last shard, make sure the max token value is INT_MAX */
-		if (shardIndex == (shardCount - 1))
-		{
-			shardMaxHashToken = INT_MAX;
-		}
+		int64 minHashTokenOffset = (shardIndex * HASH_TOKEN_COUNT) / shardCount;
+		int64 maxHashTokenOffset = ((shardIndex + 1) * HASH_TOKEN_COUNT) / shardCount - 1;
+		int32 shardMinHashToken = INT32_MIN + minHashTokenOffset;
+		int32 shardMaxHashToken = INT32_MIN + maxHashTokenOffset;
 
 		/* insert the shard metadata row along with its min/max values */
 		minHashTokenText = IntegerToText(shardMinHashToken);
