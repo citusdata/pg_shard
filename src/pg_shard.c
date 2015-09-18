@@ -1969,6 +1969,7 @@ PrepareDtmTransaction(List *taskList)
 		PGconn *connection = NULL;
 		PGresult *result = NULL;
 		char *remoteTransactionId = NULL;
+		char *remoteNodeId = NULL;
 
 		connection = GetConnection(nodeName, nodePort, true);
 		if (connection == NULL)
@@ -1986,7 +1987,7 @@ PrepareDtmTransaction(List *taskList)
 			continue;
 		}
 
-		result = PQexec(connection, "SELECT txid_current()");
+		result = PQexec(connection, "SELECT setting, txid_current() FROM pg_settings WHERE name = 'dtm.node_id' ");
 		if (PQresultStatus(result) != PGRES_TUPLES_OK)
 		{
 			ReportRemoteError(connection, result);
@@ -1995,7 +1996,17 @@ PrepareDtmTransaction(List *taskList)
 			continue;
 		}
 
-		remoteTransactionId = PQgetvalue(result, 0, 0);
+		remoteNodeId = PQgetvalue(result, 0, 0);
+		if (remoteNodeId == NULL || (*remoteNodeId) == '\0')
+		{
+			ereport(WARNING, (errmsg("failed to parse txid_current result on %s:%d",
+									 nodeName, nodePort)));
+			PQclear(result);
+			abortTransaction = true;
+			continue;
+		}
+
+		remoteTransactionId = PQgetvalue(result, 0, 1);
 		if (remoteTransactionId == NULL || (*remoteTransactionId) == '\0')
 		{
 			ereport(WARNING, (errmsg("failed to parse txid_current result on %s:%d",
@@ -2005,7 +2016,7 @@ PrepareDtmTransaction(List *taskList)
 			continue;
 		}
 
-		appendStringInfo(nodeArrayString, "%s'%s:%d'", delimiter, nodeName, nodePort);
+		appendStringInfo(nodeArrayString, "%s%s", delimiter, remoteNodeId);
 		appendStringInfo(xidArrayString, "%s%s", delimiter, remoteTransactionId);
 		delimiter = ",";
 
@@ -2158,6 +2169,30 @@ FinishDtmTransaction(XactEvent event, void *arg)
 		char *nodeName = taskPlacement->nodeName;
 		int32 nodePort = taskPlacement->nodePort;
 		PGconn *connection = NULL;
+		int querySent = 0;
+
+		connection = GetConnection(nodeName, nodePort, false);
+		if (connection == NULL)
+		{
+			/* transaction must already be aborted */
+			continue;
+		}
+
+		querySent = PQsendQuery(connection, endQuery);
+		if (querySent == 0)
+		{
+			ReportRemoteError(connection, NULL);
+			PurgeConnection(connection);
+			continue;
+		}
+	}
+
+	foreach(taskPlacementCell, task->taskPlacementList)
+	{
+		ShardPlacement *taskPlacement = (ShardPlacement *) lfirst(taskPlacementCell);
+		char *nodeName = taskPlacement->nodeName;
+		int32 nodePort = taskPlacement->nodePort;
+		PGconn *connection = NULL;
 		PGresult *result = NULL;
 
 		connection = GetConnection(nodeName, nodePort, false);
@@ -2167,13 +2202,16 @@ FinishDtmTransaction(XactEvent event, void *arg)
 			continue;
 		}
 
-		result = PQexec(connection, endQuery);
+		result = PQgetResult(connection);
 		if (PQresultStatus(result) != PGRES_COMMAND_OK)
 		{
 			ReportRemoteError(connection, result);
 		}
 
-        PQclear(result);
+	        PQclear(result);
+
+		/* clear NULL result */
+		PQgetResult(connection);
 	}
 
 	UnregisterXactCallback(FinishDtmTransaction, taskList);
