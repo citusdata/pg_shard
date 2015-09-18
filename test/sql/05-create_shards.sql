@@ -97,7 +97,14 @@ SELECT master_create_worker_shards('table_to_distribute', 16, 1);
 
 SELECT storage, min_value, max_value FROM pgs_distribution_metadata.shard
 	WHERE relation_id = 'table_to_distribute'::regclass
-	ORDER BY (min_value COLLATE "C") ASC;
+	ORDER BY (min_value::integer) ASC;
+
+-- all shards should have the same size (16 divides evenly into the hash space)
+SELECT count(*) AS shard_count,
+	max_value::integer-min_value::integer AS shard_size
+	FROM pgs_distribution_metadata.shard
+	WHERE relation_id='table_to_distribute'::regclass
+	GROUP BY shard_size;
 
 -- all shards should be on a single node
 WITH unique_nodes AS (
@@ -141,7 +148,27 @@ SELECT master_create_worker_shards('foreign_table_to_distribute', 16, 1);
 \set VERBOSITY default
 SELECT storage, min_value, max_value FROM pgs_distribution_metadata.shard
 	WHERE relation_id = 'foreign_table_to_distribute'::regclass
-	ORDER BY (min_value COLLATE "C") ASC;
+	ORDER BY (min_value::integer) ASC;
+
+-- test shard creation using weird shard count
+CREATE TABLE weird_shard_count
+(
+	name text,
+	id bigint
+);
+
+\set VERBOSITY terse
+
+SELECT master_create_distributed_table('weird_shard_count', 'id');
+SELECT master_create_worker_shards('weird_shard_count', 7, 1);
+
+\set VERBOSITY default
+
+-- pg_shard ensures all shards are roughly the same size
+SELECT max_value::integer-min_value::integer AS shard_size
+	FROM pgs_distribution_metadata.shard
+	WHERE relation_id='weird_shard_count'::regclass
+	ORDER BY min_value::integer ASC;
 
 -- cleanup foreign table, related shards and shard placements
 DELETE FROM pgs_distribution_metadata.shard_placement
