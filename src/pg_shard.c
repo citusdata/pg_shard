@@ -2236,11 +2236,6 @@ ExecuteSingleShardSelect(DistributedPlan *distributedPlan, EState *executorState
 	List *taskList = distributedPlan->taskList;
 	Assert(list_length(taskList) == 1);
 
-	if (UseDtmTransactions)
-	{
-		PrepareDtmTransaction(taskList);
-	}
-
 	task = (Task *) linitial(taskList);
 	tupleStore = tuplestore_begin_heap(false, false, work_mem);
 
