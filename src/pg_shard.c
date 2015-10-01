@@ -137,9 +137,9 @@ static void TupleStoreToTable(RangeVar *tableRangeVar, List *remoteTargetList,
 static void PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count);
 static int32 ExecuteDistributedModify(DistributedPlan *distributedPlan);
 static void PrepareDtmTransaction(List *taskList);
-static bool SendDtmGetSnapshot(PGconn *connection);
-static bool SendDtmBeginTransaction(PGconn *connection, StringInfo nodeArrayString,
-									StringInfo xidArrayString);
+
+static char * SendDtmBeginTransaction(PGconn *connection, int NumNodes);
+static bool SendDtmJoinTransaction(PGconn *connection, char *TransactionId);
 static bool SendCommand(PGconn *connection, char *command);
 static void FinishDtmTransaction(XactEvent event, void *arg);
 static void ExecuteSingleShardSelect(DistributedPlan *distributedPlan,
@@ -1944,16 +1944,10 @@ PrepareDtmTransaction(List *taskList)
 	Task *task = (Task *) linitial(taskList);
 	MemoryContext oldContext = NULL;
 	ListCell *taskPlacementCell = NULL;
-	StringInfo nodeArrayString = makeStringInfo();
-	StringInfo xidArrayString = makeStringInfo();
-	char *delimiter = "";
 	bool abortTransaction = false;
 	List *newTransactions = NIL;
 
 	oldContext = MemoryContextSwitchTo(TopTransactionContext);
-
-	appendStringInfo(nodeArrayString, "ARRAY[");
-	appendStringInfo(xidArrayString, "ARRAY[");
 
 	foreach(taskPlacementCell, task->taskPlacementList)
 	{
@@ -1961,9 +1955,7 @@ PrepareDtmTransaction(List *taskList)
 		char *nodeName = taskPlacement->nodeName;
 		int32 nodePort = taskPlacement->nodePort;
 		PGconn *connection = NULL;
-		PGresult *result = NULL;
-		char *remoteTransactionId = NULL;
-		char *remoteNodeId = NULL;
+		char *TransactionId = NULL;
 
 		connection = GetConnection(nodeName, nodePort, true);
 		if (connection == NULL)
@@ -1980,49 +1972,29 @@ PrepareDtmTransaction(List *taskList)
 			continue;
 		}
 
-		if (!SendCommand(connection, "BEGIN"))
+		if (!TransactionId && !abortTransaction)
 		{
-			PurgeConnection(connection);
-			abortTransaction = true;
-			continue;
+			/* Send dtm_begin_transaction to the first node */
+			TransactionId = SendDtmBeginTransaction(connection, task->taskPlacementList->length);
+			if (!TransactionId)
+			{
+				ereport(WARNING, (errmsg("failed to parse remoteTransactionId result on %s:%d",
+										 nodeName, nodePort)));
+				abortTransaction = true;
+				continue;
+			}
+		}
+		else
+		{
+			/* Send dtm_join_transaction to the rest of the nodes */
+			if (!SendDtmJoinTransaction(connection, TransactionId))
+			{
+				abortTransaction = true;
+				continue;
+			}
 		}
 
 		newTransactions = lappend(newTransactions, connection);
-
-		result = PQexec(connection, "SELECT setting, txid_current() FROM pg_settings WHERE name = 'dtm.node_id' ");
-		if (PQresultStatus(result) != PGRES_TUPLES_OK)
-		{
-			ReportRemoteError(connection, result);
-			PQclear(result);
-			abortTransaction = true;
-			continue;
-		}
-
-		remoteNodeId = PQgetvalue(result, 0, 0);
-		if (remoteNodeId == NULL || (*remoteNodeId) == '\0')
-		{
-			ereport(WARNING, (errmsg("failed to parse txid_current result on %s:%d",
-									 nodeName, nodePort)));
-			PQclear(result);
-			abortTransaction = true;
-			continue;
-		}
-
-		remoteTransactionId = PQgetvalue(result, 0, 1);
-		if (remoteTransactionId == NULL || (*remoteTransactionId) == '\0')
-		{
-			ereport(WARNING, (errmsg("failed to parse txid_current result on %s:%d",
-									 nodeName, nodePort)));
-			PQclear(result);
-			abortTransaction = true;
-			continue;
-		}
-
-		appendStringInfo(nodeArrayString, "%s%s", delimiter, remoteNodeId);
-		appendStringInfo(xidArrayString, "%s%s", delimiter, remoteTransactionId);
-		delimiter = ",";
-
-		PQclear(result);
 	}
 
 	if (abortTransaction)
@@ -2039,9 +2011,6 @@ PrepareDtmTransaction(List *taskList)
 		FinishDtmTransaction(XACT_EVENT_ABORT, NULL);
 		ereport(ERROR, (errmsg("aborting distributed transaction due to failures")));
 	}
-
-	appendStringInfo(nodeArrayString, "]");
-	appendStringInfo(xidArrayString, "]");
 
 	foreach(taskPlacementCell, task->taskPlacementList)
 	{
@@ -2065,17 +2034,13 @@ PrepareDtmTransaction(List *taskList)
 			continue;
 		}
 
-		if (!SendDtmBeginTransaction(connection, nodeArrayString, xidArrayString))
+		if (!SendCommand(connection, "BEGIN"))
 		{
+			PurgeConnection(connection);
 			abortTransaction = true;
 			continue;
 		}
 
-		if (!SendDtmGetSnapshot(connection))
-		{
-			abortTransaction = true;
-			continue;
-		}
 	}
 
 	connectionsWithDtmTransactions = list_union(connectionsWithDtmTransactions,
@@ -2101,16 +2066,43 @@ PrepareDtmTransaction(List *taskList)
 }
 
 
+static char *
+SendDtmBeginTransaction(PGconn *connection, int NumNodes)
+{
+	PGresult *result = NULL;
+	StringInfo beginQuery = makeStringInfo();
+	char *remoteTransactionId = NULL;
+
+	appendStringInfo(beginQuery, "SELECT dtm_begin_transaction(%u)", NumNodes);
+
+	result = PQexec(connection, beginQuery->data);
+	if (PQresultStatus(result) != PGRES_TUPLES_OK)
+	{
+		ReportRemoteError(connection, result);
+		PQclear(result);
+		return 0;
+	}
+
+	remoteTransactionId = PQgetvalue(result, 0, 0);
+	if (remoteTransactionId == NULL || (*remoteTransactionId) == '\0')
+	{
+		ReportRemoteError(connection, result);
+		PQclear(result);
+		return 0;
+	}
+
+	return remoteTransactionId;
+}
+
+
 static bool
-SendDtmBeginTransaction(PGconn *connection, StringInfo nodeArrayString,
-						StringInfo xidArrayString)
+SendDtmJoinTransaction(PGconn *connection, char *TransactionId)
 {
 	PGresult *result = NULL;
 	StringInfo beginQuery = makeStringInfo();
 	bool resultOK = true;
 
-	appendStringInfo(beginQuery, "SELECT dtm_begin_transaction(%s,%s)",
-					 nodeArrayString->data, xidArrayString->data);
+	appendStringInfo(beginQuery, "SELECT dtm_join_transaction(%s)", TransactionId);
 
 	result = PQexec(connection, beginQuery->data);
 	if (PQresultStatus(result) != PGRES_TUPLES_OK)
@@ -2123,26 +2115,6 @@ SendDtmBeginTransaction(PGconn *connection, StringInfo nodeArrayString,
 
 	return resultOK;
 }
-
-
-static bool
-SendDtmGetSnapshot(PGconn *connection)
-{
-	PGresult *result = NULL;
-	bool resultOK = true;
-
-	result = PQexec(connection, "SELECT dtm_get_snapshot()");
-	if (PQresultStatus(result) != PGRES_TUPLES_OK)
-	{
-		ReportRemoteError(connection, result);
-		resultOK = false;
-	}
-
-	PQclear(result);
-
-	return resultOK;
-}
-
 
 static bool
 SendCommand(PGconn *connection, char *command)
@@ -2182,6 +2154,9 @@ FinishDtmTransaction(XactEvent event, void *arg)
 		return;
 	}
 
+	if (!connectionsWithDtmTransactions)
+		return;
+
 	foreach(connectionCell, connectionsWithDtmTransactions)
 	{
 		PGconn *connection = (PGconn *) lfirst(connectionCell);
@@ -2209,7 +2184,7 @@ FinishDtmTransaction(XactEvent event, void *arg)
 		PQgetResult(connection);
 	}
 
-	UnregisterXactCallback(FinishDtmTransaction, NULL);
+	// UnregisterXactCallback(FinishDtmTransaction, NULL);
 	connectionsWithDtmTransactions = NIL;
 }
 
