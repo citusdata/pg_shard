@@ -27,6 +27,7 @@
 
 #include <stddef.h>
 #include <string.h>
+#include <inttypes.h>
 
 #include "access/heapam.h"
 #include "access/htup_details.h"
@@ -138,8 +139,8 @@ static void PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, lo
 static int32 ExecuteDistributedModify(DistributedPlan *distributedPlan);
 static void PrepareDtmTransaction(List *taskList);
 
-static char * SendDtmBeginTransaction(PGconn *connection, int NumNodes);
-static bool SendDtmJoinTransaction(PGconn *connection, char *TransactionId);
+static int SendDtmBeginTransaction(PGconn *connection, int NumNodes);
+static bool SendDtmJoinTransaction(PGconn *connection, int TransactionId);
 static bool SendCommand(PGconn *connection, char *command);
 static void FinishDtmTransaction(XactEvent event, void *arg);
 static void ExecuteSingleShardSelect(DistributedPlan *distributedPlan,
@@ -174,7 +175,9 @@ static ExecutorFinish_hook_type PreviousExecutorFinishHook = NULL;
 static ExecutorEnd_hook_type PreviousExecutorEndHook = NULL;
 static ProcessUtility_hook_type PreviousProcessUtilityHook = NULL;
 
+/* XTM stuff */
 static List *connectionsWithDtmTransactions = NIL;
+static int currentGlobalTransactionId = 0;
 static bool commitCallbackSet = false;
 
 
@@ -652,12 +655,12 @@ ErrorIfQueryNotSupported(Query *queryTree)
 		}
 	}
 
-	if (hasNonConstTargetEntryExprs || hasNonConstQualExprs)
-	{
-		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("cannot plan sharded modification containing values "
-							   "which are not constants or constant expressions")));
-	}
+	// if (hasNonConstTargetEntryExprs || hasNonConstQualExprs)
+	// {
+	// 	ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+	// 					errmsg("cannot plan sharded modification containing values "
+	// 						   "which are not constants or constant expressions")));
+	// }
 
 	if (specifiesPartitionValue && (commandType == CMD_UPDATE))
 	{
@@ -1468,6 +1471,12 @@ ExecuteMultipleShardSelect(DistributedPlan *distributedPlan,
 	TupleDesc tupleStoreDescriptor = ExecTypeFromTL(targetList, false);
 
 	ListCell *taskCell = NULL;
+
+	// if (UseDtmTransactions)
+	// {
+	// 	PrepareDtmTransaction(taskList);
+	// }
+
 	foreach(taskCell, taskList)
 	{
 		Task *task = (Task *) lfirst(taskCell);
@@ -1518,13 +1527,14 @@ ExecuteTaskAndStoreResults(Task *task, TupleDesc tupleDescriptor,
 		bool queryOK = false;
 		bool storedOK = false;
 
-		PGconn *connection = GetConnection(nodeName, nodePort, !UseDtmTransactions);
+		PGconn *connection = GetConnection(nodeName, nodePort, true); //!UseDtmTransactions);
 		if (connection == NULL)
 		{
 			continue;
 		}
 
 		queryOK = SendQueryInSingleRowMode(connection, task->queryString);
+
 		if (!queryOK)
 		{
 			PurgeConnection(connection);
@@ -1880,7 +1890,7 @@ ExecuteDistributedModify(DistributedPlan *plan)
 
 		Assert(taskPlacement->shardState == STATE_FINALIZED);
 
-		connection = GetConnection(nodeName, nodePort, !UseDtmTransactions);
+		connection = GetConnection(nodeName, nodePort, true); //!UseDtmTransactions);
 		if (connection == NULL)
 		{
 			failedPlacementList = lappend(failedPlacementList, taskPlacement);
@@ -1947,6 +1957,9 @@ PrepareDtmTransaction(List *taskList)
 	bool abortTransaction = false;
 	List *newTransactions = NIL;
 
+	/* Hardcode for now. Later we will change XTMd */
+	int nodesInTransaction = 1;
+
 	oldContext = MemoryContextSwitchTo(TopTransactionContext);
 
 	foreach(taskPlacementCell, task->taskPlacementList)
@@ -1955,7 +1968,6 @@ PrepareDtmTransaction(List *taskList)
 		char *nodeName = taskPlacement->nodeName;
 		int32 nodePort = taskPlacement->nodePort;
 		PGconn *connection = NULL;
-		char *TransactionId = NULL;
 
 		connection = GetConnection(nodeName, nodePort, true);
 		if (connection == NULL)
@@ -1972,11 +1984,11 @@ PrepareDtmTransaction(List *taskList)
 			continue;
 		}
 
-		if (!TransactionId && !abortTransaction)
+		if (!currentGlobalTransactionId)
 		{
 			/* Send dtm_begin_transaction to the first node */
-			TransactionId = SendDtmBeginTransaction(connection, task->taskPlacementList->length);
-			if (!TransactionId)
+			currentGlobalTransactionId = SendDtmBeginTransaction(connection, nodesInTransaction);
+			if (!currentGlobalTransactionId)
 			{
 				ereport(WARNING, (errmsg("failed to parse remoteTransactionId result on %s:%d",
 										 nodeName, nodePort)));
@@ -1987,7 +1999,7 @@ PrepareDtmTransaction(List *taskList)
 		else
 		{
 			/* Send dtm_join_transaction to the rest of the nodes */
-			if (!SendDtmJoinTransaction(connection, TransactionId))
+			if (!SendDtmJoinTransaction(connection, currentGlobalTransactionId))
 			{
 				abortTransaction = true;
 				continue;
@@ -2066,12 +2078,13 @@ PrepareDtmTransaction(List *taskList)
 }
 
 
-static char *
+static int
 SendDtmBeginTransaction(PGconn *connection, int NumNodes)
 {
 	PGresult *result = NULL;
 	StringInfo beginQuery = makeStringInfo();
-	char *remoteTransactionId = NULL;
+	char *resp = NULL;
+	int remoteTransactionId;
 
 	appendStringInfo(beginQuery, "SELECT dtm_begin_transaction(%u)", NumNodes);
 
@@ -2083,26 +2096,28 @@ SendDtmBeginTransaction(PGconn *connection, int NumNodes)
 		return 0;
 	}
 
-	remoteTransactionId = PQgetvalue(result, 0, 0);
-	if (remoteTransactionId == NULL || (*remoteTransactionId) == '\0')
+	resp = PQgetvalue(result, 0, 0);
+	if (resp == NULL || (*resp) == '\0')
 	{
 		ReportRemoteError(connection, result);
 		PQclear(result);
 		return 0;
 	}
 
+	fprintf(stderr, "remoteTransactionId: %s\n", resp);
+	remoteTransactionId = strtol(resp, (char **)NULL, 10);
 	return remoteTransactionId;
 }
 
 
 static bool
-SendDtmJoinTransaction(PGconn *connection, char *TransactionId)
+SendDtmJoinTransaction(PGconn *connection, int TransactionId)
 {
 	PGresult *result = NULL;
 	StringInfo beginQuery = makeStringInfo();
 	bool resultOK = true;
 
-	appendStringInfo(beginQuery, "SELECT dtm_join_transaction(%s)", TransactionId);
+	appendStringInfo(beginQuery, "SELECT dtm_join_transaction(%u)", TransactionId);
 
 	result = PQexec(connection, beginQuery->data);
 	if (PQresultStatus(result) != PGRES_TUPLES_OK)
@@ -2186,6 +2201,7 @@ FinishDtmTransaction(XactEvent event, void *arg)
 
 	// UnregisterXactCallback(FinishDtmTransaction, NULL);
 	connectionsWithDtmTransactions = NIL;
+	currentGlobalTransactionId = 0;
 }
 
 
