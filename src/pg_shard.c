@@ -505,8 +505,8 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	ListCell *rangeTableCell = NULL;
 	bool hasValuesScan = false;
 	uint32 queryTableCount = 0;
-	bool hasNonConstTargetEntryExprs = false;
-	bool hasNonConstQualExprs = false;
+	/* bool hasNonConstTargetEntryExprs = false; */
+	/* bool hasNonConstQualExprs = false; */
 	bool specifiesPartitionValue = false;
 
 	CmdType commandType = queryTree->commandType;
@@ -629,7 +629,7 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	if (commandType == CMD_INSERT || commandType == CMD_UPDATE ||
 		commandType == CMD_DELETE)
 	{
-		FromExpr *joinTree = NULL;
+		/* FromExpr *joinTree = NULL; */
 		ListCell *targetEntryCell = NULL;
 
 		foreach(targetEntryCell, queryTree->targetList)
@@ -642,10 +642,12 @@ ErrorIfQueryNotSupported(Query *queryTree)
 				continue;
 			}
 
-			if (!IsA(targetEntry->expr, Const))
-			{
-				hasNonConstTargetEntryExprs = true;
-			}
+			/*
+			 * if (!IsA(targetEntry->expr, Const))
+			 * {
+			 * 	hasNonConstTargetEntryExprs = true;
+			 * }
+			 */
 
 			if (targetEntry->resno == partitionColumn->varattno)
 			{
@@ -653,11 +655,13 @@ ErrorIfQueryNotSupported(Query *queryTree)
 			}
 		}
 
-		joinTree = queryTree->jointree;
-		if (joinTree != NULL && contain_mutable_functions(joinTree->quals))
-		{
-			hasNonConstQualExprs = true;
-		}
+		/*
+		 * joinTree = queryTree->jointree;
+		 * if (joinTree != NULL && contain_mutable_functions(joinTree->quals))
+		 * {
+		 * 	hasNonConstQualExprs = true;
+		 * }
+		 */
 	}
 
 	/*
