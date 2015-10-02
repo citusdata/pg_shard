@@ -137,7 +137,7 @@ static void TupleStoreToTable(RangeVar *tableRangeVar, List *remoteTargetList,
 							  TupleDesc storeTupleDescriptor, Tuplestorestate *store);
 static void PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count);
 static int32 ExecuteDistributedModify(DistributedPlan *distributedPlan);
-static void PrepareDtmTransaction(List *taskList);
+static void PrepareDtmTransaction(Task *task);
 
 static int SendDtmBeginTransaction(PGconn *connection, int NumNodes);
 static bool SendDtmJoinTransaction(PGconn *connection, int TransactionId);
@@ -1475,7 +1475,7 @@ ExecuteMultipleShardSelect(DistributedPlan *distributedPlan,
 
 	// if (UseDtmTransactions)
 	// {
-	// 	PrepareDtmTransaction(taskList);
+	// 	PrepareDtmTransaction((Task *) linitial(taskList));
 	// }
 
 	foreach(taskCell, taskList)
@@ -1483,6 +1483,11 @@ ExecuteMultipleShardSelect(DistributedPlan *distributedPlan,
 		Task *task = (Task *) lfirst(taskCell);
 		Tuplestorestate *tupleStore = tuplestore_begin_heap(false, false, work_mem);
 		bool resultsOK = false;
+
+		if (UseDtmTransactions)
+		{
+			PrepareDtmTransaction(task);
+		}
 
 		resultsOK = ExecuteTaskAndStoreResults(task, tupleStoreDescriptor, tupleStore);
 		if (!resultsOK)
@@ -1528,7 +1533,7 @@ ExecuteTaskAndStoreResults(Task *task, TupleDesc tupleDescriptor,
 		bool queryOK = false;
 		bool storedOK = false;
 
-		PGconn *connection = GetConnection(nodeName, nodePort, true); //!UseDtmTransactions);
+		PGconn *connection = GetConnection(nodeName, nodePort, !UseDtmTransactions);
 		if (connection == NULL)
 		{
 			continue;
@@ -1875,7 +1880,7 @@ ExecuteDistributedModify(DistributedPlan *plan)
 
 	if (UseDtmTransactions)
 	{
-		PrepareDtmTransaction(plan->taskList);
+		PrepareDtmTransaction(task);
 	}
 
 	foreach(taskPlacementCell, task->taskPlacementList)
@@ -1891,7 +1896,7 @@ ExecuteDistributedModify(DistributedPlan *plan)
 
 		Assert(taskPlacement->shardState == STATE_FINALIZED);
 
-		connection = GetConnection(nodeName, nodePort, true); //!UseDtmTransactions);
+		connection = GetConnection(nodeName, nodePort, !UseDtmTransactions);
 		if (connection == NULL)
 		{
 			failedPlacementList = lappend(failedPlacementList, taskPlacement);
@@ -1907,8 +1912,8 @@ ExecuteDistributedModify(DistributedPlan *plan)
 			failedPlacementList = lappend(failedPlacementList, taskPlacement);
 			continue;
 		}
-		TRACE("shard_xtm: \"%s\" to %s:%u\n",
-				task->queryString->data, nodeName, nodePort);
+		TRACE("shard_xtm: conn#%p: \"%s\" to %s:%u\n",
+				connection, task->queryString->data, nodeName, nodePort);
 
 		currentAffectedTupleString = PQcmdTuples(result);
 		currentAffectedTupleCount = pg_atoi(currentAffectedTupleString, sizeof(int32), 0);
@@ -1952,9 +1957,10 @@ ExecuteDistributedModify(DistributedPlan *plan)
  * a global transaction.
  */
 static void
-PrepareDtmTransaction(List *taskList)
+// PrepareDtmTransaction(List *taskList)
+PrepareDtmTransaction(Task *task)
 {
-	Task *task = (Task *) linitial(taskList);
+	// Task *task = (Task *) linitial(taskList);
 	MemoryContext oldContext = NULL;
 	ListCell *taskPlacementCell = NULL;
 	bool abortTransaction = false;
@@ -1998,8 +2004,8 @@ PrepareDtmTransaction(List *taskList)
 				abortTransaction = true;
 				continue;
 			}
-			TRACE("shard_xtm: Sent dtm_begin(%u) to %s:%u -> %u\n",
-				     nodesInTransaction, nodeName, nodePort, currentGlobalTransactionId);
+			TRACE("shard_xtm: conn#%p: Sent dtm_begin(%u) to %s:%u -> %u\n",
+				     connection, nodesInTransaction, nodeName, nodePort, currentGlobalTransactionId);
 		}
 		else
 		{
@@ -2009,8 +2015,8 @@ PrepareDtmTransaction(List *taskList)
 				abortTransaction = true;
 				continue;
 			}
-			TRACE("shard_xtm: Sent dtm_join(%u) to %s:%u\n",
-				     currentGlobalTransactionId, nodeName, nodePort);
+			TRACE("shard_xtm: conn#%p: Sent dtm_join(%u) to %s:%u\n",
+				     connection, currentGlobalTransactionId, nodeName, nodePort);
 		}
 
 		newTransactions = lappend(newTransactions, connection);
@@ -2059,7 +2065,7 @@ PrepareDtmTransaction(List *taskList)
 			abortTransaction = true;
 			continue;
 		}
-		TRACE("shard_xtm: Sent BEGIN to %s:%u\n", nodeName, nodePort);
+		TRACE("shard_xtm: conn#%p: Sent BEGIN to %s:%u\n", connection, nodeName, nodePort);
 
 	}
 
@@ -2189,7 +2195,7 @@ FinishDtmTransaction(XactEvent event, void *arg)
 			PurgeConnection(connection);
 			continue;
 		}
-		TRACE("shard_xtm: Sent COMMIT to %s:%s\n", PQhost(connection), PQport(connection));
+		TRACE("shard_xtm: conn#%p: Sent COMMIT to %s:%s\n", connection, PQhost(connection), PQport(connection));
 	}
 
 	foreach(connectionCell, connectionsWithDtmTransactions)
