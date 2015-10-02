@@ -138,7 +138,6 @@ static void TupleStoreToTable(RangeVar *tableRangeVar, List *remoteTargetList,
 static void PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count);
 static int32 ExecuteDistributedModify(DistributedPlan *distributedPlan);
 static void PrepareDtmTransaction(Task *task);
-
 static int SendDtmBeginTransaction(PGconn *connection, int NumNodes);
 static bool SendDtmJoinTransaction(PGconn *connection, int TransactionId);
 static bool SendCommand(PGconn *connection, char *command);
@@ -180,6 +179,11 @@ static List *connectionsWithDtmTransactions = NIL;
 static int currentGlobalTransactionId = 0;
 static bool commitCallbackSet = false;
 
+/*
+ * This is maximal number of nodes that can participate in distributed
+ * transaction. Better to set it to the number of workers.
+ */
+#define MAXNODES 10
 #define TRACE(fmt, ...) fprintf(stderr, fmt, ## __VA_ARGS__)
 
 /*
@@ -656,12 +660,20 @@ ErrorIfQueryNotSupported(Query *queryTree)
 		}
 	}
 
-	// if (hasNonConstTargetEntryExprs || hasNonConstQualExprs)
-	// {
-	// 	ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-	// 					errmsg("cannot plan sharded modification containing values "
-	// 						   "which are not constants or constant expressions")));
-	// }
+	/*
+	 * Seems that disabling this check for UPDATEs with expressions like x=x+1
+	 * doesn't break anything.
+	 */
+
+	/*
+	 * if (hasNonConstTargetEntryExprs || hasNonConstQualExprs)
+	 * {
+	 * 	ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+	 * 					errmsg("cannot plan sharded modification containing values "
+	 * 						   "which are not constants or constant expressions")));
+	 * }
+	 *
+	 */
 
 	if (specifiesPartitionValue && (commandType == CMD_UPDATE))
 	{
@@ -1256,16 +1268,22 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 		}
 		else if (!selectFromMultipleShards)
 		{
-			bool topLevel = true;
+			/* bool topLevel = true; */
 			LOCKMODE lockMode = NoLock;
 			EState *executorState = NULL;
 
-			/* disallow transactions and triggers during distributed commands */
-			if (!UseDtmTransactions)
-			{
-				PreventTransactionChain(topLevel, "distributed commands");
-				eflags |= EXEC_FLAG_SKIP_TRIGGERS;
-			}
+			/*
+			 * Also enable transactions to have ability to run the same test 
+			 * with and without DTM.
+			 */
+			/*
+			 * if (!UseDtmTransactions)
+			 * {
+			 * 	PreventTransactionChain(topLevel, "distributed commands");
+			 * 	eflags |= EXEC_FLAG_SKIP_TRIGGERS;
+			 * }
+			 *
+			 */
 
 			/* build empty executor state to obtain per-query memory context */
 			executorState = CreateExecutorState();
@@ -1473,11 +1491,6 @@ ExecuteMultipleShardSelect(DistributedPlan *distributedPlan,
 
 	ListCell *taskCell = NULL;
 
-	// if (UseDtmTransactions)
-	// {
-	// 	PrepareDtmTransaction((Task *) linitial(taskList));
-	// }
-
 	foreach(taskCell, taskList)
 	{
 		Task *task = (Task *) lfirst(taskCell);
@@ -1540,7 +1553,6 @@ ExecuteTaskAndStoreResults(Task *task, TupleDesc tupleDescriptor,
 		}
 
 		queryOK = SendQueryInSingleRowMode(connection, task->queryString);
-
 		if (!queryOK)
 		{
 			PurgeConnection(connection);
@@ -1957,17 +1969,12 @@ ExecuteDistributedModify(DistributedPlan *plan)
  * a global transaction.
  */
 static void
-// PrepareDtmTransaction(List *taskList)
 PrepareDtmTransaction(Task *task)
 {
-	// Task *task = (Task *) linitial(taskList);
 	MemoryContext oldContext = NULL;
 	ListCell *taskPlacementCell = NULL;
 	bool abortTransaction = false;
 	List *newTransactions = NIL;
-
-	/* Hardcoded maximal backends amount =) */
-	int nodesInTransaction = 2;
 
 	oldContext = MemoryContextSwitchTo(TopTransactionContext);
 
@@ -1996,7 +2003,7 @@ PrepareDtmTransaction(Task *task)
 		if (!currentGlobalTransactionId)
 		{
 			/* Send dtm_begin_transaction to the first node */
-			currentGlobalTransactionId = SendDtmBeginTransaction(connection, nodesInTransaction);
+			currentGlobalTransactionId = SendDtmBeginTransaction(connection, MAXNODES);
 			if (!currentGlobalTransactionId)
 			{
 				ereport(WARNING, (errmsg("failed to parse remoteTransactionId result on %s:%d",
@@ -2005,7 +2012,7 @@ PrepareDtmTransaction(Task *task)
 				continue;
 			}
 			TRACE("shard_xtm: conn#%p: Sent dtm_begin(%u) to %s:%u -> %u\n",
-				     connection, nodesInTransaction, nodeName, nodePort, currentGlobalTransactionId);
+				     connection, MAXNODES, nodeName, nodePort, currentGlobalTransactionId);
 		}
 		else
 		{
@@ -2144,6 +2151,7 @@ SendDtmJoinTransaction(PGconn *connection, int TransactionId)
 	return resultOK;
 }
 
+
 static bool
 SendCommand(PGconn *connection, char *command)
 {
@@ -2213,7 +2221,13 @@ FinishDtmTransaction(XactEvent event, void *arg)
 		PQgetResult(connection);
 	}
 
-	// UnregisterXactCallback(FinishDtmTransaction, NULL);
+	/*
+	 * Calling unregister inside callback itself leads to segfault when
+	 * there are several callbacks on the same event.
+	 */
+	/*
+	 * UnregisterXactCallback(FinishDtmTransaction, NULL);
+	 */
 	connectionsWithDtmTransactions = NIL;
 	currentGlobalTransactionId = 0;
 }
