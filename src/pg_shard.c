@@ -138,7 +138,7 @@ static void TupleStoreToTable(RangeVar *tableRangeVar, List *remoteTargetList,
 static void PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count);
 static int32 ExecuteDistributedModify(DistributedPlan *distributedPlan);
 static void PrepareDtmTransaction(Task *task);
-static int SendDtmBeginTransaction(PGconn *connection, int NumNodes);
+static int SendDtmBeginTransaction(PGconn *connection);
 static bool SendDtmJoinTransaction(PGconn *connection, int TransactionId);
 static bool SendCommand(PGconn *connection, char *command);
 static void FinishDtmTransaction(XactEvent event, void *arg);
@@ -179,11 +179,6 @@ static List *connectionsWithDtmTransactions = NIL;
 static int currentGlobalTransactionId = 0;
 static bool commitCallbackSet = false;
 
-/*
- * This is maximal number of nodes that can participate in distributed
- * transaction. Better to set it to the number of workers.
- */
-#define MAXNODES 10
 #define TRACE(fmt, ...) fprintf(stderr, fmt, ## __VA_ARGS__)
 
 /*
@@ -2007,7 +2002,7 @@ PrepareDtmTransaction(Task *task)
 		if (!currentGlobalTransactionId)
 		{
 			/* Send dtm_begin_transaction to the first node */
-			currentGlobalTransactionId = SendDtmBeginTransaction(connection, MAXNODES);
+			currentGlobalTransactionId = SendDtmBeginTransaction(connection);
 			if (!currentGlobalTransactionId)
 			{
 				ereport(WARNING, (errmsg("failed to parse remoteTransactionId result on %s:%d",
@@ -2015,8 +2010,8 @@ PrepareDtmTransaction(Task *task)
 				abortTransaction = true;
 				continue;
 			}
-			TRACE("shard_xtm: conn#%p: Sent dtm_begin(%u) to %s:%u -> %u\n",
-				     connection, MAXNODES, nodeName, nodePort, currentGlobalTransactionId);
+			TRACE("shard_xtm: conn#%p: Sent dtm_begin() to %s:%u -> %u\n",
+				     connection, nodeName, nodePort, currentGlobalTransactionId);
 		}
 		else
 		{
@@ -2104,16 +2099,14 @@ PrepareDtmTransaction(Task *task)
 
 
 static int
-SendDtmBeginTransaction(PGconn *connection, int NumNodes)
+SendDtmBeginTransaction(PGconn *connection)
 {
 	PGresult *result = NULL;
-	StringInfo beginQuery = makeStringInfo();
 	char *resp = NULL;
 	int remoteTransactionId;
 
-	appendStringInfo(beginQuery, "SELECT dtm_begin_transaction(%u)", NumNodes);
 
-	result = PQexec(connection, beginQuery->data);
+	result = PQexec(connection, "SELECT dtm_begin_transaction()");
 	if (PQresultStatus(result) != PGRES_TUPLES_OK)
 	{
 		ReportRemoteError(connection, result);
