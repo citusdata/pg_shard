@@ -180,6 +180,7 @@ static List *connectionsWithDtmTransactions = NIL;
 static int currentGlobalTransactionId = 0;
 static bool commitCallbackSet = false;
 
+#define TRACE(fmt, ...) fprintf(stderr, fmt, ## __VA_ARGS__)
 
 /*
  * _PG_init is called when the module is loaded. In this function we save the
@@ -1906,6 +1907,8 @@ ExecuteDistributedModify(DistributedPlan *plan)
 			failedPlacementList = lappend(failedPlacementList, taskPlacement);
 			continue;
 		}
+		TRACE("shard_xtm: \"%s\" to %s:%u\n",
+				task->queryString->data, nodeName, nodePort);
 
 		currentAffectedTupleString = PQcmdTuples(result);
 		currentAffectedTupleCount = pg_atoi(currentAffectedTupleString, sizeof(int32), 0);
@@ -1957,8 +1960,8 @@ PrepareDtmTransaction(List *taskList)
 	bool abortTransaction = false;
 	List *newTransactions = NIL;
 
-	/* Hardcode for now. Later we will change XTMd */
-	int nodesInTransaction = 1;
+	/* Hardcoded maximal backends amount =) */
+	int nodesInTransaction = 2;
 
 	oldContext = MemoryContextSwitchTo(TopTransactionContext);
 
@@ -1995,6 +1998,8 @@ PrepareDtmTransaction(List *taskList)
 				abortTransaction = true;
 				continue;
 			}
+			TRACE("shard_xtm: Sent dtm_begin(%u) to %s:%u -> %u\n",
+				     nodesInTransaction, nodeName, nodePort, currentGlobalTransactionId);
 		}
 		else
 		{
@@ -2004,6 +2009,8 @@ PrepareDtmTransaction(List *taskList)
 				abortTransaction = true;
 				continue;
 			}
+			TRACE("shard_xtm: Sent dtm_join(%u) to %s:%u\n",
+				     currentGlobalTransactionId, nodeName, nodePort);
 		}
 
 		newTransactions = lappend(newTransactions, connection);
@@ -2052,6 +2059,7 @@ PrepareDtmTransaction(List *taskList)
 			abortTransaction = true;
 			continue;
 		}
+		TRACE("shard_xtm: Sent BEGIN to %s:%u\n", nodeName, nodePort);
 
 	}
 
@@ -2104,7 +2112,6 @@ SendDtmBeginTransaction(PGconn *connection, int NumNodes)
 		return 0;
 	}
 
-	fprintf(stderr, "remoteTransactionId: %s\n", resp);
 	remoteTransactionId = strtol(resp, (char **)NULL, 10);
 	return remoteTransactionId;
 }
@@ -2182,6 +2189,7 @@ FinishDtmTransaction(XactEvent event, void *arg)
 			PurgeConnection(connection);
 			continue;
 		}
+		TRACE("shard_xtm: Sent COMMIT to %s:%s\n", PQhost(connection), PQport(connection));
 	}
 
 	foreach(connectionCell, connectionsWithDtmTransactions)
