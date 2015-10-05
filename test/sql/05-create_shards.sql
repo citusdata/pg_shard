@@ -101,7 +101,7 @@ SELECT storage, min_value, max_value FROM pgs_distribution_metadata.shard
 
 -- all shards should have the same size (16 divides evenly into the hash space)
 SELECT count(*) AS shard_count,
-	max_value::integer-min_value::integer AS shard_size
+	max_value::integer - min_value::integer AS shard_size
 	FROM pgs_distribution_metadata.shard
 	WHERE relation_id='table_to_distribute'::regclass
 	GROUP BY shard_size;
@@ -165,7 +165,7 @@ SELECT master_create_worker_shards('weird_shard_count', 7, 1);
 \set VERBOSITY default
 
 -- pg_shard ensures all shards are roughly the same size
-SELECT max_value::integer-min_value::integer AS shard_size
+SELECT max_value::integer - min_value::integer AS shard_size
 	FROM pgs_distribution_metadata.shard
 	WHERE relation_id='weird_shard_count'::regclass
 	ORDER BY min_value::integer ASC;
