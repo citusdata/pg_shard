@@ -25,7 +25,7 @@ SHLIB_LINK = $(libpq)
 EXTRA_CLEAN += $(addprefix src/,*.gcno *.gcda) # clean up after profiling runs
 
 # test configuration
-TESTS = $(wildcard test/sql/*.sql)
+TESTS = $(sort $(wildcard test/sql/*.sql))
 REGRESS = $(patsubst test/sql/%.sql,%,$(TESTS))
 REGRESS_OPTS = --inputdir=test --load-language=plpgsql
 REGRESS_OPTS += --launcher=./test/launcher.sh # use custom launcher for tests
