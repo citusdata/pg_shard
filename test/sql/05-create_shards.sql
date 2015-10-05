@@ -167,7 +167,7 @@ SELECT master_create_worker_shards('weird_shard_count', 7, 1);
 -- pg_shard ensures all shards are roughly the same size
 SELECT max_value::integer - min_value::integer AS shard_size
 	FROM pgs_distribution_metadata.shard
-	WHERE relation_id='weird_shard_count'::regclass
+	WHERE relation_id = 'weird_shard_count'::regclass
 	ORDER BY min_value::integer ASC;
 
 -- cleanup foreign table, related shards and shard placements
