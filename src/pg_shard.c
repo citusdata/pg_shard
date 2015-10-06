@@ -18,6 +18,7 @@
 #include "miscadmin.h"
 #include "plpgsql.h"
 
+#include "port.h"
 #include "pg_shard.h"
 #include "connection.h"
 #include "create_shards.h"
@@ -214,6 +215,18 @@ _PG_init(void)
 	/* install error transformation handler for PL/pgSQL invocations */
 	plugin_ptr = (PLpgSQL_plugin **) find_rendezvous_variable("PLpgSQL_plugin");
 	*plugin_ptr = &PluginFuncs;
+
+	char *serverVersion = (char *) GetConfigOption("server_version", false, false);
+	char pgDumpPath[MAXPGPATH];
+	StringInfo pgDumpVersion = makeStringInfo();
+	appendStringInfo(pgDumpVersion, "pg_dump (PostgreSQL) %s", serverVersion);
+
+	find_other_exec(my_exec_path, "pg_dump", pgDumpVersion->data, pgDumpPath);
+
+	ereport(WARNING, (errmsg("pg_dump lives: %s", pgDumpPath)));
+
+	pfree(pgDumpVersion->data);
+	pfree(pgDumpVersion);
 }
 
 
