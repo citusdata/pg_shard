@@ -27,6 +27,7 @@
 
 #include <stddef.h>
 #include <string.h>
+#include <inttypes.h>
 
 #include "access/heapam.h"
 #include "access/htup_details.h"
@@ -136,10 +137,9 @@ static void TupleStoreToTable(RangeVar *tableRangeVar, List *remoteTargetList,
 							  TupleDesc storeTupleDescriptor, Tuplestorestate *store);
 static void PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count);
 static int32 ExecuteDistributedModify(DistributedPlan *distributedPlan);
-static void PrepareDtmTransaction(List *taskList);
-static bool SendDtmGetSnapshot(PGconn *connection);
-static bool SendDtmBeginTransaction(PGconn *connection, StringInfo nodeArrayString,
-									StringInfo xidArrayString);
+static void PrepareDtmTransaction(Task *task);
+static int SendDtmBeginTransaction(PGconn *connection);
+static bool SendDtmJoinTransaction(PGconn *connection, int TransactionId);
 static bool SendCommand(PGconn *connection, char *command);
 static void FinishDtmTransaction(XactEvent event, void *arg);
 static void ExecuteSingleShardSelect(DistributedPlan *distributedPlan,
@@ -174,9 +174,12 @@ static ExecutorFinish_hook_type PreviousExecutorFinishHook = NULL;
 static ExecutorEnd_hook_type PreviousExecutorEndHook = NULL;
 static ProcessUtility_hook_type PreviousProcessUtilityHook = NULL;
 
+/* XTM stuff */
 static List *connectionsWithDtmTransactions = NIL;
+static int currentGlobalTransactionId = 0;
 static bool commitCallbackSet = false;
 
+#define TRACE(fmt, ...) fprintf(stderr, fmt, ## __VA_ARGS__)
 
 /*
  * _PG_init is called when the module is loaded. In this function we save the
@@ -497,8 +500,8 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	ListCell *rangeTableCell = NULL;
 	bool hasValuesScan = false;
 	uint32 queryTableCount = 0;
-	bool hasNonConstTargetEntryExprs = false;
-	bool hasNonConstQualExprs = false;
+	/* bool hasNonConstTargetEntryExprs = false; */
+	/* bool hasNonConstQualExprs = false; */
 	bool specifiesPartitionValue = false;
 
 	CmdType commandType = queryTree->commandType;
@@ -621,7 +624,7 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	if (commandType == CMD_INSERT || commandType == CMD_UPDATE ||
 		commandType == CMD_DELETE)
 	{
-		FromExpr *joinTree = NULL;
+		/* FromExpr *joinTree = NULL; */
 		ListCell *targetEntryCell = NULL;
 
 		foreach(targetEntryCell, queryTree->targetList)
@@ -634,10 +637,12 @@ ErrorIfQueryNotSupported(Query *queryTree)
 				continue;
 			}
 
-			if (!IsA(targetEntry->expr, Const))
-			{
-				hasNonConstTargetEntryExprs = true;
-			}
+			/*
+			 * if (!IsA(targetEntry->expr, Const))
+			 * {
+			 * 	hasNonConstTargetEntryExprs = true;
+			 * }
+			 */
 
 			if (targetEntry->resno == partitionColumn->varattno)
 			{
@@ -645,19 +650,29 @@ ErrorIfQueryNotSupported(Query *queryTree)
 			}
 		}
 
-		joinTree = queryTree->jointree;
-		if (joinTree != NULL && contain_mutable_functions(joinTree->quals))
-		{
-			hasNonConstQualExprs = true;
-		}
+		/*
+		 * joinTree = queryTree->jointree;
+		 * if (joinTree != NULL && contain_mutable_functions(joinTree->quals))
+		 * {
+		 * 	hasNonConstQualExprs = true;
+		 * }
+		 */
 	}
 
-	if (hasNonConstTargetEntryExprs || hasNonConstQualExprs)
-	{
-		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("cannot plan sharded modification containing values "
-							   "which are not constants or constant expressions")));
-	}
+	/*
+	 * Seems that disabling this check for UPDATEs with expressions like x=x+1
+	 * doesn't break anything.
+	 */
+
+	/*
+	 * if (hasNonConstTargetEntryExprs || hasNonConstQualExprs)
+	 * {
+	 * 	ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+	 * 					errmsg("cannot plan sharded modification containing values "
+	 * 						   "which are not constants or constant expressions")));
+	 * }
+	 *
+	 */
 
 	if (specifiesPartitionValue && (commandType == CMD_UPDATE))
 	{
@@ -1252,16 +1267,22 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 		}
 		else if (!selectFromMultipleShards)
 		{
-			bool topLevel = true;
+			/* bool topLevel = true; */
 			LOCKMODE lockMode = NoLock;
 			EState *executorState = NULL;
 
-			/* disallow transactions and triggers during distributed commands */
-			if (!UseDtmTransactions)
-			{
-				PreventTransactionChain(topLevel, "distributed commands");
-				eflags |= EXEC_FLAG_SKIP_TRIGGERS;
-			}
+			/*
+			 * Also enable transactions to have ability to run the same test 
+			 * with and without DTM.
+			 */
+			/*
+			 * if (!UseDtmTransactions)
+			 * {
+			 * 	PreventTransactionChain(topLevel, "distributed commands");
+			 * 	eflags |= EXEC_FLAG_SKIP_TRIGGERS;
+			 * }
+			 *
+			 */
 
 			/* build empty executor state to obtain per-query memory context */
 			executorState = CreateExecutorState();
@@ -1468,11 +1489,17 @@ ExecuteMultipleShardSelect(DistributedPlan *distributedPlan,
 	TupleDesc tupleStoreDescriptor = ExecTypeFromTL(targetList, false);
 
 	ListCell *taskCell = NULL;
+
 	foreach(taskCell, taskList)
 	{
 		Task *task = (Task *) lfirst(taskCell);
 		Tuplestorestate *tupleStore = tuplestore_begin_heap(false, false, work_mem);
 		bool resultsOK = false;
+
+		if (UseDtmTransactions)
+		{
+			PrepareDtmTransaction(task);
+		}
 
 		resultsOK = ExecuteTaskAndStoreResults(task, tupleStoreDescriptor, tupleStore);
 		if (!resultsOK)
@@ -1864,7 +1891,7 @@ ExecuteDistributedModify(DistributedPlan *plan)
 
 	if (UseDtmTransactions)
 	{
-		PrepareDtmTransaction(plan->taskList);
+		PrepareDtmTransaction(task);
 	}
 
 	foreach(taskPlacementCell, task->taskPlacementList)
@@ -1896,6 +1923,8 @@ ExecuteDistributedModify(DistributedPlan *plan)
 			failedPlacementList = lappend(failedPlacementList, taskPlacement);
 			continue;
 		}
+		TRACE("shard_xtm: conn#%p: \"%s\" to %s:%u\n",
+				connection, task->queryString->data, nodeName, nodePort);
 
 		currentAffectedTupleString = PQcmdTuples(result);
 		currentAffectedTupleCount = pg_atoi(currentAffectedTupleString, sizeof(int32), 0);
@@ -1939,21 +1968,14 @@ ExecuteDistributedModify(DistributedPlan *plan)
  * a global transaction.
  */
 static void
-PrepareDtmTransaction(List *taskList)
+PrepareDtmTransaction(Task *task)
 {
-	Task *task = (Task *) linitial(taskList);
 	MemoryContext oldContext = NULL;
 	ListCell *taskPlacementCell = NULL;
-	StringInfo nodeArrayString = makeStringInfo();
-	StringInfo xidArrayString = makeStringInfo();
-	char *delimiter = "";
 	bool abortTransaction = false;
 	List *newTransactions = NIL;
 
 	oldContext = MemoryContextSwitchTo(TopTransactionContext);
-
-	appendStringInfo(nodeArrayString, "ARRAY[");
-	appendStringInfo(xidArrayString, "ARRAY[");
 
 	foreach(taskPlacementCell, task->taskPlacementList)
 	{
@@ -1961,9 +1983,6 @@ PrepareDtmTransaction(List *taskList)
 		char *nodeName = taskPlacement->nodeName;
 		int32 nodePort = taskPlacement->nodePort;
 		PGconn *connection = NULL;
-		PGresult *result = NULL;
-		char *remoteTransactionId = NULL;
-		char *remoteNodeId = NULL;
 
 		connection = GetConnection(nodeName, nodePort, true);
 		if (connection == NULL)
@@ -1980,49 +1999,33 @@ PrepareDtmTransaction(List *taskList)
 			continue;
 		}
 
-		if (!SendCommand(connection, "BEGIN"))
+		if (!currentGlobalTransactionId)
 		{
-			PurgeConnection(connection);
-			abortTransaction = true;
-			continue;
+			/* Send dtm_begin_transaction to the first node */
+			currentGlobalTransactionId = SendDtmBeginTransaction(connection);
+			if (!currentGlobalTransactionId)
+			{
+				ereport(WARNING, (errmsg("failed to parse remoteTransactionId result on %s:%d",
+										 nodeName, nodePort)));
+				abortTransaction = true;
+				continue;
+			}
+			TRACE("shard_xtm: conn#%p: Sent dtm_begin() to %s:%u -> %u\n",
+				     connection, nodeName, nodePort, currentGlobalTransactionId);
+		}
+		else
+		{
+			/* Send dtm_join_transaction to the rest of the nodes */
+			if (!SendDtmJoinTransaction(connection, currentGlobalTransactionId))
+			{
+				abortTransaction = true;
+				continue;
+			}
+			TRACE("shard_xtm: conn#%p: Sent dtm_join(%u) to %s:%u\n",
+				     connection, currentGlobalTransactionId, nodeName, nodePort);
 		}
 
 		newTransactions = lappend(newTransactions, connection);
-
-		result = PQexec(connection, "SELECT setting, txid_current() FROM pg_settings WHERE name = 'dtm.node_id' ");
-		if (PQresultStatus(result) != PGRES_TUPLES_OK)
-		{
-			ReportRemoteError(connection, result);
-			PQclear(result);
-			abortTransaction = true;
-			continue;
-		}
-
-		remoteNodeId = PQgetvalue(result, 0, 0);
-		if (remoteNodeId == NULL || (*remoteNodeId) == '\0')
-		{
-			ereport(WARNING, (errmsg("failed to parse txid_current result on %s:%d",
-									 nodeName, nodePort)));
-			PQclear(result);
-			abortTransaction = true;
-			continue;
-		}
-
-		remoteTransactionId = PQgetvalue(result, 0, 1);
-		if (remoteTransactionId == NULL || (*remoteTransactionId) == '\0')
-		{
-			ereport(WARNING, (errmsg("failed to parse txid_current result on %s:%d",
-									 nodeName, nodePort)));
-			PQclear(result);
-			abortTransaction = true;
-			continue;
-		}
-
-		appendStringInfo(nodeArrayString, "%s%s", delimiter, remoteNodeId);
-		appendStringInfo(xidArrayString, "%s%s", delimiter, remoteTransactionId);
-		delimiter = ",";
-
-		PQclear(result);
 	}
 
 	if (abortTransaction)
@@ -2039,9 +2042,6 @@ PrepareDtmTransaction(List *taskList)
 		FinishDtmTransaction(XACT_EVENT_ABORT, NULL);
 		ereport(ERROR, (errmsg("aborting distributed transaction due to failures")));
 	}
-
-	appendStringInfo(nodeArrayString, "]");
-	appendStringInfo(xidArrayString, "]");
 
 	foreach(taskPlacementCell, task->taskPlacementList)
 	{
@@ -2065,17 +2065,14 @@ PrepareDtmTransaction(List *taskList)
 			continue;
 		}
 
-		if (!SendDtmBeginTransaction(connection, nodeArrayString, xidArrayString))
+		if (!SendCommand(connection, "BEGIN"))
 		{
+			PurgeConnection(connection);
 			abortTransaction = true;
 			continue;
 		}
+		TRACE("shard_xtm: conn#%p: Sent BEGIN to %s:%u\n", connection, nodeName, nodePort);
 
-		if (!SendDtmGetSnapshot(connection))
-		{
-			abortTransaction = true;
-			continue;
-		}
 	}
 
 	connectionsWithDtmTransactions = list_union(connectionsWithDtmTransactions,
@@ -2101,37 +2098,45 @@ PrepareDtmTransaction(List *taskList)
 }
 
 
+static int
+SendDtmBeginTransaction(PGconn *connection)
+{
+	PGresult *result = NULL;
+	char *resp = NULL;
+	int remoteTransactionId;
+
+
+	result = PQexec(connection, "SELECT dtm_begin_transaction()");
+	if (PQresultStatus(result) != PGRES_TUPLES_OK)
+	{
+		ReportRemoteError(connection, result);
+		PQclear(result);
+		return 0;
+	}
+
+	resp = PQgetvalue(result, 0, 0);
+	if (resp == NULL || (*resp) == '\0')
+	{
+		ReportRemoteError(connection, result);
+		PQclear(result);
+		return 0;
+	}
+
+	remoteTransactionId = strtol(resp, (char **)NULL, 10);
+	return remoteTransactionId;
+}
+
+
 static bool
-SendDtmBeginTransaction(PGconn *connection, StringInfo nodeArrayString,
-						StringInfo xidArrayString)
+SendDtmJoinTransaction(PGconn *connection, int TransactionId)
 {
 	PGresult *result = NULL;
 	StringInfo beginQuery = makeStringInfo();
 	bool resultOK = true;
 
-	appendStringInfo(beginQuery, "SELECT dtm_begin_transaction(%s,%s)",
-					 nodeArrayString->data, xidArrayString->data);
+	appendStringInfo(beginQuery, "SELECT dtm_join_transaction(%u)", TransactionId);
 
 	result = PQexec(connection, beginQuery->data);
-	if (PQresultStatus(result) != PGRES_TUPLES_OK)
-	{
-		ReportRemoteError(connection, result);
-		resultOK = false;
-	}
-
-	PQclear(result);
-
-	return resultOK;
-}
-
-
-static bool
-SendDtmGetSnapshot(PGconn *connection)
-{
-	PGresult *result = NULL;
-	bool resultOK = true;
-
-	result = PQexec(connection, "SELECT dtm_get_snapshot()");
 	if (PQresultStatus(result) != PGRES_TUPLES_OK)
 	{
 		ReportRemoteError(connection, result);
@@ -2182,6 +2187,9 @@ FinishDtmTransaction(XactEvent event, void *arg)
 		return;
 	}
 
+	if (!connectionsWithDtmTransactions)
+		return;
+
 	foreach(connectionCell, connectionsWithDtmTransactions)
 	{
 		PGconn *connection = (PGconn *) lfirst(connectionCell);
@@ -2192,6 +2200,7 @@ FinishDtmTransaction(XactEvent event, void *arg)
 			PurgeConnection(connection);
 			continue;
 		}
+		TRACE("shard_xtm: conn#%p: Sent COMMIT to %s:%s\n", connection, PQhost(connection), PQport(connection));
 	}
 
 	foreach(connectionCell, connectionsWithDtmTransactions)
@@ -2209,8 +2218,15 @@ FinishDtmTransaction(XactEvent event, void *arg)
 		PQgetResult(connection);
 	}
 
-	UnregisterXactCallback(FinishDtmTransaction, NULL);
+	/*
+	 * Calling unregister inside callback itself leads to segfault when
+	 * there are several callbacks on the same event.
+	 */
+	/*
+	 * UnregisterXactCallback(FinishDtmTransaction, NULL);
+	 */
 	connectionsWithDtmTransactions = NIL;
+	currentGlobalTransactionId = 0;
 }
 
 
