@@ -46,6 +46,7 @@
 #include "utils/lsyscache.h"
 #include "utils/palloc.h"
 #include "utils/rel.h"
+
 /* PostgreSQL 9.5 moved some builtins.h functions to this new file */
 #if (PG_VERSION_NUM >= 90500 && PG_VERSION_NUM < 90600)
 #include "utils/ruleutils.h"
