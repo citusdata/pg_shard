@@ -141,6 +141,17 @@ copy_to_distributed_table -CH -d '|' -n NULL input.csv users
 
 Call the script with the `-h` for more usage information.
 
+### Increasing INSERT throughput
+
+To maximize INSERT throughput, you should run statements in parallel. This helps utilizing multiple CPU cores. For instance, if you are loading data from two files you could run them in parallel such as the following:
+
+```
+copy_to_distributed_table -CH -d '|' -n NULL input_1.csv users &
+copy_to_distributed_table -CH -d '|' -n NULL input_2.csv users &
+```
+
+Similarly, if you run statements on the PostgreSQL server via psql, you should open multiple connections and run the INSERT statements concurrently.
+
 ### Repairing Shards
 
 If for whatever reason a shard placement fails to be updated during a modification command, it will be marked as inactive. The `master_copy_shard_placement` function can be called to repair an inactive shard placement using data from a healthy placement. In order for this function to operate, `pg_shard` must be installed on _all_ worker nodes and not just the master node. The shard will be protected from any concurrent modifications during the repair.
