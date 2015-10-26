@@ -143,12 +143,16 @@ Call the script with the `-h` for more usage information.
 
 ### Increasing INSERT throughput
 
-To maximize INSERT throughput, you should run statements in parallel. This helps utilizing multiple CPU cores. For instance, if you are loading data from two files you could run them in parallel such as the following:
+To maximize INSERT throughput, you should run statements in parallel. This helps utilizing multiple CPU cores. For instance, if you want to load the contents of the `input.csv`, first split the file and then run `copy_to_distributed_table` in parallel as shown below:
 
 ```
-copy_to_distributed_table -CH -d '|' -n NULL input_1.csv users &
-copy_to_distributed_table -CH -d '|' -n NULL input_2.csv users &
+mkdir chunks
+split -n l/64 input.csv chunks/
+find chunks/ -type f | xargs -n 1 -P 64 sh -c 'echo $0 `copy_to_distributed_table -C $0 users`'
 ```
+
+Note that the above commands load the contents of the `input.csv` with 64 concurrent connections. You can optimize that number with respect to your hardware. 
+
 
 Similarly, if you run statements on the PostgreSQL server via psql, you should open multiple connections and run the INSERT statements concurrently.
 
