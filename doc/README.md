@@ -153,9 +153,9 @@ split -nl/64 input.csv chunks/
 ls chunks | xargs -t -n1 -P64 -I% copy_to_distributed_table -C % users
 ```
 
-Note that the above example loads the contents of `input.csv` using 64 processes. This number may need tuning depending on hardware and cluster size.
+Note that the above example loads the contents of `input.csv` using 64 processes. The optimal value will vary depending on factors such as cluster size and hardware.
 
-This advice applies similarly to application design: if you have workers loading data into a `pg_shard` cluster, experiment to determine the number of workers that maximize cluster utilization.
+This advice applies similarly to application design: if you have workers loading data into a `pg_shard` cluster, experiment to determine the number of workers that maximizes cluster utilization.
 
 ### Repairing Shards
 
