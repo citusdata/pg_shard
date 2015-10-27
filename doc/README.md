@@ -141,6 +141,22 @@ copy_to_distributed_table -CH -d '|' -n NULL input.csv users
 
 Call the script with the `-h` for more usage information.
 
+#### Maximizing Throughput
+
+Because `INSERT` commands must wait for a response before returning, loading rows through a single connection can never fully exploit the write capacity of your `pg_shard` cluster. To achieve the highest insert rates, it is necessary to load data in a concurrent fashion. The difference, even in a small cluster, will be significant.
+
+For example, we could split an input file (`input.csv`) into chunks and load each chunk using a separate instance of `copy_to_distributed_table` (requires GNU `split`):
+
+```
+mkdir chunks
+split -nl/64 input.csv chunks/
+ls chunks | xargs -t -n1 -P64 -I% copy_to_distributed_table -C % users
+```
+
+Note that the above example loads the contents of `input.csv` using 64 processes. The optimal value will vary depending on factors such as cluster size and hardware.
+
+This advice applies similarly to application design: if you have workers loading data into a `pg_shard` cluster, experiment to determine the number of workers that maximizes cluster utilization.
+
 ### Repairing Shards
 
 If for whatever reason a shard placement fails to be updated during a modification command, it will be marked as inactive. The `master_copy_shard_placement` function can be called to repair an inactive shard placement using data from a healthy placement. In order for this function to operate, `pg_shard` must be installed on _all_ worker nodes and not just the master node. The shard will be protected from any concurrent modifications during the repair.
