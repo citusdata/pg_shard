@@ -58,6 +58,7 @@ SELECT create_insert_proxy_for_table('insert_target', 'rows_inserted') AS proxy_
 INSERT INTO pg_temp.:"proxy_tablename" (id) VALUES (1);
 
 -- test copy with bad row in middle
+\set VERBOSITY terse
 COPY pg_temp.:"proxy_tablename" FROM stdin;
 2	dolor sit amet
 3	consectetur adipiscing elit
@@ -67,6 +68,7 @@ COPY pg_temp.:"proxy_tablename" FROM stdin;
 7	\N
 8	magna aliqua
 \.
+\set VERBOSITY default
 
 -- verify rows were copied to distributed table
 SELECT * FROM insert_target ORDER BY id ASC;

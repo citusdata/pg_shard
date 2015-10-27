@@ -62,11 +62,10 @@ SELECT create_insert_proxy_for_table('insert_target', 'rows_inserted') AS proxy_
 -- insert to proxy, again relying on default value
 INSERT INTO pg_temp.:"proxy_tablename" (id) VALUES (1);
 -- test copy with bad row in middle
+\set VERBOSITY terse
 COPY pg_temp.:"proxy_tablename" FROM stdin;
 ERROR:  could not modify any active placements
-CONTEXT:  SQL statement "INSERT INTO public.insert_target (id,data) VALUES ($1,$2)"
-PL/pgSQL function pg_temp_2.copy_to_insert() line 3 at EXECUTE statement
-COPY insert_target_insert_proxy, line 6: "7	\N"
+\set VERBOSITY default
 -- verify rows were copied to distributed table
 SELECT * FROM insert_target ORDER BY id ASC;
  id |            data             
