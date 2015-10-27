@@ -141,20 +141,21 @@ copy_to_distributed_table -CH -d '|' -n NULL input.csv users
 
 Call the script with the `-h` for more usage information.
 
-### Increasing INSERT throughput
+#### Maximizing Throughput
 
-To maximize INSERT throughput, you should run statements in parallel. This helps utilizing multiple CPU cores. For instance, if you want to load the contents of the `input.csv`, first split the file and then run `copy_to_distributed_table` in parallel as shown below:
+Because `INSERT` commands must wait for a response before returning, loading rows through a single connection can never fully exploit the write capacity of your `pg_shard` cluster. To achieve the highest insert rates, it is necessary to load data in a concurrent fashion. The difference, even in a small cluster, will be significant.
+
+For example, we could split an input file (`input.csv`) into chunks and load each chunk using a separate instance of `copy_to_distributed_table` (requires GNU `split`):
 
 ```
 mkdir chunks
-split -n l/64 input.csv chunks/
-find chunks/ -type f | xargs -n 1 -P 64 sh -c 'echo $0 `copy_to_distributed_table -C $0 users`'
+split -nl/64 input.csv chunks/
+ls chunks | xargs -t -n1 -P64 -I% copy_to_distributed_table -C % users
 ```
 
-Note that the above commands load the contents of the `input.csv` with 64 concurrent connections. You can optimize that number with respect to your hardware. 
+Note that the above example loads the contents of `input.csv` using 64 processes. This number may need tuning depending on hardware and cluster size.
 
-
-Similarly, if you run statements on the PostgreSQL server via psql, you should open multiple connections and run the INSERT statements concurrently.
+This advice applies similarly to application design: if you have workers loading data into a `pg_shard` cluster, experiment to determine the number of workers that maximize cluster utilization.
 
 ### Repairing Shards
 
