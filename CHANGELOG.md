@@ -1,4 +1,4 @@
-### pg_shard v1.2.3 (Unreleased) ###
+### pg_shard v1.2.3 (October 28, 2015) ###
 
 * Addresses a performance regression by caching metadata plans
 
