@@ -1,3 +1,7 @@
+### pg_shard v1.2.3 (October 28, 2015) ###
+
+* Addresses a performance regression by caching metadata plans
+
 ### pg_shard v1.2.2 (August 28, 2015) ###
 
 * Changes default planner when running within CitusDB
