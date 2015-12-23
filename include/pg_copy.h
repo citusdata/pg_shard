@@ -12,7 +12,6 @@
 #ifndef PG_COPY_H
 #define PG_COPY_H
 
-extern int PgCopyTMGR;
 extern bool PgShardCopy(CopyStmt *copyStatement, char const* query);
 
 #endif

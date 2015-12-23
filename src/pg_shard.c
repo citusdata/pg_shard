@@ -19,6 +19,7 @@
 #include "plpgsql.h"
 
 #include "pg_shard.h"
+#include "pg_tmgr.h"
 #include "pg_copy.h"
 #include "connection.h"
 #include "create_shards.h"
@@ -166,6 +167,12 @@ static ExecutorFinish_hook_type PreviousExecutorFinishHook = NULL;
 static ExecutorEnd_hook_type PreviousExecutorEndHook = NULL;
 static ProcessUtility_hook_type PreviousProcessUtilityHook = NULL;
 
+struct config_enum_entry const PgShardTransManagerEnum[] = 
+{ 
+    { "local", 0, false },
+    { "2PC", 1, false }
+};
+                                                
 
 /*
  * _PG_init is called when the module is loaded. In this function we save the
@@ -210,11 +217,11 @@ _PG_init(void)
 							 &LogDistributedStatements, false, PGC_USERSET, 0, NULL,
 							 NULL, NULL);
 
-	DefineCustomIntVariable("pg_shard.copy_tmgr",
-                            "Transaction manager for distributed copy", 
-                            "0: no global transaction manager, 1: two-phase commit",
-                            &PgCopyTMGR, 0, 0, 1, PGC_USERSET, 0, NULL,
-                            NULL, NULL);
+	DefineCustomEnumVariable("pg_shard.copy_TransManager",
+                             "Transaction manager for distributed copy", 
+                             NULL, 
+                             &PgShardCurrTransManager, 0, PgShardTransManagerEnum, PGC_USERSET, 0, NULL,
+                             NULL, NULL);
 
 	EmitWarningsOnPlaceholders("pg_shard");
 

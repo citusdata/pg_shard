@@ -19,6 +19,7 @@
 
 #include "pg_shard.h"
 #include "pg_copy.h"
+#include "pg_tmgr.h"
 #include "connection.h"
 #include "create_shards.h"
 #include "distribution_metadata.h"
@@ -80,96 +81,6 @@
 #include "utils/tuplestore.h"
 #include "utils/memutils.h"
 
-typedef struct { 
-	bool (*Begin)(PGconn* conn);
-	bool (*Prepare)(PGconn* conn, char const* relationName, int64 shardId);
-	bool (*CommitPrepared)(PGconn* conn, char const* relationName, int64 shardId);
-	bool (*RollbackPrepared)(PGconn* conn, char const* relationName, int64 shardId);
-	bool (*Rollback)(PGconn* conn);
-} PgCopyTransactionManager;
-
-int PgCopyTMGR;
-
-static bool PgShardExecute(PGconn* conn, ExecStatusType expectedResult, char const* sql, ...)
-	__attribute__((format(PG_PRINTF_ATTRIBUTE, 3, 4)));
-
-static bool PgCopyBeginStub(PGconn* conn);
-static bool PgCopyPrepareStub(PGconn* conn, char const* relationName, int64 shardId);
-static bool PgCopyCommitPreparedStub(PGconn* conn, char const* relationName, int64 shardId);
-static bool PgCopyRollbackPreparedStub(PGconn* conn, char const* relationName, int64 shardId);
-static bool PgCopyRollbackStub(PGconn* conn);
-
-static bool PgCopyBegin2PC(PGconn* conn);
-static bool PgCopyPrepare2PC(PGconn* conn, char const* relationName, int64 shardId);
-static bool PgCopyCommitPrepared2PC(PGconn* conn, char const* relationName, int64 shardId);
-static bool PgCopyRollbackPrepared2PC(PGconn* conn, char const* relationName, int64 shardId);
-static bool PgCopyRollback2PC(PGconn* conn);
-
-
-static PgCopyTransactionManager PgCopyTmgrImpl[] = 
-{
-	{ PgCopyBeginStub, PgCopyPrepareStub, PgCopyCommitPreparedStub, PgCopyRollbackPreparedStub, PgCopyRollbackStub },
-	{ PgCopyBegin2PC, PgCopyPrepare2PC, PgCopyCommitPrepared2PC, PgCopyRollbackPrepared2PC, PgCopyRollback2PC }
-};
-
-/* 
- * Transaction manager stub
- */
-static bool PgCopyBeginStub(PGconn* conn) 
-{
-	return true;
-}
-
-static bool PgCopyPrepareStub(PGconn* conn, char const* relationName, int64 shardId)
-{
-	return true;
-}
-
-static bool PgCopyCommitPreparedStub(PGconn* conn, char const* relationName, int64 shardId)
-{
-	return true;
-}
-
-static bool PgCopyRollbackPreparedStub(PGconn* conn, char const* relationName, int64 shardId)
-{
-	return true;
-}
-
-static bool PgCopyRollbackStub(PGconn* conn)
-{
-	return true;
-}
-
-/* 
- * Two-phase commit 
- */ 
-static bool PgCopyBegin2PC(PGconn* conn)
-{
-	return PgShardExecute(conn, PGRES_COMMAND_OK, "BEGIN TRANSACTION");
-}
-
-static bool PgCopyPrepare2PC(PGconn* conn, char const* relationName, int64 shardId)
-{
-	return PgShardExecute(conn, PGRES_COMMAND_OK, "PREPARE TRANSACTION 'copy_%s_%d'", relationName, (int)shardId);
-}
-							
-static bool PgCopyCommitPrepared2PC(PGconn* conn, char const* relationName, int64 shardId)
-{
-	return PgShardExecute(conn, PGRES_COMMAND_OK, "COMMIT PREPARED 'copy_%s_%d'", relationName, (int)shardId); 
-}
-
-static bool PgCopyRollbackPrepared2PC(PGconn* conn, char const* relationName, int64 shardId)
-{
-	return PgShardExecute(conn, PGRES_COMMAND_OK, "ROLLBACK PREPARED 'copy_%s_%d'", relationName, (int)shardId); 
-}
-
-static bool PgCopyRollback2PC(PGconn* conn)
-{
-	return PgShardExecute(conn, PGRES_COMMAND_OK, "ROLLBACK");
-}
-
-
- 
 /*
  * TODO: this fragment was copied from src/backend/commands/copy.c 
  * It is needed only for CopyGetLineBuf function.
@@ -308,7 +219,6 @@ static StringInfo CopyGetLineBuf(CopyStateData *cs)
 
 #define MAX_SHARDS 1001
 #define MAX_REPLICATION_FACTOR 8 /* should be less or equal than 32 */
-#define MAX_STMT_LEN 1024
 
 typedef struct {
 	int64 shardId;
@@ -341,28 +251,6 @@ CreateShard2ConnectionHash()
 }
 
 /*
- * Execute statement with specified parameters and check its result
- */
-static bool PgShardExecute(PGconn* conn, ExecStatusType expectedResult, char const* sql, ...)
-{
-	PGresult *result;
-	bool ret = true;
-	va_list args;
-	char buf[MAX_STMT_LEN];
-
-	va_start(args, sql);
-	vsnprintf(buf, sizeof(buf), sql, args);
-	result = PQexec(conn, buf);
-
-	if (PQresultStatus(result) != expectedResult)
-	{
-		ReportRemoteError(conn, result);
-		ret = false;
-	}
-	return ret;
-}
-
-/*
  * Handle copy to/from distributed table
  */
 bool PgShardCopy(CopyStmt *copyStatement, char const* query)
@@ -374,7 +262,7 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 	int relationSuffixPos;
 	char *relationName;
 	char const *lowerQuery, *relationOcc;
-	PgCopyTransactionManager* tmgr = &PgCopyTmgrImpl[PgCopyTMGR];
+	PgCopyTransactionManager const* tmgr = &PgShardTransManagerImpl[PgShardCurrTransManager];
 
 	if (relation != NULL)
 	{
