@@ -238,7 +238,7 @@ static uint32 shard_id_hash_fn(const void *key, Size keysize)
  * we need to establish multiple connections with each nodes: one connection per shard
  */
 static HTAB *
-CreateShard2ConnectionHash()
+CreateShardToConnectionHash()
 {
 	HASHCTL info;
 
@@ -247,7 +247,7 @@ CreateShard2ConnectionHash()
 	info.entrysize = sizeof(CopyConnection);
 	info.hash = shard_id_hash_fn;
 
-	return hash_create("shard2conn", MAX_SHARDS, &info, HASH_ELEM | HASH_FUNCTION);
+	return hash_create("shardToConn", MAX_SHARDS, &info, HASH_ELEM | HASH_FUNCTION);
 }
 
 /*
@@ -256,241 +256,221 @@ CreateShard2ConnectionHash()
 bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 {		 
 	RangeVar *relation = copyStatement->relation;
-	ListCell *shardIntervalCell;
-	ListCell *taskPlacementCell;
-	List *shardIntervalList;
-	int relationSuffixPos;
-	char *relationName;
-	char const *lowerQuery, *relationOcc;
+	ListCell *shardIntervalCell = NULL;
+	ListCell *taskPlacementCell = NULL;
+	List *shardIntervalList = NULL;
+	int relationSuffixPos = 0;
+	char *relationName = NULL;
+	char const *lowerQuery = NULL, *relationOcc = NULL;
 	PgCopyTransactionManager const* tmgr = &PgShardTransManagerImpl[PgShardCurrTransManager];
+	bool failOK = true;
+	Oid tableId = 0;
 
-	if (relation != NULL)
+	if (relation == NULL)
 	{
-		bool failOK = true;
-		Oid tableId = RangeVarGetRelid(relation, NoLock, failOK);
-		bool isDistributedTable = false;
-
-		isDistributedTable = IsDistributedTable(tableId);
-		if (isDistributedTable)
+		return false;
+	}
+	tableId = RangeVarGetRelid(relation, NoLock, failOK);
+	if (IsDistributedTable(tableId))
+	{
+		HTAB* shardToConn = NULL;
+		MemoryContext tupleContext = NULL;
+		CopyState copyState = NULL;
+		bool nextRowFound = true;
+		TupleDesc tupleDescriptor = NULL;
+		uint32 columnCount = 0;
+		Datum *columnValues = NULL;
+		bool *columnNulls = NULL;
+		Var* partitionColumn = NULL;
+		Oid columnOid = 0;
+		OpExpr *equalityExpr = NULL;
+		HASH_SEQ_STATUS hashCursor;
+		List *whereClauseList = NULL;
+		List *prunedList = NULL;
+		Node *rightOp = NULL;
+		Const *rightConst = NULL;
+		int64 failedShard = -1;
+		Relation rel = NULL;
+		StringInfo lineBuf;
+		CopyConnection* copyConn = NULL;
+		int i = 0;
+		
+		relationName = get_rel_name(tableId);
+		lowerQuery = lowerstr(query);
+		relationOcc =  strstr(lowerQuery, lowerstr(relationName));
+		Assert(relationOcc != NULL);
+		relationSuffixPos = (int)((relationOcc - lowerQuery) + strlen(relationName));			 
+		
+		shardIntervalList = LookupShardIntervalList(tableId);
+		if (shardIntervalList == NIL)
 		{
-			HTAB* shard2conn;
-			MemoryContext tupleContext;
-			CopyState copyState;
-			bool nextRowFound = true;
-			TupleDesc tupleDescriptor = NULL;
-			uint32 columnCount = 0;
-			Datum *columnValues = NULL;
-			bool *columnNulls = NULL;
-			Var* partitionColumn;
-			Oid columnOid;
-			OpExpr *equalityExpr;
-			HASH_SEQ_STATUS hashCursor;
-			List *whereClauseList;
-			List *prunedList;
-			Node *rightOp;
-			Const *rightConst;
-			int64 failedShard = -1;
-			Relation rel;
-			StringInfo lineBuf;
-			CopyConnection* copyConn;
-			int i;
+			ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+							errmsg("could not find any shards for query"),
+							errdetail("No shards exist for distributed table \"%s\".",
+									  relationName),
+							errhint("Run master_create_worker_shards to create shards "
+									"and try again.")));
+		}
+		if (!copyStatement->is_from) { /* Construct query selecting data from this relation */
+			uint64 processedCount;
+			char const* qualifiedName = quote_qualified_identifier(relation->schemaname,
+																   relation->relname);
+			StringInfo newQuerySubstring = makeStringInfo();
+			List *queryList = NIL;
+			appendStringInfo(newQuerySubstring, "select * from %s", qualifiedName);
+			queryList = raw_parser(newQuerySubstring->data);
+			copyStatement->query = linitial(queryList);
+			copyStatement->relation = NULL;
+			/* Collecting data from shards will be done by select handler */
+			DoCopy(copyStatement, query, &processedCount);
+			return true;
+		}
 
-			relationName = get_rel_name(tableId);
-			lowerQuery = lowerstr(query);
-			relationOcc =  strstr(lowerQuery, lowerstr(relationName));
-			Assert(relationOcc != NULL);
-			relationSuffixPos = (int)((relationOcc - lowerQuery) + strlen(relationName));			 
+		/* construct pseudo predicate specifying condition for partition key */
+		partitionColumn = PartitionColumn(tableId);
+		columnOid = partitionColumn->vartype;
+		equalityExpr = MakeOpExpression(partitionColumn, BTEqualStrategyNumber);
+		rightOp = get_rightop((Expr *) equalityExpr);				 
+		Assert(IsA(rightOp, Const));
+		rightConst = (Const *) rightOp;
+		rightConst->constvalue = 0;
+		rightConst->constisnull = false;
+		rightConst->constbyval = get_typbyval(columnOid);
+		whereClauseList = list_make1(equalityExpr);
 
-			shardIntervalList = LookupShardIntervalList(tableId);
-			if (shardIntervalList == NIL)
-			{
-				ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-								errmsg("could not find any shards for query"),
-								errdetail("No shards exist for distributed table \"%s\".",
-										  relationName),
-								errhint("Run master_create_worker_shards to create shards "
-										"and try again.")));
-			}
-			if (!copyStatement->is_from) { /* Construct query selecting data from this relation */
-				uint64 processedCount;
-				char const* qualifiedName = quote_qualified_identifier(relation->schemaname,
-																	   relation->relname);
-				StringInfo newQuerySubstring = makeStringInfo();
-				List *queryList = NIL;
-				appendStringInfo(newQuerySubstring, "select * from %s", qualifiedName);
-				queryList = raw_parser(newQuerySubstring->data);
-				copyStatement->query = linitial(queryList);
-				copyStatement->relation = NULL;
-				/* Collecting data from shards will be done by select handler */
-				DoCopy(copyStatement, query, &processedCount);
-				return true;
-			}
+		/* allocate column values and nulls arrays */
+		rel = heap_open(tableId,  AccessShareLock);
+		tupleDescriptor = RelationGetDescr(rel);
+		columnCount = tupleDescriptor->natts;
+		columnValues = palloc0(columnCount * sizeof(Datum));
+		columnNulls = palloc0(columnCount * sizeof(bool));
 
-			/* construct pseudo predicate specifying condition for partition key */
-			partitionColumn = PartitionColumn(tableId);
-			columnOid = partitionColumn->vartype;
-			equalityExpr = MakeOpExpression(partitionColumn, BTEqualStrategyNumber);
-			rightOp = get_rightop((Expr *) equalityExpr);				 
-			Assert(IsA(rightOp, Const));
-			rightConst = (Const *) rightOp;
-			rightConst->constvalue = 0;
-			rightConst->constisnull = false;
-			rightConst->constbyval = get_typbyval(columnOid);
-			whereClauseList = list_make1(equalityExpr);
-
-			/* allocate column values and nulls arrays */
-			rel = heap_open(tableId, ExclusiveLock);
-			tupleDescriptor = RelationGetDescr(rel);
-			columnCount = tupleDescriptor->natts;
-			columnValues = palloc0(columnCount * sizeof(Datum));
-			columnNulls = palloc0(columnCount * sizeof(bool));
-
-			/*
-			 * We create a new memory context called tuple context, and read and write
-			 * each row's values within this memory context. After each read and write,
-			 * we reset the memory context. That way, we immediately release memory
-			 * allocated for each row, and don't bloat memory usage with large input
-			 * files.
-			 */
-			tupleContext = AllocSetContextCreate(CurrentMemoryContext,
-												 "COPY Row Memory Context",
-												 ALLOCSET_DEFAULT_MINSIZE,
-												 ALLOCSET_DEFAULT_INITSIZE,
-												 ALLOCSET_DEFAULT_MAXSIZE);
+		/*
+		 * We create a new memory context called tuple context, and read and write
+		 * each row's values within this memory context. After each read and write,
+		 * we reset the memory context. That way, we immediately release memory
+		 * allocated for each row, and don't bloat memory usage with large input
+		 * files.
+		 */
+		tupleContext = AllocSetContextCreate(CurrentMemoryContext,
+											 "COPY Row Memory Context",
+											 ALLOCSET_DEFAULT_MINSIZE,
+											 ALLOCSET_DEFAULT_INITSIZE,
+											 ALLOCSET_DEFAULT_MAXSIZE);
 				
-			/* 
-			 * Construct hash table used for shardId->Connection mapping.
-			 * We can not use connection cache from connection.c used by GteConnection because
-			 * we need to establish multiple connections with each nodes: one connection per shard
-			 */
-			shard2conn = CreateShard2ConnectionHash();
+		/* 
+		 * Construct hash table used for shardId->Connection mapping.
+		 * We can not use connection cache from connection.c used by GteConnection because
+		 * we need to establish multiple connections with each nodes: one connection per shard
+		 */
+		shardToConn = CreateShardToConnectionHash();
 
-			/* init state to read from COPY data source */
-			copyState = BeginCopyFrom(rel, copyStatement->filename,
-									  copyStatement->is_program,
-									  copyStatement->attlist,
-									  copyStatement->options);
+		/* init state to read from COPY data source */
+		copyState = BeginCopyFrom(rel, copyStatement->filename,
+								  copyStatement->is_program,
+								  copyStatement->attlist,
+								  copyStatement->options);
 				
-			/* TODO: handle binary mode */
-			if (copyState->binary) { 
-				elog(ERROR, "Copy in binary mode is not currently supported");
-			}
+		/* TODO: handle binary mode */
+		if (copyState->binary) { 
+			elog(ERROR, "Copy in binary mode is not currently supported");
+		}
 
-			PG_TRY();
+		PG_TRY();
+		{
+			while (nextRowFound)
 			{
-				while (nextRowFound)
-				{
-					MemoryContext oldContext = MemoryContextSwitchTo(tupleContext);
-					nextRowFound = NextCopyFrom(copyState, NULL, columnValues, columnNulls, NULL);
-					MemoryContextSwitchTo(oldContext);
+				MemoryContext oldContext = MemoryContextSwitchTo(tupleContext);
+				nextRowFound = NextCopyFrom(copyState, NULL, columnValues, columnNulls, NULL);
+				MemoryContextSwitchTo(oldContext);
 					
-					/* write the row to the shard */
-					if (nextRowFound)
-					{		
-						if (columnNulls[partitionColumn->varattno]) { 
-							ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-											errmsg("cannot copy row with NULL value "
-												   "in partition column")));
-						} else { 
-							Datum partitionValue = columnValues[partitionColumn->varattno];
-							rightConst->constvalue = partitionValue;
-							prunedList = PruneShardList(tableId, whereClauseList, shardIntervalList);
+				/* write the row to the shard */
+				if (nextRowFound)
+				{	
+					if (columnNulls[partitionColumn->varattno]) 
+					{ 
+						ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+										errmsg("cannot copy row with NULL value "
+											   "in partition column")));
+					} 
+					rightConst->constvalue = columnValues[partitionColumn->varattno];
+					prunedList = PruneShardList(tableId, whereClauseList, shardIntervalList);
+					
+					foreach(shardIntervalCell, prunedList)
+					{
+						ShardInterval *shardInterval = (ShardInterval *) lfirst(shardIntervalCell);
+						int64 shardId = shardInterval->id;
+						bool found = false;
+						
+						copyConn = (CopyConnection*)hash_search(shardToConn, &shardInterval->id, HASH_ENTER, &found);
+						if (!found) { 
+							List *finalizedPlacementList = NULL;
+
+							copyConn->nReplicas = 0;
+							copyConn->preparedMask = 0;
+							/* grab shared metadata lock to stop concurrent placement additions */
+							LockShardDistributionMetadata(shardId, ShareLock);
 							
-							foreach(shardIntervalCell, prunedList)
+							/* now safe to populate placement list */
+							finalizedPlacementList = LoadFinalizedShardPlacementList(shardId);
+							foreach(taskPlacementCell, finalizedPlacementList)
 							{
-								ShardInterval *shardInterval = (ShardInterval *) lfirst(shardIntervalCell);
-								int64 shardId = shardInterval->id;
-								bool found;
-								
-								copyConn = (CopyConnection*)hash_search(shard2conn, &shardInterval->id, HASH_ENTER, &found);
-								if (!found) { 
-									List *finalizedPlacementList;
-									copyConn->nReplicas = 0;
-									copyConn->preparedMask = 0;
-									/* grab shared metadata lock to stop concurrent placement additions */
-									LockShardDistributionMetadata(shardId, ShareLock);
-									
-									/* now safe to populate placement list */
-									finalizedPlacementList = LoadFinalizedShardPlacementList(shardId);
-									foreach(taskPlacementCell, finalizedPlacementList)
+								ShardPlacement *taskPlacement = (ShardPlacement *) lfirst(taskPlacementCell);
+								char *nodeName = taskPlacement->nodeName;
+								char nodePort[16];
+								PGconn* conn = NULL;
+								sprintf(nodePort, "%d", taskPlacement->nodePort);	 
+								conn = ConnectToNode(nodeName, nodePort);
+								if (conn != NULL)										 
+								{
+									copyConn->conn[copyConn->nReplicas++] = conn;
+									/*
+									 * New connection: start transaction with copy command on it.
+									 * Append shard id to table name.
+									 */
+									if (!tmgr->Begin(conn) ||
+										!PgShardExecute(conn, PGRES_COPY_IN, "%.*s_%ld%s", relationSuffixPos, query,
+														(long)shardId, query + relationSuffixPos))
 									{
-										ShardPlacement *taskPlacement = (ShardPlacement *) lfirst(taskPlacementCell);
-										char *nodeName = taskPlacement->nodeName;
-										char nodePort[16];
-										PGconn* conn;
-										sprintf(nodePort, "%d", taskPlacement->nodePort);	 
-										conn = ConnectToNode(nodeName, nodePort);
-										if (conn != NULL)										 
-										{
-											copyConn->conn[copyConn->nReplicas++] = conn;
-											/*
-											 * New connection: start transaction with copy command on it.
-											 * Append shard id to table name.
-											 */
-											if (!tmgr->Begin(conn) ||
-												!PgShardExecute(conn, PGRES_COPY_IN, "%.*s_%ld%s", relationSuffixPos, query,
-																(long)shardId, query + relationSuffixPos))
-											{
-												continue;
-											}
-										} else { 
-											elog(ERROR, "Failed to connect to node %s:%s", nodeName, nodePort);
-										}
+										continue;
 									}
-								}
-								/* TODO: handle binary format */
-								lineBuf = CopyGetLineBuf(copyState);
-								lineBuf->data[lineBuf->len++] = '\n'; /* there was already new line in the buffer, but it was truncated: no need to heck available space */
-								/* Replicate row to all shards */
-								for (i = 0; i < copyConn->nReplicas; i++) { 
-									PQputCopyData(copyConn->conn[i], lineBuf->data, lineBuf->len);
+								} else { 
+									elog(ERROR, "Failed to connect to node %s:%s", nodeName, nodePort);
 								}
 							}
 						}
-					}
-					MemoryContextReset(tupleContext);
-				}
-				/* Perform two phase commit in replicas */
-				hash_seq_init(&hashCursor, shard2conn);
-				while (failedShard < 0 && (copyConn = (CopyConnection*)hash_seq_search(&hashCursor)) != NULL) {
-					for (i = 0; i < copyConn->nReplicas; i++) {						
-						PQputCopyEnd(copyConn->conn[i], NULL);
-						if (tmgr->Prepare(copyConn->conn[i], relationName, copyConn->shardId)) { 
-							copyConn->preparedMask |= 1 << i;
-						} else { 
-							failedShard = copyConn->shardId;
-							break;
+						/* TODO: handle binary format */
+						lineBuf = CopyGetLineBuf(copyState);
+						lineBuf->data[lineBuf->len++] = '\n'; /* there was already new line in the buffer, but it was truncated: no need to heck available space */
+						/* Replicate row to all shards */
+						for (i = 0; i < copyConn->nReplicas; i++) { 
+							PQputCopyData(copyConn->conn[i], lineBuf->data, lineBuf->len);
 						}
 					}
 				}
+				MemoryContextReset(tupleContext);
 			}
-			PG_CATCH(); /* do recovery */
-			{
-				EndCopyFrom(copyState);
-				heap_close(rel, ExclusiveLock);
-
-				/* Rollback transactions */
-				hash_seq_init(&hashCursor, shard2conn);
-				while ((copyConn = (CopyConnection*)hash_seq_search(&hashCursor)) != NULL) {
-					for (i = 0; i < copyConn->nReplicas; i++) {						
-						if (copyConn->preparedMask & (1 << i)) { 
-							tmgr->RollbackPrepared(copyConn->conn[i], relationName, copyConn->shardId);
-						} else { 
-							PQputCopyEnd(copyConn->conn[i], "Aborted because of failure on some shard");
-							tmgr->Rollback(copyConn->conn[i]);
-						}
-						PQfinish(copyConn->conn[i]);
+			/* Perform two phase commit in replicas */
+			hash_seq_init(&hashCursor, shardToConn);
+			while (failedShard < 0 && (copyConn = (CopyConnection*)hash_seq_search(&hashCursor)) != NULL) {
+				for (i = 0; i < copyConn->nReplicas; i++) {						
+					PQputCopyEnd(copyConn->conn[i], NULL);
+					if (tmgr->Prepare(copyConn->conn[i], relationName, copyConn->shardId)) { 
+						copyConn->preparedMask |= 1 << i;
+					} else { 
+						failedShard = copyConn->shardId;
+						break;
 					}
 				}
-				PG_RE_THROW();
 			}
-			PG_END_TRY();
-
+		}
+		PG_CATCH(); /* do recovery */
+		{
 			EndCopyFrom(copyState);
-			heap_close(rel, ExclusiveLock);
+			heap_close(rel, AccessShareLock);
 
-			/* Complete two phase commit */
-			hash_seq_init(&hashCursor, shard2conn);
+			/* Rollback transactions */
+			hash_seq_init(&hashCursor, shardToConn);
 			while ((copyConn = (CopyConnection*)hash_seq_search(&hashCursor)) != NULL) {
 				for (i = 0; i < copyConn->nReplicas; i++) {						
 					if (copyConn->preparedMask & (1 << i)) { 
@@ -502,11 +482,30 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 					PQfinish(copyConn->conn[i]);
 				}
 			}
-			if (failedShard >= 0) { 
-				elog(ERROR, "COPY failed for shard %ld", (long)failedShard);
-			}
-			return true;
+			PG_RE_THROW();
 		}
+		PG_END_TRY();
+
+		EndCopyFrom(copyState);
+		heap_close(rel, AccessShareLock);
+
+		/* Complete two phase commit */
+		hash_seq_init(&hashCursor, shardToConn);
+		while ((copyConn = (CopyConnection*)hash_seq_search(&hashCursor)) != NULL) {
+			for (i = 0; i < copyConn->nReplicas; i++) {						
+				if (copyConn->preparedMask & (1 << i)) { 
+					tmgr->CommitPrepared(copyConn->conn[i], relationName, copyConn->shardId);
+				} else { 
+					PQputCopyEnd(copyConn->conn[i], "Aborted because of failure on some shard");
+					tmgr->Rollback(copyConn->conn[i]);
+				}
+				PQfinish(copyConn->conn[i]);
+			}
+		}
+		if (failedShard >= 0) { 
+			elog(ERROR, "COPY failed for shard %ld", (long)failedShard);
+		}
+		return true;
 	}
 	return false;
 }
