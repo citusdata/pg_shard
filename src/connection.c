@@ -39,7 +39,6 @@ static HTAB *NodeConnectionHash = NULL;
 
 /* local function forward declarations */
 static HTAB * CreateNodeConnectionHash(void);
-static PGconn * ConnectToNode(char *nodeName, char *nodePort);
 static char * ConnectionGetOptionValue(PGconn *connection, char *optionKeyword);
 
 
@@ -264,7 +263,7 @@ CreateNodeConnectionHash(void)
  * We attempt to connect up to MAX_CONNECT_ATTEMPT times. After that we give up
  * and return NULL.
  */
-static PGconn *
+PGconn *
 ConnectToNode(char *nodeName, char *nodePort)
 {
 	PGconn *connection = NULL;

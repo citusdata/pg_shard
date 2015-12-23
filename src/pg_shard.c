@@ -19,6 +19,7 @@
 #include "plpgsql.h"
 
 #include "pg_shard.h"
+#include "pg_copy.h"
 #include "connection.h"
 #include "create_shards.h"
 #include "distribution_metadata.h"
@@ -208,6 +209,12 @@ _PG_init(void)
 							 "Logs each statement used in a distributed plan", NULL,
 							 &LogDistributedStatements, false, PGC_USERSET, 0, NULL,
 							 NULL, NULL);
+
+	DefineCustomIntVariable("pg_shard.copy_tmgr",
+                            "Transaction manager for distributed copy", 
+                            "0: no global transaction manager, 1: two-phase commit",
+                            &PgCopyTMGR, 0, 0, 1, PGC_USERSET, 0, NULL,
+                            NULL, NULL);
 
 	EmitWarningsOnPlaceholders("pg_shard");
 
@@ -2104,50 +2111,8 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 	}
 	else if (statementType == T_CopyStmt)
 	{
-		CopyStmt *copyStatement = (CopyStmt *) parsetree;
-		RangeVar *relation = copyStatement->relation;
-		Node *rawQuery = copyObject(copyStatement->query);
-
-		if (relation != NULL)
-		{
-			bool failOK = true;
-			Oid tableId = RangeVarGetRelid(relation, NoLock, failOK);
-			bool isDistributedTable = false;
-
-			Assert(rawQuery == NULL);
-
-			isDistributedTable = IsDistributedTable(tableId);
-			if (isDistributedTable)
-			{
-				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("COPY commands on distributed tables "
-									   "are unsupported")));
-			}
-		}
-		else if (rawQuery != NULL)
-		{
-			Query *parsedQuery = NULL;
-			PlannerType plannerType = PLANNER_INVALID_FIRST;
-			List *queryList = pg_analyze_and_rewrite(rawQuery, queryString,
-													 NULL, 0);
-
-			Assert(relation == NULL);
-
-			if (list_length(queryList) != 1)
-			{
-				ereport(ERROR, (errmsg("unexpected rewrite result")));
-			}
-
-			parsedQuery = (Query *) linitial(queryList);
-
-			/* determine if the query runs on a distributed table */
-			plannerType = DeterminePlannerType(parsedQuery);
-			if (plannerType == PLANNER_TYPE_PG_SHARD)
-			{
-				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("COPY commands involving distributed "
-									   "tables are unsupported")));
-			}
+		if (PgShardCopy((CopyStmt *)parsetree, queryString)) {			   
+			return;
 		}
 	}
 	else if (statementType == T_DropStmt)
