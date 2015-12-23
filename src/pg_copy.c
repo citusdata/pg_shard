@@ -552,7 +552,7 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 								}
 								/* TODO: handle binary format */
 								lineBuf = CopyGetLineBuf(copyState);
-                                lineBuf->data[lineBuf->len++] = '\n'; /* there was already new line in the buffer, but it was truncated: no need to heck available space */
+								lineBuf->data[lineBuf->len++] = '\n'; /* there was already new line in the buffer, but it was truncated: no need to heck available space */
 								/* Replicate row to all shards */
 								for (i = 0; i < copyConn->nReplicas; i++) { 
 									PQputCopyData(copyConn->conn[i], lineBuf->data, lineBuf->len);
