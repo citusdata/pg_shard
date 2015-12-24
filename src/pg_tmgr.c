@@ -8,48 +8,48 @@
 
 int PgShardCurrTransManager;
 
-static bool PgCopyBeginStub(PGconn* conn);
-static bool PgCopyPrepareStub(PGconn* conn, char const* relationName, int64 shardId);
-static bool PgCopyCommitPreparedStub(PGconn* conn, char const* relationName, int64 shardId);
-static bool PgCopyRollbackPreparedStub(PGconn* conn, char const* relationName, int64 shardId);
-static bool PgCopyRollbackStub(PGconn* conn);
+static bool PgShardBeginStub(PGconn* conn);
+static bool PgShardPrepareStub(PGconn* conn, char const* relationName, int64 shardId);
+static bool PgShardCommitPreparedStub(PGconn* conn, char const* relationName, int64 shardId);
+static bool PgShardRollbackPreparedStub(PGconn* conn, char const* relationName, int64 shardId);
+static bool PgShardRollbackStub(PGconn* conn);
 
-static bool PgCopyBegin2PC(PGconn* conn);
-static bool PgCopyPrepare2PC(PGconn* conn, char const* relationName, int64 shardId);
-static bool PgCopyCommitPrepared2PC(PGconn* conn, char const* relationName, int64 shardId);
-static bool PgCopyRollbackPrepared2PC(PGconn* conn, char const* relationName, int64 shardId);
-static bool PgCopyRollback2PC(PGconn* conn);
+static bool PgShardBegin2PC(PGconn* conn);
+static bool PgShardPrepare2PC(PGconn* conn, char const* relationName, int64 shardId);
+static bool PgShardCommitPrepared2PC(PGconn* conn, char const* relationName, int64 shardId);
+static bool PgShardRollbackPrepared2PC(PGconn* conn, char const* relationName, int64 shardId);
+static bool PgShardRollback2PC(PGconn* conn);
 
-PgCopyTransactionManager const PgShardTransManagerImpl[] = 
+PgShardTransactionManager const PgShardTransManagerImpl[] = 
 {
-	{ PgCopyBeginStub, PgCopyPrepareStub, PgCopyCommitPreparedStub, PgCopyRollbackPreparedStub, PgCopyRollbackStub },
-	{ PgCopyBegin2PC, PgCopyPrepare2PC, PgCopyCommitPrepared2PC, PgCopyRollbackPrepared2PC, PgCopyRollback2PC }
+	{ PgShardBeginStub, PgShardPrepareStub, PgShardCommitPreparedStub, PgShardRollbackPreparedStub, PgShardRollbackStub },
+	{ PgShardBegin2PC, PgShardPrepare2PC, PgShardCommitPrepared2PC, PgShardRollbackPrepared2PC, PgShardRollback2PC }
 };
 
 /* 
  * Transaction manager stub
  */
-static bool PgCopyBeginStub(PGconn* conn) 
+static bool PgShardBeginStub(PGconn* conn) 
 {
 	return true;
 }
 
-static bool PgCopyPrepareStub(PGconn* conn, char const* relationName, int64 shardId)
+static bool PgShardPrepareStub(PGconn* conn, char const* relationName, int64 shardId)
 {
 	return true;
 }
 
-static bool PgCopyCommitPreparedStub(PGconn* conn, char const* relationName, int64 shardId)
+static bool PgShardCommitPreparedStub(PGconn* conn, char const* relationName, int64 shardId)
 {
 	return true;
 }
 
-static bool PgCopyRollbackPreparedStub(PGconn* conn, char const* relationName, int64 shardId)
+static bool PgShardRollbackPreparedStub(PGconn* conn, char const* relationName, int64 shardId)
 {
 	return true;
 }
 
-static bool PgCopyRollbackStub(PGconn* conn)
+static bool PgShardRollbackStub(PGconn* conn)
 {
 	return true;
 }
@@ -57,27 +57,27 @@ static bool PgCopyRollbackStub(PGconn* conn)
 /* 
  * Two-phase commit 
  */ 
-static bool PgCopyBegin2PC(PGconn* conn)
+static bool PgShardBegin2PC(PGconn* conn)
 {
 	return PgShardExecute(conn, PGRES_COMMAND_OK, "BEGIN TRANSACTION");
 }
 
-static bool PgCopyPrepare2PC(PGconn* conn, char const* relationName, int64 shardId)
+static bool PgShardPrepare2PC(PGconn* conn, char const* relationName, int64 shardId)
 {
 	return PgShardExecute(conn, PGRES_COMMAND_OK, "PREPARE TRANSACTION 'copy_%s_%d'", relationName, (int)shardId);
 }
 							
-static bool PgCopyCommitPrepared2PC(PGconn* conn, char const* relationName, int64 shardId)
+static bool PgShardCommitPrepared2PC(PGconn* conn, char const* relationName, int64 shardId)
 {
 	return PgShardExecute(conn, PGRES_COMMAND_OK, "COMMIT PREPARED 'copy_%s_%d'", relationName, (int)shardId); 
 }
 
-static bool PgCopyRollbackPrepared2PC(PGconn* conn, char const* relationName, int64 shardId)
+static bool PgShardRollbackPrepared2PC(PGconn* conn, char const* relationName, int64 shardId)
 {
 	return PgShardExecute(conn, PGRES_COMMAND_OK, "ROLLBACK PREPARED 'copy_%s_%d'", relationName, (int)shardId); 
 }
 
-static bool PgCopyRollback2PC(PGconn* conn)
+static bool PgShardRollback2PC(PGconn* conn)
 {
 	return PgShardExecute(conn, PGRES_COMMAND_OK, "ROLLBACK");
 }

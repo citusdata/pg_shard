@@ -18,10 +18,10 @@ typedef struct {
 	bool (*CommitPrepared)(PGconn* conn, char const* relationName, int64 shardId);
 	bool (*RollbackPrepared)(PGconn* conn, char const* relationName, int64 shardId);
 	bool (*Rollback)(PGconn* conn);
-} PgCopyTransactionManager;
+} PgShardTransactionManager;
 
 extern int PgShardCurrTransManager;
-extern PgCopyTransactionManager const PgShardTransManagerImpl[];
+extern PgShardTransactionManager const PgShardTransManagerImpl[];
 
 extern bool PgShardExecute(PGconn* conn, ExecStatusType expectedResult, char const* sql, ...)
 	__attribute__((format(PG_PRINTF_ATTRIBUTE, 3, 4)));

@@ -262,7 +262,7 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 	int relationSuffixPos = 0;
 	char *relationName = NULL;
 	char const *lowerQuery = NULL, *relationOcc = NULL;
-	PgCopyTransactionManager const* tmgr = &PgShardTransManagerImpl[PgShardCurrTransManager];
+	PgShardTransactionManager const* tmgr = &PgShardTransManagerImpl[PgShardCurrTransManager];
 	bool failOK = true;
 	Oid tableId = 0;
 
@@ -295,11 +295,8 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 		CopyConnection* copyConn = NULL;
 		int i = 0;
 		
+
 		relationName = get_rel_name(tableId);
-		lowerQuery = lowerstr(query);
-		relationOcc =  strstr(lowerQuery, lowerstr(relationName));
-		Assert(relationOcc != NULL);
-		relationSuffixPos = (int)((relationOcc - lowerQuery) + strlen(relationName));			 
 		
 		shardIntervalList = LookupShardIntervalList(tableId);
 		if (shardIntervalList == NIL)
@@ -325,6 +322,29 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 			DoCopy(copyStatement, query, &processedCount);
 			return true;
 		}
+
+		if (copyStatement->filename != NULL) /* copy from file (not fro STDIN): replace file name with STDIN */
+		{
+			char* fileNameBeg = strchr(query, '\'');
+			char* fileNameEnd = fileNameBeg;
+			Assert(fileNameBeg != NULL);
+			while (true) {
+				fileNameEnd = strchr(fileNameEnd + 1, '\'');
+				Assert(fileNameEnd != NULL);
+				if (fileNameEnd[1] == '\'') {
+					fileNameEnd += 1;
+				} else { 
+					break;
+				}
+			}
+			query = psprintf("%.*s STDIN %s", (int)(fileNameBeg - query), query, fileNameEnd+1);
+		}
+		/* Find location of table: we should append shard name to the name of the table */
+		lowerQuery = lowerstr(query);
+		relationOcc =  strstr(lowerQuery, lowerstr(relationName));
+		Assert(relationOcc != NULL);
+		relationSuffixPos = (int)((relationOcc - lowerQuery) + strlen(relationName));			 
+
 
 		/* construct pseudo predicate specifying condition for partition key */
 		partitionColumn = PartitionColumn(tableId);
@@ -432,7 +452,7 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 										!PgShardExecute(conn, PGRES_COPY_IN, "%.*s_%ld%s", relationSuffixPos, query,
 														(long)shardId, query + relationSuffixPos))
 									{
-										continue;
+										elog(ERROR, "Failed to start copy on node %s:%s", nodeName, nodePort);
 									}
 								} else { 
 									elog(ERROR, "Failed to connect to node %s:%s", nodeName, nodePort);
