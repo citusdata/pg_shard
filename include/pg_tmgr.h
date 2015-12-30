@@ -23,7 +23,6 @@ typedef struct {
 extern int PgShardCurrTransManager;
 extern PgShardTransactionManager const PgShardTransManagerImpl[];
 
-extern bool PgShardExecute(PGconn* conn, ExecStatusType expectedResult, char const* sql, ...)
-	__attribute__((format(PG_PRINTF_ATTRIBUTE, 3, 4)));
+extern bool PgShardExecute(PGconn* conn, ExecStatusType expectedResult, char const* sql);
 
 #endif

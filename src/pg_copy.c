@@ -40,6 +40,7 @@
 #include "catalog/pg_type.h"
 #include "commands/extension.h"
 #include "commands/copy.h"
+#include "commands/defrem.h"
 #include "executor/execdesc.h"
 #include "executor/executor.h"
 #include "executor/instrument.h"
@@ -218,13 +219,12 @@ static StringInfo CopyGetLineBuf(CopyStateData *cs)
 }
 
 #define MAX_SHARDS 1001
-#define MAX_REPLICATION_FACTOR 8 /* should be less or equal than 32 */
 
 typedef struct {
 	int64 shardId;
 	int nReplicas;
-	int preparedMask;
-	PGconn* conn[MAX_REPLICATION_FACTOR];
+	bool* prepared;
+	PGconn** conn;
 } CopyConnection;
 
 static uint32 shard_id_hash_fn(const void *key, Size keysize)
@@ -250,6 +250,41 @@ CreateShardToConnectionHash()
 	return hash_create("shardToConn", MAX_SHARDS, &info, HASH_ELEM | HASH_FUNCTION);
 }
 
+static char const* ConstructCopyStatement(CopyStmt *copyStatement, int64_t shardId)
+{
+    StringInfo buf = makeStringInfo();
+    ListCell* cell;
+    char sep;
+    char const* qualifiedName = quote_qualified_identifier(copyStatement->relation->schemaname,
+                                                           copyStatement->relation->relname);
+    appendStringInfo(buf, "COPY %s_%ld ", qualifiedName, (long)shardId);    
+    if (copyStatement->attlist) { 
+        sep = '(';
+        foreach(cell, copyStatement->attlist)
+        {
+            appendStringInfoChar(buf, sep);
+            appendStringInfoString(buf, strVal(lfirst(cell)));
+            sep = ',';
+        }
+        appendStringInfoChar(buf, ')');        
+    }
+    appendStringInfoString(buf, "FROM STDIN");
+
+    if (copyStatement->options) { 
+        appendStringInfoString(buf, " WITH ");
+        sep = '(';
+        foreach(cell, copyStatement->options)
+        {
+            DefElem* def = (DefElem *) lfirst(cell);     
+            appendStringInfo(buf, "%d%s %s", sep, def->defname, defGetString(def));
+            sep = ',';
+        }
+        appendStringInfoChar(buf, ')');        
+    }   
+    return buf->data;
+}
+
+    
 /*
  * Handle copy to/from distributed table
  */
@@ -259,9 +294,7 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 	ListCell *shardIntervalCell = NULL;
 	ListCell *taskPlacementCell = NULL;
 	List *shardIntervalList = NULL;
-	int relationSuffixPos = 0;
 	char *relationName = NULL;
-	char const *lowerQuery = NULL, *relationOcc = NULL;
 	PgShardTransactionManager const* tmgr = &PgShardTransManagerImpl[PgShardCurrTransManager];
 	bool failOK = true;
 	Oid tableId = 0;
@@ -322,29 +355,6 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 			DoCopy(copyStatement, query, &processedCount);
 			return true;
 		}
-
-		if (copyStatement->filename != NULL) /* copy from file (not fro STDIN): replace file name with STDIN */
-		{
-			char* fileNameBeg = strchr(query, '\'');
-			char* fileNameEnd = fileNameBeg;
-			Assert(fileNameBeg != NULL);
-			while (true) {
-				fileNameEnd = strchr(fileNameEnd + 1, '\'');
-				Assert(fileNameEnd != NULL);
-				if (fileNameEnd[1] == '\'') {
-					fileNameEnd += 1;
-				} else { 
-					break;
-				}
-			}
-			query = psprintf("%.*s STDIN %s", (int)(fileNameBeg - query), query, fileNameEnd+1);
-		}
-		/* Find location of table: we should append shard name to the name of the table */
-		lowerQuery = lowerstr(query);
-		relationOcc =  strstr(lowerQuery, lowerstr(relationName));
-		Assert(relationOcc != NULL);
-		relationSuffixPos = (int)((relationOcc - lowerQuery) + strlen(relationName));			 
-
 
 		/* construct pseudo predicate specifying condition for partition key */
 		partitionColumn = PartitionColumn(tableId);
@@ -414,7 +424,7 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 											   "in partition column")));
 					} 
 					rightConst->constvalue = columnValues[partitionColumn->varattno];
-					prunedList = PruneShardList(tableId, whereClauseList, shardIntervalList);
+					prunedList = SortList(PruneShardList(tableId, whereClauseList, shardIntervalList), CompareTasksByShardId);
 					
 					foreach(shardIntervalCell, prunedList)
 					{
@@ -425,14 +435,22 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 						copyConn = (CopyConnection*)hash_search(shardToConn, &shardInterval->id, HASH_ENTER, &found);
 						if (!found) { 
 							List *finalizedPlacementList = NULL;
+                            int nPlacements = 0;
 
-							copyConn->nReplicas = 0;
-							copyConn->preparedMask = 0;
 							/* grab shared metadata lock to stop concurrent placement additions */
 							LockShardDistributionMetadata(shardId, ShareLock);
+                            /* TODO: do we need to lock data in addition to metadata? */                    
+                            /* TODO: may be it is more efficient to lock distribution table? */                    
+							LockShardData(shardId, ShareLock);
 							
 							/* now safe to populate placement list */
-							finalizedPlacementList = LoadFinalizedShardPlacementList(shardId);
+							finalizedPlacementList = LoadFinalizedShardPlacementList(shardId); 
+                            nPlacements = list_length(finalizedPlacementList);
+                            copyConn->conn = (PGconn**)palloc0(sizeof(PGconn*)*nPlacements);
+							copyConn->nReplicas = nPlacements;
+							copyConn->prepared = (bool*)palloc0(nPlacements*sizeof(bool));
+                            nPlacements = 0;
+
 							foreach(taskPlacementCell, finalizedPlacementList)
 							{
 								ShardPlacement *taskPlacement = (ShardPlacement *) lfirst(taskPlacementCell);
@@ -443,14 +461,14 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 								conn = ConnectToNode(nodeName, nodePort);
 								if (conn != NULL)										 
 								{
-									copyConn->conn[copyConn->nReplicas++] = conn;
+                                    char const* copy = ConstructCopyStatement(copyStatement, shardId);
+									copyConn->conn[nPlacements++] = conn;
 									/*
 									 * New connection: start transaction with copy command on it.
 									 * Append shard id to table name.
 									 */
 									if (!tmgr->Begin(conn) ||
-										!PgShardExecute(conn, PGRES_COPY_IN, "%.*s_%ld%s", relationSuffixPos, query,
-														(long)shardId, query + relationSuffixPos))
+										!PgShardExecute(conn, PGRES_COPY_IN, copy))
 									{
 										elog(ERROR, "Failed to start copy on node %s:%s", nodeName, nodePort);
 									}
@@ -476,7 +494,7 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 				for (i = 0; i < copyConn->nReplicas; i++) {						
 					PQputCopyEnd(copyConn->conn[i], NULL);
 					if (tmgr->Prepare(copyConn->conn[i], relationName, copyConn->shardId)) { 
-						copyConn->preparedMask |= 1 << i;
+						copyConn->prepared[i] = true;
 					} else { 
 						failedShard = copyConn->shardId;
 						break;
@@ -493,7 +511,7 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 			hash_seq_init(&hashCursor, shardToConn);
 			while ((copyConn = (CopyConnection*)hash_seq_search(&hashCursor)) != NULL) {
 				for (i = 0; i < copyConn->nReplicas; i++) {						
-					if (copyConn->preparedMask & (1 << i)) { 
+					if (copyConn->prepared[i]) { 
 						tmgr->RollbackPrepared(copyConn->conn[i], relationName, copyConn->shardId);
 					} else { 
 						PQputCopyEnd(copyConn->conn[i], "Aborted because of failure on some shard");
@@ -513,7 +531,7 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 		hash_seq_init(&hashCursor, shardToConn);
 		while ((copyConn = (CopyConnection*)hash_seq_search(&hashCursor)) != NULL) {
 			for (i = 0; i < copyConn->nReplicas; i++) {						
-				if (copyConn->preparedMask & (1 << i)) { 
+				if (copyConn->prepared[i]) { 
 					tmgr->CommitPrepared(copyConn->conn[i], relationName, copyConn->shardId);
 				} else { 
 					PQputCopyEnd(copyConn->conn[i], "Aborted because of failure on some shard");
@@ -529,5 +547,4 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 	}
 	return false;
 }
-
 

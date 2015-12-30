@@ -97,6 +97,7 @@ extern void _PG_init(void);
 extern void _PG_fini(void);
 extern bool ExecuteTaskAndStoreResults(Task *task, TupleDesc tupleDescriptor,
 									   Tuplestorestate *tupleStore);
+extern int  CompareTasksByShardId(const void *leftElement, const void *rightElement);
 
 
 #endif /* PG_SHARD_H */

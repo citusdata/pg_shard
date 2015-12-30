@@ -125,7 +125,6 @@ static bool IsPgShardPlan(PlannedStmt *plannedStmt);
 static void NextExecutorStartHook(QueryDesc *queryDesc, int eflags);
 static LOCKMODE CommutativityRuleToLockMode(CmdType commandType);
 static void AcquireExecutorShardLocks(List *taskList, LOCKMODE lockMode);
-static int CompareTasksByShardId(const void *leftElement, const void *rightElement);
 static void ExecuteMultipleShardSelect(DistributedPlan *distributedPlan,
 									   RangeVar *intermediateTable);
 static bool SendQueryInSingleRowMode(PGconn *connection, StringInfo query);
@@ -1423,7 +1422,7 @@ AcquireExecutorShardLocks(List *taskList, LOCKMODE lockMode)
 
 
 /* Helper function to compare two tasks using their shardIds. */
-static int
+int
 CompareTasksByShardId(const void *leftElement, const void *rightElement)
 {
 	const Task *leftTask = *((const Task **) leftElement);
