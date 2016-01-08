@@ -408,6 +408,16 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 
 		PG_TRY();
 		{
+			/* Lock all shards in shared mode */
+			shardIntervalList = SortList(shardIntervalList, CompareTasksByShardId);
+			foreach(shardIntervalCell, shardIntervalList)
+			{
+				ShardInterval *shardInterval = (ShardInterval *) lfirst(shardIntervalCell);
+				int64 shardId = shardInterval->id;
+				LockShardData(shardId, ShareLock);
+				LockShardDistributionMetadata(shardId, ShareLock);
+			}
+
 			while (nextRowFound)
 			{
 				MemoryContext oldContext = MemoryContextSwitchTo(tupleContext);
@@ -424,7 +434,7 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 											   "in partition column")));
 					} 
 					rightConst->constvalue = columnValues[partitionColumn->varattno];
-					prunedList = SortList(PruneShardList(tableId, whereClauseList, shardIntervalList), CompareTasksByShardId);
+					prunedList = PruneShardList(tableId, whereClauseList, shardIntervalList);
 					
 					foreach(shardIntervalCell, prunedList)
 					{
@@ -437,13 +447,6 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 							List *finalizedPlacementList = NULL;
                             int nPlacements = 0;
 
-							/* grab shared metadata lock to stop concurrent placement additions */
-							LockShardDistributionMetadata(shardId, ShareLock);
-                            /* TODO: do we need to lock data in addition to metadata? */                    
-                            /* TODO: may be it is more efficient to lock distribution table? */                    
-							LockShardData(shardId, ShareLock);
-							
-							/* now safe to populate placement list */
 							finalizedPlacementList = LoadFinalizedShardPlacementList(shardId); 
                             nPlacements = list_length(finalizedPlacementList);
                             copyConn->conn = (PGconn**)palloc0(sizeof(PGconn*)*nPlacements);
