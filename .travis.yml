@@ -11,15 +11,15 @@ env:
     - PGVERSION=40.0
     - PGVERSION=41.0
 before_install:
-  - git clone --depth 1 https://gist.github.com/9963879.git tools
-  - tools/setup_apt.sh
-  - tools/nuke_pg.sh
+  - git clone --depth 1 https://github.com/citusdata/tools.git
+  - tools/travis/setup_apt.sh
+  - tools/travis/nuke_pg.sh
 install:
   - sudo pip install cpp-coveralls
-  - tools/install_pg.sh
-  - tools/install_citus.sh
-before_script: tools/config_and_start_cluster.sh
-script: tools/pg_travis_test.sh
+  - tools/travis/install_pg.sh
+  - tools/travis/install_citus.sh
+before_script: tools/travis/config_and_start_cluster.sh
+script: tools/travis/pg_travis_test.sh
 after_success:
   - sudo chmod 666 *.gcda
   - coveralls --exclude test/include --exclude test/src --exclude src/ruleutils_93.c --exclude src/ruleutils_94.c --exclude src/ruleutils_95.c --gcov-options '\-lp'
