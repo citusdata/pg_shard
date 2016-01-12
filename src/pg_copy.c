@@ -354,7 +354,7 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 		List *prunedList = NULL;
 		Node *rightOp = NULL;
 		Const *rightConst = NULL;
-		ShardId failedShard = -1;
+		ShardId failedShard = INVALID_SHARD_ID;
 		Relation rel = NULL;
 		StringInfo lineBuf;
 		ShardConnections* shardConn = NULL;
@@ -542,7 +542,7 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 		/* Complete two phase commit */
 		DoForAllShards(shardToConn, PgCopyEndTransaction, relationName);
 
-		if (failedShard >= 0) { 
+		if (failedShard != INVALID_SHARD_ID) { 
 			elog(ERROR, "COPY failed for shard %ld", (long)failedShard);
 		}
 		return true;
