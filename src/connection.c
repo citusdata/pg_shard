@@ -329,3 +329,25 @@ ConnectionGetOptionValue(PGconn *connection, char *optionKeyword)
 
 	return optionValue;
 }
+
+ShardId DoForAllShards(struct HTAB* shardConnHash, ShardAction action, void* arg)
+{
+	HASH_SEQ_STATUS hashCursor;
+	ShardConnections* shardConn = NULL;
+	int i = 0;
+
+	hash_seq_init(&hashCursor, shardConnHash);
+	while ((shardConn = (ShardConnections*)hash_seq_search(&hashCursor)) != NULL) 
+	{
+		bool allOk = true;
+		for (i = 0; i < shardConn->nReplicas; i++) 
+		{						
+			allOk &= shardConn->status[i] = action(shardConn->shardId, shardConn->conn[i], arg, shardConn->status[i]);
+		}
+		if (!allOk) 
+		{
+			return shardConn->shardId;
+		}
+	}
+	return INVALID_SHARD_ID;
+}

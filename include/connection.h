@@ -15,7 +15,7 @@
 
 #include "c.h"
 #include "libpq-fe.h"
-
+#include "pg_shard.h"
 
 /* maximum duration to wait for connection */
 #define CLIENT_CONNECT_TIMEOUT_SECONDS "5"
@@ -29,7 +29,6 @@
 
 /* SQL statement for testing */
 #define TEST_SQL "DO $$ BEGIN RAISE EXCEPTION 'Raised remotely!'; END $$"
-
 
 /*
  * NodeConnectionKey acts as the key to index into the (process-local) hash
@@ -50,11 +49,27 @@ typedef struct NodeConnectionEntry
 } NodeConnectionEntry;
 
 
+
+typedef struct {
+	ShardId shardId;
+	int nReplicas;
+	bool* status;
+	PGconn** conn;
+} ShardConnections;
+
 /* function declarations for obtaining and using a connection */
 extern PGconn * GetConnection(char *nodeName, int32 nodePort);
 extern void PurgeConnection(PGconn *connection);
 extern void ReportRemoteError(PGconn *connection, PGresult *result);
 extern PGconn* ConnectToNode(char *nodeName, char *nodePort);
 
+typedef bool (*ShardAction)(ShardId id, PGconn* conn, void* arg, bool status);
+
+/* 
+ * Perform action for all shards and all shard replicas.
+ * Returns number of shard for which operation od failed or INVALID_SHARD_ID in case of success
+ */
+struct HTAB;
+extern ShardId DoForAllShards(struct HTAB* shardConnHash, ShardAction action, void* arg);
 
 #endif /* PG_SHARD_CONNECTION_H */

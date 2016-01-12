@@ -77,6 +77,9 @@ typedef struct DistributedPlan
 } DistributedPlan;
 
 
+#define INVALID_SHARD_ID (-1)
+typedef int64 ShardId;
+
 /*
  * Tasks just bundle a query string (already ready for execution) with a list of
  * placements on which that string could be executed. The semantics of a task
@@ -88,7 +91,7 @@ typedef struct Task
 {
 	StringInfo queryString;     /* SQL string suitable for immediate remote execution */
 	List *taskPlacementList;    /* ShardPlacements on which the task can be executed */
-	int64 shardId;              /* Denormalized shardId of tasks for convenience */
+	ShardId shardId;              /* Denormalized shardId of tasks for convenience */
 } Task;
 
 

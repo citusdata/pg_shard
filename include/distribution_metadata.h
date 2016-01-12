@@ -19,6 +19,7 @@
 #include "nodes/primnodes.h"
 #include "storage/lock.h"
 
+#include "pg_shard.h"
 
 /* query prefix (target list and joins) for shard interval information */
 #define SHARD_QUERY_PREFIX "SELECT s.id, s.relation_id, s.min_value, s.max_value, " \
@@ -77,7 +78,7 @@ typedef enum
  */
 typedef struct ShardInterval
 {
-	int64 id;           /* unique identifier for the shard */
+	ShardId id;           /* unique identifier for the shard */
 	Oid relationId;     /* id of the shard's distributed table */
 	Datum minValue;     /* a shard's typed min value datum */
 	Datum maxValue;     /* a shard's typed max value datum */
@@ -95,8 +96,8 @@ typedef struct ShardInterval
  */
 typedef struct ShardPlacement
 {
-	int64 id;               /* unique identifier for the shard placement */
-	int64 shardId;          /* identifies shard for this shard placement */
+	ShardId id;               /* unique identifier for the shard placement */
+	ShardId shardId;          /* identifies shard for this shard placement */
 	ShardState shardState;  /* represents last known state of this placement */
 	char *nodeName;         /* hostname of machine hosting this shard */
 	int32 nodePort;         /* port number for connecting to host */
@@ -129,9 +130,9 @@ typedef enum
 /* function declarations to access and manipulate the metadata */
 extern List * LookupShardIntervalList(Oid distributedTableId);
 extern List * LoadShardIntervalList(Oid distributedTableId);
-extern ShardInterval * LoadShardInterval(int64 shardId);
-extern List * LoadFinalizedShardPlacementList(int64 shardId);
-extern List * LoadShardPlacementList(int64 shardId);
+extern ShardInterval * LoadShardInterval(ShardId shardId);
+extern List * LoadFinalizedShardPlacementList(ShardId shardId);
+extern List * LoadShardPlacementList(ShardId shardId);
 extern Var * PartitionColumn(Oid distributedTableId);
 extern char PartitionType(Oid distributedTableId);
 extern bool IsDistributedTable(Oid tableId);
@@ -139,14 +140,14 @@ extern bool DistributedTablesExist(void);
 extern Var * ColumnNameToColumn(Oid relationId, char *columnName);
 extern void InsertPartitionRow(Oid distributedTableId, char partitionType,
 							   text *partitionKeyText);
-extern int64 CreateShardRow(Oid distributedTableId, char shardStorage,
+extern ShardId CreateShardRow(Oid distributedTableId, char shardStorage,
 							text *shardMinValue, text *shardMaxValue);
-extern int64 CreateShardPlacementRow(int64 shardId, ShardState shardState,
+extern ShardId CreateShardPlacementRow(ShardId shardId, ShardState shardState,
 									 char *nodeName, uint32 nodePort);
-extern void DeleteShardPlacementRow(int64 shardPlacementId);
-extern void UpdateShardPlacementRowState(int64 shardPlacementId, ShardState newState);
-extern void LockShardData(int64 shardId, LOCKMODE lockMode);
-extern void LockShardDistributionMetadata(int64 shardId, LOCKMODE lockMode);
+extern void DeleteShardPlacementRow(ShardId shardPlacementId);
+extern void UpdateShardPlacementRowState(ShardId shardPlacementId, ShardState newState);
+extern void LockShardData(ShardId shardId, LOCKMODE lockMode);
+extern void LockShardDistributionMetadata(ShardId shardId, LOCKMODE lockMode);
 extern void LockRelationDistributionMetadata(Oid relationId, LOCKMODE lockMode);
 
 #endif /* PG_SHARD_DISTRIBUTION_METADATA_H */

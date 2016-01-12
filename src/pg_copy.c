@@ -220,13 +220,6 @@ static StringInfo CopyGetLineBuf(CopyStateData *cs)
 
 #define MAX_SHARDS 1001
 
-typedef struct {
-	int64 shardId;
-	int nReplicas;
-	bool* prepared;
-	PGconn** conn;
-} CopyConnection;
-
 static uint32 shard_id_hash_fn(const void *key, Size keysize)
 {
 	return *(int32*)key ^ *((int32*)key+1);
@@ -243,14 +236,14 @@ CreateShardToConnectionHash()
 	HASHCTL info;
 
 	memset(&info, 0, sizeof(info));
-	info.keysize = sizeof(int64);
-	info.entrysize = sizeof(CopyConnection);
+	info.keysize = sizeof(ShardId);
+	info.entrysize = sizeof(ShardConnections);
 	info.hash = shard_id_hash_fn;
 
 	return hash_create("shardToConn", MAX_SHARDS, &info, HASH_ELEM | HASH_FUNCTION);
 }
 
-static char const* ConstructCopyStatement(CopyStmt *copyStatement, int64_t shardId)
+static char const* ConstructCopyStatement(CopyStmt *copyStatement, ShardId shardId)
 {
     StringInfo buf = makeStringInfo();
     ListCell* cell;
@@ -284,7 +277,47 @@ static char const* ConstructCopyStatement(CopyStmt *copyStatement, int64_t shard
     return buf->data;
 }
 
-    
+static bool PgCopyPrepareTransaction(ShardId shardId, PGconn* conn, void* arg, bool status)
+{
+
+	char const* relationName = (char*)arg;
+	PgShardTransactionManager const* tmgr = &PgShardTransManagerImpl[PgShardCurrTransManager];
+	PQputCopyEnd(conn, NULL);
+	return tmgr->Prepare(conn, relationName, shardId);
+}
+
+static bool PgCopyAbortTransaction(ShardId shardId, PGconn* conn, void* arg, bool status)
+{
+	char const* relationName = (char*)arg;
+	PgShardTransactionManager const* tmgr = &PgShardTransManagerImpl[PgShardCurrTransManager];
+
+	if (status) 
+	{
+		tmgr->RollbackPrepared(conn, relationName, shardId);
+	} else {
+		PQputCopyEnd(conn, "Aborted because of failure on some shard");
+		tmgr->Rollback(conn);
+	}
+	PQfinish(conn);
+	return true;
+}
+
+static bool PgCopyEndTransaction(ShardId shardId, PGconn* conn, void* arg, bool status)
+{
+	char const* relationName = (char*)arg;
+	PgShardTransactionManager const* tmgr = &PgShardTransManagerImpl[PgShardCurrTransManager];
+	
+	if (status)
+	{
+		tmgr->CommitPrepared(conn, relationName, shardId);
+	} else {
+		PQputCopyEnd(conn, "Aborted because of failure on some shard");
+		tmgr->Rollback(conn);
+	}
+	PQfinish(conn);
+	return true;
+}
+	
 /*
  * Handle copy to/from distributed table
  */
@@ -317,18 +350,16 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 		Var* partitionColumn = NULL;
 		Oid columnOid = 0;
 		OpExpr *equalityExpr = NULL;
-		HASH_SEQ_STATUS hashCursor;
 		List *whereClauseList = NULL;
 		List *prunedList = NULL;
 		Node *rightOp = NULL;
 		Const *rightConst = NULL;
-		int64 failedShard = -1;
+		ShardId failedShard = -1;
 		Relation rel = NULL;
 		StringInfo lineBuf;
-		CopyConnection* copyConn = NULL;
+		ShardConnections* shardConn = NULL;
 		int i = 0;
 		
-
 		relationName = get_rel_name(tableId);
 		
 		shardIntervalList = LookupShardIntervalList(tableId);
@@ -413,7 +444,7 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 			foreach(shardIntervalCell, shardIntervalList)
 			{
 				ShardInterval *shardInterval = (ShardInterval *) lfirst(shardIntervalCell);
-				int64 shardId = shardInterval->id;
+				ShardId shardId = shardInterval->id;
 				LockShardData(shardId, ShareLock);
 				LockShardDistributionMetadata(shardId, ShareLock);
 			}
@@ -439,19 +470,19 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 					foreach(shardIntervalCell, prunedList)
 					{
 						ShardInterval *shardInterval = (ShardInterval *) lfirst(shardIntervalCell);
-						int64 shardId = shardInterval->id;
+						ShardId shardId = shardInterval->id;
 						bool found = false;
 						
-						copyConn = (CopyConnection*)hash_search(shardToConn, &shardInterval->id, HASH_ENTER, &found);
+						shardConn = (ShardConnections*)hash_search(shardToConn, &shardInterval->id, HASH_ENTER, &found);
 						if (!found) { 
 							List *finalizedPlacementList = NULL;
                             int nPlacements = 0;
 
 							finalizedPlacementList = LoadFinalizedShardPlacementList(shardId); 
                             nPlacements = list_length(finalizedPlacementList);
-                            copyConn->conn = (PGconn**)palloc0(sizeof(PGconn*)*nPlacements);
-							copyConn->nReplicas = nPlacements;
-							copyConn->prepared = (bool*)palloc0(nPlacements*sizeof(bool));
+                            shardConn->conn = (PGconn**)palloc0(sizeof(PGconn*)*nPlacements);
+							shardConn->nReplicas = nPlacements;
+							shardConn->status = (bool*)palloc0(nPlacements*sizeof(bool));
                             nPlacements = 0;
 
 							foreach(taskPlacementCell, finalizedPlacementList)
@@ -465,7 +496,7 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 								if (conn != NULL)										 
 								{
                                     char const* copy = ConstructCopyStatement(copyStatement, shardId);
-									copyConn->conn[nPlacements++] = conn;
+									shardConn->conn[nPlacements++] = conn;
 									/*
 									 * New connection: start transaction with copy command on it.
 									 * Append shard id to table name.
@@ -484,26 +515,15 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 						lineBuf = CopyGetLineBuf(copyState);
 						lineBuf->data[lineBuf->len++] = '\n'; /* there was already new line in the buffer, but it was truncated: no need to heck available space */
 						/* Replicate row to all shards */
-						for (i = 0; i < copyConn->nReplicas; i++) { 
-							PQputCopyData(copyConn->conn[i], lineBuf->data, lineBuf->len);
+						for (i = 0; i < shardConn->nReplicas; i++) { 
+							PQputCopyData(shardConn->conn[i], lineBuf->data, lineBuf->len);
 						}
 					}
 				}
 				MemoryContextReset(tupleContext);
 			}
 			/* Perform two phase commit in replicas */
-			hash_seq_init(&hashCursor, shardToConn);
-			while (failedShard < 0 && (copyConn = (CopyConnection*)hash_seq_search(&hashCursor)) != NULL) {
-				for (i = 0; i < copyConn->nReplicas; i++) {						
-					PQputCopyEnd(copyConn->conn[i], NULL);
-					if (tmgr->Prepare(copyConn->conn[i], relationName, copyConn->shardId)) { 
-						copyConn->prepared[i] = true;
-					} else { 
-						failedShard = copyConn->shardId;
-						break;
-					}
-				}
-			}
+			failedShard = DoForAllShards(shardToConn, PgCopyPrepareTransaction, relationName);
 		}
 		PG_CATCH(); /* do recovery */
 		{
@@ -511,18 +531,7 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 			heap_close(rel, AccessShareLock);
 
 			/* Rollback transactions */
-			hash_seq_init(&hashCursor, shardToConn);
-			while ((copyConn = (CopyConnection*)hash_seq_search(&hashCursor)) != NULL) {
-				for (i = 0; i < copyConn->nReplicas; i++) {						
-					if (copyConn->prepared[i]) { 
-						tmgr->RollbackPrepared(copyConn->conn[i], relationName, copyConn->shardId);
-					} else { 
-						PQputCopyEnd(copyConn->conn[i], "Aborted because of failure on some shard");
-						tmgr->Rollback(copyConn->conn[i]);
-					}
-					PQfinish(copyConn->conn[i]);
-				}
-			}
+			DoForAllShards(shardToConn, PgCopyAbortTransaction, relationName);
 			PG_RE_THROW();
 		}
 		PG_END_TRY();
@@ -531,18 +540,8 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 		heap_close(rel, AccessShareLock);
 
 		/* Complete two phase commit */
-		hash_seq_init(&hashCursor, shardToConn);
-		while ((copyConn = (CopyConnection*)hash_seq_search(&hashCursor)) != NULL) {
-			for (i = 0; i < copyConn->nReplicas; i++) {						
-				if (copyConn->prepared[i]) { 
-					tmgr->CommitPrepared(copyConn->conn[i], relationName, copyConn->shardId);
-				} else { 
-					PQputCopyEnd(copyConn->conn[i], "Aborted because of failure on some shard");
-					tmgr->Rollback(copyConn->conn[i]);
-				}
-				PQfinish(copyConn->conn[i]);
-			}
-		}
+		DoForAllShards(shardToConn, PgCopyEndTransaction, relationName);
+
 		if (failedShard >= 0) { 
 			elog(ERROR, "COPY failed for shard %ld", (long)failedShard);
 		}

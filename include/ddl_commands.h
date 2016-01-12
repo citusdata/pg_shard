@@ -20,6 +20,7 @@
 #include "lib/stringinfo.h"
 #include "nodes/pg_list.h"
 
+#include "pg_shard.h"
 
 /* character for separating table name from shard ID in generated table names */
 #define SHARD_NAME_SEPARATOR '_'
@@ -28,9 +29,9 @@
 /* function declarations to extend DDL commands with shard IDs */
 extern List * TableDDLCommandList(Oid relationId);
 extern void AppendOptionListToString(StringInfo stringBuffer, List *optionList);
-extern List * ExtendedDDLCommandList(Oid masterRelationId, int64 shardId,
+extern List * ExtendedDDLCommandList(Oid masterRelationId, ShardId shardId,
 									 List *sqlCommandList);
-extern void AppendShardIdToName(char **name, int64 shardId);
+extern void AppendShardIdToName(char **name, ShardId shardId);
 extern bool ExecuteRemoteCommandList(char *nodeName, uint32 nodePort,
 									 List *sqlCommandList);
 

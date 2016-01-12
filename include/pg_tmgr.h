@@ -14,9 +14,9 @@
 
 typedef struct { 
 	bool (*Begin)(PGconn* conn);
-	bool (*Prepare)(PGconn* conn, char const* relationName, int64 shardId);
-	bool (*CommitPrepared)(PGconn* conn, char const* relationName, int64 shardId);
-	bool (*RollbackPrepared)(PGconn* conn, char const* relationName, int64 shardId);
+	bool (*Prepare)(PGconn* conn, char const* relationName, ShardId shardId);
+	bool (*CommitPrepared)(PGconn* conn, char const* relationName, ShardId shardId);
+	bool (*RollbackPrepared)(PGconn* conn, char const* relationName, ShardId shardId);
 	bool (*Rollback)(PGconn* conn);
 } PgShardTransactionManager;
 
