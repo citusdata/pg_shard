@@ -135,7 +135,11 @@ TableDDLCommandList(Oid relationId)
 			Oid constraintId = get_index_constraint(indexId);
 			Assert(constraintId != InvalidOid);
 
+#if (PG_VERSION_NUM >= 90300 && PG_VERSION_NUM < 90500)
 			statementDef = pg_get_constraintdef_string(constraintId);
+#else
+			statementDef = pg_get_constraintdef_command(constraintId);
+#endif
 		}
 		else
 		{
