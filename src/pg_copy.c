@@ -269,7 +269,7 @@ static char const* ConstructCopyStatement(CopyStmt *copyStatement, ShardId shard
         foreach(cell, copyStatement->options)
         {
             DefElem* def = (DefElem *) lfirst(cell);     
-            appendStringInfo(buf, "%d%s %s", sep, def->defname, defGetString(def));
+            appendStringInfo(buf, "%c%s '%s'", sep, def->defname, defGetString(def));
             sep = ',';
         }
         appendStringInfoChar(buf, ')');        
@@ -504,7 +504,7 @@ bool PgShardCopy(CopyStmt *copyStatement, char const* query)
 									if (!tmgr->Begin(conn) ||
 										!PgShardExecute(conn, PGRES_COPY_IN, copy))
 									{
-										elog(ERROR, "Failed to start copy on node %s:%s", nodeName, nodePort);
+										elog(ERROR, "Failed to start '%s' on node %s:%s", copy, nodeName, nodePort);
 									}
 								} else { 
 									elog(ERROR, "Failed to connect to node %s:%s", nodeName, nodePort);
