@@ -533,12 +533,15 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 				lineBuf = CopyGetLineBuf(copyState);
 				lineBuf->data[lineBuf->len++] = '\n'; 
 				/* There was already new line in the buffer, but it was truncated: 
-				 * no need to heck available space */
+				 * no need to check available space */
 				
-				/* Replicate row to all shards */
+				/* Replicate row to all shard placements */
 				for (i = 0; i < shardConnections->replicaCount; i++) 
 				{ 
-					PQputCopyData(shardConnections->conn[i], lineBuf->data, lineBuf->len);
+					if (PQputCopyData(shardConnections->conn[i], lineBuf->data, lineBuf->len) <= 0)
+					{
+						elog(ERROR, "Copy failed for shard %ld", (long)shardId);
+					}
 				}
 			}
 			MemoryContextReset(tupleContext);
