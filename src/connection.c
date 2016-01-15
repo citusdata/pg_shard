@@ -338,7 +338,7 @@ ShardId DoForAllShards(List* shardConnections, ShardAction action, void* arg)
 	{
 		ShardConnections* shardConn = (ShardConnections*)lfirst(listCell);
 		bool allOk = true;
-		for (i = 0; i < shardConn->nReplicas; i++) 
+		for (i = 0; i < shardConn->replicaCount; i++) 
 		{						
 			allOk &= shardConn->status[i] = action(shardConn->shardId, shardConn->conn[i], arg, shardConn->status[i]);
 		}

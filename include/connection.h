@@ -52,7 +52,7 @@ typedef struct NodeConnectionEntry
 
 typedef struct {
 	ShardId shardId;
-	int nReplicas;
+	int replicaCount;
 	bool* status;
 	PGconn** conn;
 } ShardConnections;

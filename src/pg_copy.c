@@ -330,7 +330,7 @@ InitializeShardConnections(CopyStmt *copyStatement,
 	int placementCount = list_length(finalizedPlacementList);
 	
 	shardConnections->conn = (PGconn**)palloc0(sizeof(PGconn*)*placementCount);
-	shardConnections->nReplicas = placementCount;
+	shardConnections->replicaCount = placementCount;
 	shardConnections->status = (bool*)palloc0(placementCount*sizeof(bool));
 	placementCount = 0;
 					
@@ -536,7 +536,7 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 				 * no need to heck available space */
 				
 				/* Replicate row to all shards */
-				for (i = 0; i < shardConnections->nReplicas; i++) 
+				for (i = 0; i < shardConnections->replicaCount; i++) 
 				{ 
 					PQputCopyData(shardConnections->conn[i], lineBuf->data, lineBuf->len);
 				}
