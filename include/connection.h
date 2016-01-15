@@ -61,7 +61,7 @@ typedef struct {
 extern PGconn * GetConnection(char *nodeName, int32 nodePort);
 extern void PurgeConnection(PGconn *connection);
 extern void ReportRemoteError(PGconn *connection, PGresult *result);
-extern PGconn* ConnectToNode(char *nodeName, char *nodePort);
+extern PGconn* ConnectToNode(char *nodeName, int nodePort);
 
 typedef bool (*ShardAction)(ShardId id, PGconn* conn, void* arg, bool status);
 
@@ -69,7 +69,6 @@ typedef bool (*ShardAction)(ShardId id, PGconn* conn, void* arg, bool status);
  * Perform action for all shards and all shard replicas.
  * Returns number of shard for which operation od failed or INVALID_SHARD_ID in case of success
  */
-struct HTAB;
-extern ShardId DoForAllShards(struct HTAB* shardConnHash, ShardAction action, void* arg);
+extern ShardId DoForAllShards(List* shardConnections, ShardAction action, void* arg);
 
 #endif /* PG_SHARD_CONNECTION_H */

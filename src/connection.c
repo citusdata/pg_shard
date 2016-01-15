@@ -62,7 +62,7 @@ GetConnection(char *nodeName, int32 nodePort)
 	NodeConnectionEntry *nodeConnectionEntry = NULL;
 	bool entryFound = false;
 	bool needNewConnection = true;
-
+	
 	/* check input */
 	if (strnlen(nodeName, MAX_NODE_LENGTH + 1) > MAX_NODE_LENGTH)
 	{
@@ -98,10 +98,7 @@ GetConnection(char *nodeName, int32 nodePort)
 
 	if (needNewConnection)
 	{
-		StringInfo nodePortString = makeStringInfo();
-		appendStringInfo(nodePortString, "%d", nodePort);
-
-		connection = ConnectToNode(nodeName, nodePortString->data);
+		connection = ConnectToNode(nodeName, nodePort);
 		if (connection != NULL)
 		{
 			nodeConnectionEntry = hash_search(NodeConnectionHash, &nodeConnectionKey,
@@ -264,7 +261,7 @@ CreateNodeConnectionHash(void)
  * and return NULL.
  */
 PGconn *
-ConnectToNode(char *nodeName, char *nodePort)
+ConnectToNode(char *nodeName, int nodePort)
 {
 	PGconn *connection = NULL;
 	const char *clientEncoding = GetDatabaseEncodingName();
@@ -274,10 +271,12 @@ ConnectToNode(char *nodeName, char *nodePort)
 		"host", "port", "fallback_application_name",
 		"client_encoding", "connect_timeout", "dbname", NULL
 	};
+	char nodePortString[8];
 	const char *valueArray[] = {
-		nodeName, nodePort, "pg_shard", clientEncoding,
+		nodeName, nodePortString, "pg_shard", clientEncoding,
 		CLIENT_CONNECT_TIMEOUT_SECONDS, dbname, NULL
 	};
+	sprintf(nodePortString, "%d", nodePort);
 
 	Assert(sizeof(keywordArray) == sizeof(valueArray));
 
@@ -330,15 +329,14 @@ ConnectionGetOptionValue(PGconn *connection, char *optionKeyword)
 	return optionValue;
 }
 
-ShardId DoForAllShards(struct HTAB* shardConnHash, ShardAction action, void* arg)
+ShardId DoForAllShards(List* shardConnections, ShardAction action, void* arg)
 {
-	HASH_SEQ_STATUS hashCursor;
-	ShardConnections* shardConn = NULL;
+	ListCell *listCell;
 	int i = 0;
 
-	hash_seq_init(&hashCursor, shardConnHash);
-	while ((shardConn = (ShardConnections*)hash_seq_search(&hashCursor)) != NULL) 
+	foreach (listCell, shardConnections)
 	{
+		ShardConnections* shardConn = (ShardConnections*)lfirst(listCell);
 		bool allOk = true;
 		for (i = 0; i < shardConn->nReplicas; i++) 
 		{						
