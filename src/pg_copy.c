@@ -519,6 +519,10 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 
 		while (true)
 		{
+			ShardInterval *shardInterval = NULL;
+			ShardId shardId = 0;
+			bool found = false;
+
 			MemoryContext oldContext = MemoryContextSwitchTo(tupleContext);
 			nextRowFound = NextCopyFrom(copyState, NULL, columnValues, columnNulls, NULL);
 			MemoryContextSwitchTo(oldContext);
@@ -548,29 +552,25 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 				shardListCache[shardHashCode] = prunedList;
 			}
 
-			foreach(shardIntervalCell, prunedList)
-			{
-				ShardInterval *shardInterval = (ShardInterval *) lfirst(shardIntervalCell);
-				ShardId shardId = shardInterval->id;
-				bool found = false;
+			shardInterval = (ShardInterval *) lfirst(list_head(prunedList));
+			shardId = shardInterval->id;
 				
-				shardConnections = (ShardConnections*)hash_search(shardToConn, &shardInterval->id, HASH_ENTER, &found);
-				if (!found) 
-				{ 
-					InitializeShardConnections(copyStatement, shardConnections, shardId, transactionManager);
-				}
-				lineBuf = CopyGetLineBuf(copyState);
-				lineBuf->data[lineBuf->len++] = '\n'; 
-				/* There was already new line in the buffer, but it was truncated: 
-				 * no need to check available space */
-				
-				/* Replicate row to all shard placements */
-				for (i = 0; i < shardConnections->replicaCount; i++) 
-				{ 
-					if (PQputCopyData(shardConnections->conn[i], lineBuf->data, lineBuf->len) <= 0)
-					{
-						elog(ERROR, "Copy failed for shard %ld", (long)shardId);
-					}
+			shardConnections = (ShardConnections*)hash_search(shardToConn, &shardInterval->id, HASH_ENTER, &found);
+			if (!found) 
+			{ 
+				InitializeShardConnections(copyStatement, shardConnections, shardId, transactionManager);
+			}
+			lineBuf = CopyGetLineBuf(copyState);
+			lineBuf->data[lineBuf->len++] = '\n'; 
+			/* There was already new line in the buffer, but it was truncated: 
+			 * no need to check available space */
+			
+			/* Replicate row to all shard placements */
+			for (i = 0; i < shardConnections->replicaCount; i++) 
+			{ 
+				if (PQputCopyData(shardConnections->conn[i], lineBuf->data, lineBuf->len) <= 0)
+				{
+					elog(ERROR, "Copy failed for shard %ld", (long)shardId);
 				}
 			}
 			MemoryContextReset(tupleContext);
