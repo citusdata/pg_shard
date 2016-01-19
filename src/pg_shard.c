@@ -216,7 +216,7 @@ _PG_init(void)
 							 &LogDistributedStatements, false, PGC_USERSET, 0, NULL,
 							 NULL, NULL);
 
-	DefineCustomEnumVariable("pg_shard.copy_TransManager",
+	DefineCustomEnumVariable("pg_shard.copy_transaction_manager",
                              "Transaction manager for distributed copy", 
                              NULL, 
                              &PgShardCurrTransManager, 0, PgShardTransManagerEnum, PGC_USERSET, 0, NULL,
