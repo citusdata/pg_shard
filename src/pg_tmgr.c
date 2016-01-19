@@ -1,5 +1,6 @@
 #include "postgres.h"
 #include "libpq-fe.h"
+#include "miscadmin.h"
 
 #include "connection.h"
 #include "pg_tmgr.h"
@@ -9,15 +10,15 @@
 int PgShardCurrTransManager;
 
 static bool PgShardBeginStub(PGconn* conn);
-static bool PgShardPrepareStub(PGconn* conn, char const* relationName, int64 shardId);
-static bool PgShardCommitPreparedStub(PGconn* conn, char const* relationName, int64 shardId);
-static bool PgShardRollbackPreparedStub(PGconn* conn, char const* relationName, int64 shardId);
+static bool PgShardPrepareStub(PGconn* conn);
+static bool PgShardCommitPreparedStub(PGconn* conn);
+static bool PgShardRollbackPreparedStub(PGconn* conn);
 static bool PgShardRollbackStub(PGconn* conn);
 
 static bool PgShardBegin2PC(PGconn* conn);
-static bool PgShardPrepare2PC(PGconn* conn, char const* relationName, int64 shardId);
-static bool PgShardCommitPrepared2PC(PGconn* conn, char const* relationName, int64 shardId);
-static bool PgShardRollbackPrepared2PC(PGconn* conn, char const* relationName, int64 shardId);
+static bool PgShardPrepare2PC(PGconn* conn);
+static bool PgShardCommitPrepared2PC(PGconn* conn);
+static bool PgShardRollbackPrepared2PC(PGconn* conn);
 static bool PgShardRollback2PC(PGconn* conn);
 
 PgShardTransactionManager const PgShardTransManagerImpl[] = 
@@ -34,17 +35,17 @@ static bool PgShardBeginStub(PGconn* conn)
 	return true;
 }
 
-static bool PgShardPrepareStub(PGconn* conn, char const* relationName, int64 shardId)
+static bool PgShardPrepareStub(PGconn* conn)
 {
 	return true;
 }
 
-static bool PgShardCommitPreparedStub(PGconn* conn, char const* relationName, int64 shardId)
+static bool PgShardCommitPreparedStub(PGconn* conn)
 {
 	return true;
 }
 
-static bool PgShardRollbackPreparedStub(PGconn* conn, char const* relationName, int64 shardId)
+static bool PgShardRollbackPreparedStub(PGconn* conn)
 {
 	return true;
 }
@@ -57,33 +58,42 @@ static bool PgShardRollbackStub(PGconn* conn)
 /* 
  * Two-phase commit 
  */ 
-static char* PgShard2pcCommand(char const* cmd, char const* relationName, int64 shardId)
+static int GlobalTransactionId;
+
+static char* 
+PgShard2pcCommand(char const* cmd)
 {
-    return psprintf("%s 'pgshard_%s_%d'", cmd, relationName, (int)shardId);
+    return psprintf("%s 'pgshard_%d_%d'", cmd, MyProcPid, GlobalTransactionId);
 }
 
 
-static bool PgShardBegin2PC(PGconn* conn)
+static bool 
+PgShardBegin2PC(PGconn* conn)
 {
 	return PgShardExecute(conn, PGRES_COMMAND_OK, "BEGIN TRANSACTION");
 }
 
-static bool PgShardPrepare2PC(PGconn* conn, char const* relationName, int64 shardId)
+static bool 
+PgShardPrepare2PC(PGconn* conn)
 {
-	return PgShardExecute(conn, PGRES_COMMAND_OK, PgShard2pcCommand("PREPARE TRANSACTION", relationName, shardId));
+	GlobalTransactionId += 1;
+	return PgShardExecute(conn, PGRES_COMMAND_OK, PgShard2pcCommand("PREPARE TRANSACTION"));
 }
 							
-static bool PgShardCommitPrepared2PC(PGconn* conn, char const* relationName, int64 shardId)
+static bool 
+PgShardCommitPrepared2PC(PGconn* conn)
 {
-	return PgShardExecute(conn, PGRES_COMMAND_OK, PgShard2pcCommand("COMMIT PREPARED", relationName, shardId)); 
+	return PgShardExecute(conn, PGRES_COMMAND_OK, PgShard2pcCommand("COMMIT PREPARED")); 
 }
 
-static bool PgShardRollbackPrepared2PC(PGconn* conn, char const* relationName, int64 shardId)
+static bool 
+PgShardRollbackPrepared2PC(PGconn* conn)
 {
-	return PgShardExecute(conn, PGRES_COMMAND_OK, PgShard2pcCommand("ROLLBACK PREPARED 'copy_%s_%d'", relationName, shardId)); 
+	return PgShardExecute(conn, PGRES_COMMAND_OK, PgShard2pcCommand("ROLLBACK PREPARED")); 
 }
 
-static bool PgShardRollback2PC(PGconn* conn)
+static bool 
+PgShardRollback2PC(PGconn* conn)
 {
 	return PgShardExecute(conn, PGRES_COMMAND_OK, "ROLLBACK");
 }
@@ -91,7 +101,8 @@ static bool PgShardRollback2PC(PGconn* conn)
 /*
  * Execute statement with specified parameters and check its result
  */
-bool PgShardExecute(PGconn* conn, ExecStatusType expectedResult, char const* sql)
+bool 
+PgShardExecute(PGconn* conn, ExecStatusType expectedResult, char const* sql)
 {
 	bool ret = true;
 	PGresult *result = PQexec(conn, sql);
