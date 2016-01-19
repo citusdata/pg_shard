@@ -29,9 +29,9 @@
 /* function declarations to extend DDL commands with shard IDs */
 extern List * TableDDLCommandList(Oid relationId);
 extern void AppendOptionListToString(StringInfo stringBuffer, List *optionList);
-extern List * ExtendedDDLCommandList(Oid masterRelationId, ShardId shardId,
+extern List * ExtendedDDLCommandList(Oid masterRelationId, int64 shardId,
 									 List *sqlCommandList);
-extern void AppendShardIdToName(char **name, ShardId shardId);
+extern void AppendShardIdToName(char **name, int64 shardId);
 extern bool ExecuteRemoteCommandList(char *nodeName, uint32 nodePort,
 									 List *sqlCommandList);
 

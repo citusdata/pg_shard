@@ -545,7 +545,7 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 				shardListCache[shardHashCode] = prunedList;
 			}
 
-			shardInterval = (ShardInterval *) lfirst(list_head(prunedList));
+			shardInterval = (ShardInterval *) linitial(prunedList);
 			shardId = shardInterval->id;
 				
 			shardConnections = (ShardConnections*)hash_search(shardToConn, &shardInterval->id, HASH_ENTER, &found);
