@@ -367,6 +367,7 @@ static List* HTABToList(HTAB* hash)
 	void* entry;
 	List* list = NULL;
 
+	hash_seq_init(&hashCursor, hash);
 	while ((entry = hash_seq_search(&hashCursor)) != NULL) 
 	{
 		list = lappend(list, entry);
