@@ -309,13 +309,9 @@ static bool PgCopyEndTransaction(ShardId shardId, PGconn* conn, void* arg, bool 
 	char const* relationName = (char*)arg;
 	PgShardTransactionManager const* tmgr = &PgShardTransManagerImpl[PgShardCurrTransManager];
 	
-	if (status)
-	{
-		tmgr->CommitPrepared(conn, relationName, shardId);
-	} else {
-		PQputCopyEnd(conn, "Aborted because of failure on some shard");
-		tmgr->Rollback(conn);
-	}
+	Assert(status);
+	tmgr->CommitPrepared(conn, relationName, shardId);
+
 	PQfinish(conn);
 	return true;
 }
@@ -594,10 +590,14 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 	heap_close(rel, AccessShareLock);
 
 	/* Complete two phase commit */
-	DoForAllShards(shardConnectionsList, PgCopyEndTransaction, relationName);
 	if (failedShard != INVALID_SHARD_ID) 
 	{ 
+		DoForAllShards(shardConnectionsList, PgCopyAbortTransaction, relationName);
 		elog(ERROR, "COPY failed for shard %ld", (long)failedShard);
+	}
+	else
+	{
+		DoForAllShards(shardConnectionsList, PgCopyEndTransaction, relationName);
 	}
 }
 
