@@ -38,6 +38,7 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_type.h"
+#include "catalog/pg_am.h"
 #include "commands/extension.h"
 #include "commands/copy.h"
 #include "commands/defrem.h"
@@ -75,6 +76,7 @@
 #include "utils/errcodes.h"
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
+#include "utils/typcache.h"
 #include "utils/palloc.h"
 #include "utils/rel.h"
 #include "utils/relcache.h"
@@ -406,8 +408,16 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 	StringInfo lineBuf;
 	ShardConnections* shardConnections = NULL;
 	List* shardConnectionsList = NULL;
+	List** shardListCache = NULL;
+	Datum partitionColumnValue = 0;
 	int i = 0;
-		
+	TypeCacheEntry *typeEntry = NULL;
+	FmgrInfo *hashFunction = NULL;
+	int hashedValue = 0;
+	int shardCount = 0;
+	int shardHashCode = 0;
+	uint32 hashTokenIncrement = 0;
+
 	relationName = get_rel_name(tableId);
 		
 	shardIntervalList = LookupShardIntervalList(tableId);
@@ -448,6 +458,10 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 	rightConst->constbyval = get_typbyval(columnOid);
 	whereClauseList = list_make1(equalityExpr);
 
+	/* resolve hash function for parition column */
+	typeEntry = lookup_type_cache(partitionColumn->vartype, TYPECACHE_HASH_PROC_FINFO);
+	hashFunction = &(typeEntry->hash_proc_finfo);
+
 	/* allocate column values and nulls arrays */
 	rel = heap_open(tableId,  AccessShareLock);
 	tupleDescriptor = RelationGetDescr(rel);
@@ -486,9 +500,14 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 	}
 
 	PG_TRY();
-	{
+	{	
 		/* Lock all shards in shared mode */
 		shardIntervalList = SortList(shardIntervalList, CompareTasksByShardId);
+
+		shardCount = shardIntervalList->length;
+		shardListCache = palloc0(shardCount*sizeof(List*));
+		hashTokenIncrement = (uint32)(HASH_TOKEN_COUNT / shardCount);
+
 		foreach(shardIntervalCell, shardIntervalList)
 		{
 			ShardInterval *shardInterval = (ShardInterval *) lfirst(shardIntervalCell);
@@ -516,9 +535,18 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 								errmsg("cannot copy row with NULL value "
 									   "in partition column")));
 			} 
-			rightConst->constvalue = columnValues[partitionColumn->varattno];
-			prunedList = PruneShardList(tableId, whereClauseList, shardIntervalList);
-				
+			partitionColumnValue = columnValues[partitionColumn->varattno];
+			hashedValue = DatumGetInt32(FunctionCall1(hashFunction, partitionColumnValue));
+			shardHashCode = (int)((uint32)(hashedValue - INT32_MIN) / hashTokenIncrement);
+			prunedList = shardListCache[shardHashCode];
+			
+			if (prunedList == NULL)
+			{
+				rightConst->constvalue = partitionColumnValue;
+				prunedList = PruneShardList(tableId, whereClauseList, shardIntervalList);
+				shardListCache[shardHashCode] = prunedList;
+			}
+
 			foreach(shardIntervalCell, prunedList)
 			{
 				ShardInterval *shardInterval = (ShardInterval *) lfirst(shardIntervalCell);
