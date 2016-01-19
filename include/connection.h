@@ -49,12 +49,18 @@ typedef struct NodeConnectionEntry
 } NodeConnectionEntry;
 
 
+typedef struct
+{
+	int64   id;
+	PGconn* conn;
+} PlacementConnection;
 
-typedef struct {
+typedef struct 
+{
 	ShardId shardId;
 	int replicaCount;
 	bool* status;
-	PGconn** conn;
+	PlacementConnection* placements;
 } ShardConnections;
 
 /* function declarations for obtaining and using a connection */

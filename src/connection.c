@@ -340,7 +340,7 @@ ShardId DoForAllShards(List* shardConnections, ShardAction action, void* arg)
 		bool allOk = true;
 		for (i = 0; i < shardConn->replicaCount; i++) 
 		{						
-			allOk &= shardConn->status[i] = action(shardConn->shardId, shardConn->conn[i], arg, shardConn->status[i]);
+			allOk &= shardConn->status[i] = action(shardConn->shardId, shardConn->placements[i].conn, arg, shardConn->status[i]);
 		}
 		if (!allOk) 
 		{

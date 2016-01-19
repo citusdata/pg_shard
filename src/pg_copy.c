@@ -314,7 +314,7 @@ static bool PgCopyEndTransaction(ShardId shardId, PGconn* conn, void* arg, bool 
 }
 	
 
-static void 
+static void
 InitializeShardConnections(CopyStmt *copyStatement,
 						   ShardConnections *shardConnections,
                            ShardId shardId,
@@ -323,9 +323,10 @@ InitializeShardConnections(CopyStmt *copyStatement,
 	ListCell *taskPlacementCell = NULL;
 	List *finalizedPlacementList = LoadFinalizedShardPlacementList(shardId); 
 	int placementCount = list_length(finalizedPlacementList);
+	List *failedPlacementList = NULL;
+	ListCell *failedPlacementCell = NULL;
 	
-	shardConnections->conn = (PGconn**)palloc0(sizeof(PGconn*)*placementCount);
-	shardConnections->replicaCount = placementCount;
+	shardConnections->placements = (PlacementConnection*)palloc0(sizeof(PlacementConnection)*placementCount);
 	shardConnections->status = (bool*)palloc0(placementCount*sizeof(bool));
 	placementCount = 0;
 					
@@ -338,7 +339,9 @@ InitializeShardConnections(CopyStmt *copyStatement,
 		if (conn != NULL)										 
 		{
 			char const* copy = ConstructCopyStatement(copyStatement, shardId);
-			shardConnections->conn[placementCount++] = conn;
+			shardConnections->placements[placementCount].conn = conn;
+			shardConnections->placements[placementCount].id = taskPlacement->id;
+			placementCount += 1;
 			/*
 			 * New connection: start transaction with copy command on it.
 			 * Append shard id to table name.
@@ -346,12 +349,27 @@ InitializeShardConnections(CopyStmt *copyStatement,
 			if (!transactionManager->Begin(conn) ||
 				!PgShardExecute(conn, PGRES_COPY_IN, copy))
 			{
-				elog(ERROR, "Failed to start '%s' on node %s:%d", copy, nodeName, taskPlacement->nodePort);
+				failedPlacementList = lappend(failedPlacementList, taskPlacement);
+				elog(WARNING, "Failed to start '%s' on node %s:%d", copy, nodeName, taskPlacement->nodePort);
 			}
 		} else { 
-			elog(ERROR, "Failed to connect to node %s:%d", nodeName, taskPlacement->nodePort);
+			failedPlacementList = lappend(failedPlacementList, taskPlacement);
+			elog(WARNING, "Failed to connect to node %s:%d", nodeName, taskPlacement->nodePort);
 		}
 	}
+	/* if all placements failed, error out */
+	if (list_length(failedPlacementList) == list_length(finalizedPlacementList))
+	{
+		elog(ERROR, "Could not copy to any active placements for shard %ld", (long)shardId);
+	}
+	/* otherwise, mark failed placements as inactive: they're stale */
+	foreach(failedPlacementCell, failedPlacementList)
+	{
+		ShardPlacement *failedPlacement = (ShardPlacement *) lfirst(failedPlacementCell);
+
+		UpdateShardPlacementRowState(failedPlacement->id, STATE_INACTIVE);
+	}
+	shardConnections->replicaCount = placementCount;
 }
 
 static List* HTABToList(HTAB* hash)
@@ -514,8 +532,8 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 		{
 			ShardInterval *shardInterval = NULL;
 			ShardId shardId = 0;
+			int errorCount = 0;
 			bool found = false;
-
 			MemoryContext oldContext = MemoryContextSwitchTo(tupleContext);
 			nextRowFound = NextCopyFrom(copyState, NULL, columnValues, columnNulls, NULL);
 			MemoryContextSwitchTo(oldContext);
@@ -561,12 +579,35 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 			/* Replicate row to all shard placements */
 			for (i = 0; i < shardConnections->replicaCount; i++) 
 			{ 
-				if (PQputCopyData(shardConnections->conn[i], lineBuf->data, lineBuf->len) <= 0)
+				if (PQputCopyData(shardConnections->placements[i].conn, lineBuf->data, lineBuf->len) <= 0)
 				{
-					elog(ERROR, "Copy failed for shard %ld", (long)shardId);
+					elog(WARNING, "Copy failed for placement %ld for %ld", (long)shardConnections->placements[i].id, (long)shardId);
+					errorCount += 1;
+					PQfinish(shardConnections->placements[i].conn);
+					shardConnections->placements[i].conn = NULL;
 				}
 			}
 			MemoryContextReset(tupleContext);
+			shardConnections->replicaCount -= errorCount;
+			if (shardConnections->replicaCount == 0) /* if all placements failed, error out */
+			{
+				elog(ERROR, "Could not copy to any active placements for shard %ld", (long)shardId);
+			}
+			else if (errorCount != 0) /* otherwise, mark failed placements as inactive: they're stale */
+			{
+				int j;
+				for (i = j = 0; i < shardConnections->replicaCount; j++)
+				{
+					if (shardConnections->placements[j].conn != NULL)
+					{
+						shardConnections->placements[i++] = shardConnections->placements[j];
+					}
+					else
+					{
+						UpdateShardPlacementRowState(shardConnections->placements[j].id, STATE_INACTIVE);
+					}
+				}
+			}						
 		}
 		/* Perform two phase commit in replicas */
 		shardConnectionsList = HTABToList(shardToConn);
