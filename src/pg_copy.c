@@ -372,23 +372,26 @@ InitializeShardConnections(CopyStmt *copyStatement,
 				!PgShardExecute(conn, PGRES_COPY_IN, copy))
 			{
 				failedPlacementList = lappend(failedPlacementList, taskPlacement);
-				elog(WARNING, "Failed to start '%s' on node %s:%d", copy, nodeName,
-					 taskPlacement->nodePort);
+				ereport(WARNING, (errcode(ERRCODE_IO_ERROR),
+								  errmsg("Failed to start '%s' on node %s:%d", 
+										 copy, nodeName, taskPlacement->nodePort)));
 			}
 		}
 		else
 		{
 			failedPlacementList = lappend(failedPlacementList, taskPlacement);
-			elog(WARNING, "Failed to connect to node %s:%d", nodeName,
-				 taskPlacement->nodePort);
+			ereport(WARNING, (errcode(ERRCODE_IO_ERROR),
+							  errmsg("Failed to connect to node %s:%d", 
+									 nodeName, taskPlacement->nodePort)));
 		}
 	}
 
 	/* if all placements failed, error out */
 	if (list_length(failedPlacementList) == list_length(finalizedPlacementList))
 	{
-		elog(ERROR, "Could not copy to any active placements for shard %ld",
-			 (long) shardId);
+		ereport(ERROR, (errcode(ERRCODE_IO_ERROR),
+						errmsg("Could not copy to any active placements for shard %ld",
+							   (long) shardId)));
 
 		/* otherwise, mark failed placements as inactive: they're stale */
 	}
@@ -542,7 +545,8 @@ PgShardCopy(CopyStmt *copyStatement, char const *query)
 
 	if (copyState->binary)
 	{
-		elog(ERROR, "Copy in binary mode is not currently supported");
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("Copy in binary mode is not currently supported")));
 	}
 	PG_TRY();
 	{
@@ -622,9 +626,10 @@ PgShardCopy(CopyStmt *copyStatement, char const *query)
 				if (PQputCopyData(shardConnections->placements[i].conn, lineBuf->data,
 								  lineBuf->len) <= 0)
 				{
-					elog(WARNING, "Copy failed for placement %ld for %ld",
-						 (long) shardConnections->placements[i].id,
-						 (long) shardId);
+					ereport(WARNING, (errcode(ERRCODE_IO_ERROR),
+									  errmsg("Copy failed for placement %ld for %ld",
+											 (long) shardConnections->placements[i].id,
+											 (long) shardId)));
 					errorCount += 1;
 					PQfinish(shardConnections->placements[i].conn);
 					shardConnections->placements[i].conn = NULL;
@@ -634,8 +639,9 @@ PgShardCopy(CopyStmt *copyStatement, char const *query)
 			shardConnections->replicaCount -= errorCount;
 			if (shardConnections->replicaCount == 0) /* if all placements failed, error out */
 			{
-				elog(ERROR, "Could not copy to any active placements for shard %ld",
-					 (long) shardId);
+				ereport(ERROR, (errcode(ERRCODE_IO_ERROR),
+								errmsg("Could not copy to any active placements for shard %ld",
+									   (long) shardId)));
 			}
 			else if (errorCount != 0) /* otherwise, mark failed placements as inactive: they're stale */
 			{
@@ -680,7 +686,8 @@ PgShardCopy(CopyStmt *copyStatement, char const *query)
 	if (failedShard != INVALID_SHARD_ID)
 	{
 		DoForAllShards(shardConnectionsList, PgCopyAbortTransaction, NULL);
-		elog(ERROR, "COPY failed for shard %ld", (long) failedShard);
+		ereport(ERROR, (errcode(ERRCODE_IO_ERROR),
+						errmsg("COPY failed for shard %ld", (long) failedShard)));
 	}
 	else
 	{
