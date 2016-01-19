@@ -6,7 +6,7 @@
  *
  * Copyright (c) 2014-2015, Citus Data, Inc.
  *
- *-------------------------------------------------------------------------
+ ****-------------------------------------------------------------------------
  */
 
 #include "postgres.h"
@@ -85,14 +85,14 @@
 #include "utils/memutils.h"
 
 /*
- * TODO: this fragment was copied from src/backend/commands/copy.c 
+ * TODO: this fragment was copied from src/backend/commands/copy.c
  * It is needed only for CopyGetLineBuf function.
  */
 typedef enum CopyDest
 {
-	COPY_FILE,					/* to/from file (or a piped program) */
-	COPY_OLD_FE,				/* to/from frontend (2.0 protocol) */
-	COPY_NEW_FE					/* to/from frontend (3.0 protocol) */
+	COPY_FILE,                  /* to/from file (or a piped program) */
+	COPY_OLD_FE,                /* to/from frontend (2.0 protocol) */
+	COPY_NEW_FE                 /* to/from frontend (3.0 protocol) */
 } CopyDest;
 typedef enum EolType
 {
@@ -106,74 +106,74 @@ typedef enum EolType
 typedef struct CopyStateData
 {
 	/* low-level state data */
-	CopyDest	copy_dest;		/* type of copy source/destination */
-	FILE	   *copy_file;		/* used if copy_dest == COPY_FILE */
-	StringInfo	fe_msgbuf;		/* used for all dests during COPY TO, only for
-								 * dest == COPY_NEW_FE in COPY FROM */
-	bool		fe_eof;			/* true if detected end of copy data */
-	EolType		eol_type;		/* EOL type of input */
-	int			file_encoding;	/* file or remote side's character encoding */
-	bool		need_transcoding;		/* file encoding diff from server? */
-	bool		encoding_embeds_ascii;	/* ASCII can be non-first byte? */
+	CopyDest copy_dest;         /* type of copy source/destination */
+	FILE *copy_file;            /* used if copy_dest == COPY_FILE */
+	StringInfo fe_msgbuf;       /* used for all dests during COPY TO, only for
+	                             * dest == COPY_NEW_FE in COPY FROM */
+	bool fe_eof;                /* true if detected end of copy data */
+	EolType eol_type;           /* EOL type of input */
+	int file_encoding;          /* file or remote side's character encoding */
+	bool need_transcoding;              /* file encoding diff from server? */
+	bool encoding_embeds_ascii;         /* ASCII can be non-first byte? */
 
 	/* parameters from the COPY command */
-	Relation	rel;			/* relation to copy to or from */
-	QueryDesc  *queryDesc;		/* executable query to copy from */
-	List	   *attnumlist;		/* integer list of attnums to copy */
-	char	   *filename;		/* filename, or NULL for STDIN/STDOUT */
-	bool		is_program;		/* is 'filename' a program to popen? */
-	bool		binary;			/* binary format? */
-	bool		oids;			/* include OIDs? */
-	bool		freeze;			/* freeze rows on loading? */
-	bool		csv_mode;		/* Comma Separated Value format? */
-	bool		header_line;	/* CSV header line? */
-	char	   *null_print;		/* NULL marker string (server encoding!) */
-	int			null_print_len; /* length of same */
-	char	   *null_print_client;		/* same converted to file encoding */
-	char	   *delim;			/* column delimiter (must be 1 byte) */
-	char	   *quote;			/* CSV quote char (must be 1 byte) */
-	char	   *escape;			/* CSV escape char (must be 1 byte) */
-	List	   *force_quote;	/* list of column names */
-	bool		force_quote_all;	/* FORCE QUOTE *? */
-	bool	   *force_quote_flags;		/* per-column CSV FQ flags */
-	List	   *force_notnull;	/* list of column names */
-	bool	   *force_notnull_flags;	/* per-column CSV FNN flags */
-	List	   *force_null;		/* list of column names */
-	bool	   *force_null_flags;		/* per-column CSV FN flags */
-	bool		convert_selectively;	/* do selective binary conversion? */
-	List	   *convert_select; /* list of column names (can be NIL) */
-	bool	   *convert_select_flags;	/* per-column CSV/TEXT CS flags */
+	Relation rel;               /* relation to copy to or from */
+	QueryDesc *queryDesc;       /* executable query to copy from */
+	List *attnumlist;           /* integer list of attnums to copy */
+	char *filename;             /* filename, or NULL for STDIN/STDOUT */
+	bool is_program;            /* is 'filename' a program to popen? */
+	bool binary;                /* binary format? */
+	bool oids;                  /* include OIDs? */
+	bool freeze;                /* freeze rows on loading? */
+	bool csv_mode;              /* Comma Separated Value format? */
+	bool header_line;           /* CSV header line? */
+	char *null_print;           /* NULL marker string (server encoding!) */
+	int null_print_len;         /* length of same */
+	char *null_print_client;            /* same converted to file encoding */
+	char *delim;                /* column delimiter (must be 1 byte) */
+	char *quote;                /* CSV quote char (must be 1 byte) */
+	char *escape;               /* CSV escape char (must be 1 byte) */
+	List *force_quote;          /* list of column names */
+	bool force_quote_all;           /* FORCE QUOTE *? */
+	bool *force_quote_flags;            /* per-column CSV FQ flags */
+	List *force_notnull;        /* list of column names */
+	bool *force_notnull_flags;          /* per-column CSV FNN flags */
+	List *force_null;           /* list of column names */
+	bool *force_null_flags;             /* per-column CSV FN flags */
+	bool convert_selectively;           /* do selective binary conversion? */
+	List *convert_select;       /* list of column names (can be NIL) */
+	bool *convert_select_flags;         /* per-column CSV/TEXT CS flags */
 
 	/* these are just for error messages, see CopyFromErrorCallback */
-	const char *cur_relname;	/* table name for error messages */
-	int			cur_lineno;		/* line number for error messages */
-	const char *cur_attname;	/* current att for error messages */
-	const char *cur_attval;		/* current att value for error messages */
+	const char *cur_relname;    /* table name for error messages */
+	int cur_lineno;             /* line number for error messages */
+	const char *cur_attname;    /* current att for error messages */
+	const char *cur_attval;     /* current att value for error messages */
 
 	/*
 	 * Working state for COPY TO/FROM
 	 */
-	MemoryContext copycontext;	/* per-copy execution context */
+	MemoryContext copycontext;  /* per-copy execution context */
 
 	/*
 	 * Working state for COPY TO
 	 */
-	FmgrInfo   *out_functions;	/* lookup info for output functions */
-	MemoryContext rowcontext;	/* per-row evaluation context */
+	FmgrInfo *out_functions;    /* lookup info for output functions */
+	MemoryContext rowcontext;   /* per-row evaluation context */
 
 	/*
 	 * Working state for COPY FROM
 	 */
-	AttrNumber	num_defaults;
-	bool		file_has_oids;
-	FmgrInfo	oid_in_function;
-	Oid			oid_typioparam;
-	FmgrInfo   *in_functions;	/* array of input functions for each attrs */
-	Oid		   *typioparams;	/* array of element types for in_functions */
-	int		   *defmap;			/* array of default att numbers */
-	ExprState **defexprs;		/* array of default att expressions */
-	bool		volatile_defexprs;		/* is any of defexprs volatile? */
-	List	   *range_table;
+	AttrNumber num_defaults;
+	bool file_has_oids;
+	FmgrInfo oid_in_function;
+	Oid oid_typioparam;
+	FmgrInfo *in_functions;     /* array of input functions for each attrs */
+	Oid *typioparams;           /* array of element types for in_functions */
+	int *defmap;                /* array of default att numbers */
+	ExprState **defexprs;       /* array of default att expressions */
+	bool volatile_defexprs;             /* is any of defexprs volatile? */
+	List *range_table;
 
 	/*
 	 * These variables are used to reduce overhead in textual COPY FROM.
@@ -187,8 +187,8 @@ typedef struct CopyStateData
 
 	/* field raw data pointers found by COPY FROM */
 
-	int			max_fields;
-	char	  **raw_fields;
+	int max_fields;
+	char **raw_fields;
 
 	/*
 	 * Similarly, line_buf holds the whole input line being processed. The
@@ -198,8 +198,8 @@ typedef struct CopyStateData
 	 * can display it in error messages if appropriate.
 	 */
 	StringInfoData line_buf;
-	bool		line_buf_converted;		/* converted to server encoding? */
-	bool		line_buf_valid; /* contains the row being processed? */
+	bool line_buf_converted;            /* converted to server encoding? */
+	bool line_buf_valid;        /* contains the row being processed? */
 
 	/*
 	 * Finally, raw_buf holds raw data read from the data source (file or
@@ -208,26 +208,30 @@ typedef struct CopyStateData
 	 * converts it.	 Note: we guarantee that there is a \0 at
 	 * raw_buf[raw_buf_len].
 	 */
-#define RAW_BUF_SIZE 65536		/* we palloc RAW_BUF_SIZE+1 bytes */
-	char	   *raw_buf;
-	int			raw_buf_index;	/* next byte to process */
-	int			raw_buf_len;	/* total # of bytes stored */
+#define RAW_BUF_SIZE 65536      /* we palloc RAW_BUF_SIZE+1 bytes */
+	char *raw_buf;
+	int raw_buf_index;          /* next byte to process */
+	int raw_buf_len;            /* total # of bytes stored */
 } CopyStateData;
 
 /* TODOL should be moved to copy.c */
-static StringInfo CopyGetLineBuf(CopyStateData *cs)
+static StringInfo
+CopyGetLineBuf(CopyStateData *cs)
 {
 	return &cs->line_buf;
 }
 
+
 #define MAX_SHARDS 1001
 
-static uint32 shard_id_hash_fn(const void *key, Size keysize)
+static uint32
+shard_id_hash_fn(const void *key, Size keysize)
 {
-	return *(int32*)key ^ *((int32*)key+1);
+	return *(int32 *) key ^ *((int32 *) key + 1);
 }
 
-/* 
+
+/*
  * Construct hash table used for shardId->Connection mapping.
  * We can not use connection cache from connection.c used by GteConnection because
  * we need to establish multiple connections with each nodes: one connection per shard
@@ -245,56 +249,69 @@ CreateShardToConnectionHash()
 	return hash_create("shardToConn", MAX_SHARDS, &info, HASH_ELEM | HASH_FUNCTION);
 }
 
-static char const* ConstructCopyStatement(CopyStmt *copyStatement, ShardId shardId)
-{
-    StringInfo buf = makeStringInfo();
-    ListCell* cell;
-    char sep;
-    char const* qualifiedName = quote_qualified_identifier(copyStatement->relation->schemaname,
-                                                           copyStatement->relation->relname);
-    appendStringInfo(buf, "COPY %s_%ld ", qualifiedName, (long)shardId);    
-    if (copyStatement->attlist) { 
-        sep = '(';
-        foreach(cell, copyStatement->attlist)
-        {
-            appendStringInfoChar(buf, sep);
-            appendStringInfoString(buf, strVal(lfirst(cell)));
-            sep = ',';
-        }
-        appendStringInfoChar(buf, ')');        
-    }
-    appendStringInfoString(buf, "FROM STDIN");
 
-    if (copyStatement->options) { 
-        appendStringInfoString(buf, " WITH ");
-        sep = '(';
-        foreach(cell, copyStatement->options)
-        {
-            DefElem* def = (DefElem *) lfirst(cell);     
-            appendStringInfo(buf, "%c%s '%s'", sep, def->defname, defGetString(def));
-            sep = ',';
-        }
-        appendStringInfoChar(buf, ')');        
-    }   
-    return buf->data;
+static char const *
+ConstructCopyStatement(CopyStmt *copyStatement, ShardId shardId)
+{
+	StringInfo buf = makeStringInfo();
+	ListCell *cell;
+	char sep;
+	char const *qualifiedName = quote_qualified_identifier(
+		copyStatement->relation->schemaname,
+		copyStatement->relation->
+		relname);
+	appendStringInfo(buf, "COPY %s_%ld ", qualifiedName, (long) shardId);
+	if (copyStatement->attlist)
+	{
+		sep = '(';
+		foreach(cell, copyStatement->attlist)
+		{
+			appendStringInfoChar(buf, sep);
+			appendStringInfoString(buf, strVal(lfirst(cell)));
+			sep = ',';
+		}
+		appendStringInfoChar(buf, ')');
+	}
+	appendStringInfoString(buf, "FROM STDIN");
+
+	if (copyStatement->options)
+	{
+		appendStringInfoString(buf, " WITH ");
+		sep = '(';
+		foreach(cell, copyStatement->options)
+		{
+			DefElem *def = (DefElem *) lfirst(cell);
+			appendStringInfo(buf, "%c%s '%s'", sep, def->defname, defGetString(def));
+			sep = ',';
+		}
+		appendStringInfoChar(buf, ')');
+	}
+	return buf->data;
 }
 
-static bool PgCopyPrepareTransaction(ShardId shardId, PGconn* conn, void* arg, bool status)
-{
 
-	PgShardTransactionManager const* tmgr = &PgShardTransManagerImpl[PgShardCurrTransManager];
+static bool
+PgCopyPrepareTransaction(ShardId shardId, PGconn *conn, void *arg, bool status)
+{
+	PgShardTransactionManager const *tmgr =
+		&PgShardTransManagerImpl[PgShardCurrTransManager];
 	PQputCopyEnd(conn, NULL);
 	return tmgr->Prepare(conn);
 }
 
-static bool PgCopyAbortTransaction(ShardId shardId, PGconn* conn, void* arg, bool status)
-{
-	PgShardTransactionManager const* tmgr = &PgShardTransManagerImpl[PgShardCurrTransManager];
 
-	if (status) 
+static bool
+PgCopyAbortTransaction(ShardId shardId, PGconn *conn, void *arg, bool status)
+{
+	PgShardTransactionManager const *tmgr =
+		&PgShardTransManagerImpl[PgShardCurrTransManager];
+
+	if (status)
 	{
 		tmgr->RollbackPrepared(conn);
-	} else {
+	}
+	else
+	{
 		PQputCopyEnd(conn, "Aborted because of failure on some shard");
 		tmgr->Rollback(conn);
 	}
@@ -302,46 +319,51 @@ static bool PgCopyAbortTransaction(ShardId shardId, PGconn* conn, void* arg, boo
 	return true;
 }
 
-static bool PgCopyEndTransaction(ShardId shardId, PGconn* conn, void* arg, bool status)
+
+static bool
+PgCopyEndTransaction(ShardId shardId, PGconn *conn, void *arg, bool status)
 {
-	PgShardTransactionManager const* tmgr = &PgShardTransManagerImpl[PgShardCurrTransManager];
-	
+	PgShardTransactionManager const *tmgr =
+		&PgShardTransManagerImpl[PgShardCurrTransManager];
+
 	Assert(status);
 	tmgr->CommitPrepared(conn);
 
 	PQfinish(conn);
 	return true;
 }
-	
+
 
 static void
 InitializeShardConnections(CopyStmt *copyStatement,
 						   ShardConnections *shardConnections,
-                           ShardId shardId,
-                           PgShardTransactionManager const* transactionManager) 
+						   ShardId shardId,
+						   PgShardTransactionManager const *transactionManager)
 {
 	ListCell *taskPlacementCell = NULL;
-	List *finalizedPlacementList = LoadFinalizedShardPlacementList(shardId); 
+	List *finalizedPlacementList = LoadFinalizedShardPlacementList(shardId);
 	int placementCount = list_length(finalizedPlacementList);
 	List *failedPlacementList = NULL;
 	ListCell *failedPlacementCell = NULL;
-	
-	shardConnections->placements = (PlacementConnection*)palloc0(sizeof(PlacementConnection)*placementCount);
-	shardConnections->status = (bool*)palloc0(placementCount*sizeof(bool));
+
+	shardConnections->placements =
+		(PlacementConnection *) palloc0(sizeof(PlacementConnection) * placementCount);
+	shardConnections->status = (bool *) palloc0(placementCount * sizeof(bool));
 	placementCount = 0;
-					
+
 	foreach(taskPlacementCell, finalizedPlacementList)
 	{
 		ShardPlacement *taskPlacement = (ShardPlacement *) lfirst(taskPlacementCell);
 		char *nodeName = taskPlacement->nodeName;
-		PGconn* conn = NULL;
+		PGconn *conn = NULL;
 		conn = ConnectToNode(nodeName, taskPlacement->nodePort);
-		if (conn != NULL)										 
+		if (conn != NULL)
 		{
-			char const* copy = ConstructCopyStatement(copyStatement, shardId);
+			char const *copy = ConstructCopyStatement(copyStatement, shardId);
 			shardConnections->placements[placementCount].conn = conn;
 			shardConnections->placements[placementCount].id = taskPlacement->id;
 			placementCount += 1;
+
 			/*
 			 * New connection: start transaction with copy command on it.
 			 * Append shard id to table name.
@@ -350,19 +372,26 @@ InitializeShardConnections(CopyStmt *copyStatement,
 				!PgShardExecute(conn, PGRES_COPY_IN, copy))
 			{
 				failedPlacementList = lappend(failedPlacementList, taskPlacement);
-				elog(WARNING, "Failed to start '%s' on node %s:%d", copy, nodeName, taskPlacement->nodePort);
+				elog(WARNING, "Failed to start '%s' on node %s:%d", copy, nodeName,
+					 taskPlacement->nodePort);
 			}
-		} else { 
+		}
+		else
+		{
 			failedPlacementList = lappend(failedPlacementList, taskPlacement);
-			elog(WARNING, "Failed to connect to node %s:%d", nodeName, taskPlacement->nodePort);
+			elog(WARNING, "Failed to connect to node %s:%d", nodeName,
+				 taskPlacement->nodePort);
 		}
 	}
+
 	/* if all placements failed, error out */
 	if (list_length(failedPlacementList) == list_length(finalizedPlacementList))
 	{
-		elog(ERROR, "Could not copy to any active placements for shard %ld", (long)shardId);
+		elog(ERROR, "Could not copy to any active placements for shard %ld",
+			 (long) shardId);
+
+		/* otherwise, mark failed placements as inactive: they're stale */
 	}
-	/* otherwise, mark failed placements as inactive: they're stale */
 	foreach(failedPlacementCell, failedPlacementList)
 	{
 		ShardPlacement *failedPlacement = (ShardPlacement *) lfirst(failedPlacementCell);
@@ -372,14 +401,16 @@ InitializeShardConnections(CopyStmt *copyStatement,
 	shardConnections->replicaCount = placementCount;
 }
 
-static List* HTABToList(HTAB* hash)
+
+static List *
+HTABToList(HTAB *hash)
 {
 	HASH_SEQ_STATUS hashCursor;
-	void* entry;
-	List* list = NULL;
+	void *entry;
+	List *list = NULL;
 
 	hash_seq_init(&hashCursor, hash);
-	while ((entry = hash_seq_search(&hashCursor)) != NULL) 
+	while ((entry = hash_seq_search(&hashCursor)) != NULL)
 	{
 		list = lappend(list, entry);
 	}
@@ -390,17 +421,18 @@ static List* HTABToList(HTAB* hash)
 /*
  * Handle copy to/from distributed table
  */
-void PgShardCopy(CopyStmt *copyStatement, char const* query)
-{		 
+void
+PgShardCopy(CopyStmt *copyStatement, char const *query)
+{
 	RangeVar *relation = copyStatement->relation;
 	ListCell *shardIntervalCell = NULL;
 	List *shardIntervalList = NULL;
 	char *relationName = NULL;
-	PgShardTransactionManager const* transactionManager = 
+	PgShardTransactionManager const *transactionManager =
 		&PgShardTransManagerImpl[PgShardCurrTransManager];
 	bool failOK = true;
 	Oid tableId = RangeVarGetRelid(relation, NoLock, failOK);
-	HTAB* shardToConn = NULL;
+	HTAB *shardToConn = NULL;
 	MemoryContext tupleContext = NULL;
 	CopyState copyState = NULL;
 	bool nextRowFound = true;
@@ -408,7 +440,7 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 	uint32 columnCount = 0;
 	Datum *columnValues = NULL;
 	bool *columnNulls = NULL;
-	Var* partitionColumn = NULL;
+	Var *partitionColumn = NULL;
 	Oid columnOid = 0;
 	OpExpr *equalityExpr = NULL;
 	List *whereClauseList = NULL;
@@ -418,9 +450,9 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 	ShardId failedShard = INVALID_SHARD_ID;
 	Relation rel = NULL;
 	StringInfo lineBuf;
-	ShardConnections* shardConnections = NULL;
-	List* shardConnectionsList = NULL;
-	List** shardListCache = NULL;
+	ShardConnections *shardConnections = NULL;
+	List *shardConnectionsList = NULL;
+	List **shardListCache = NULL;
 	Datum partitionColumnValue = 0;
 	int i = 0;
 	TypeCacheEntry *typeEntry = NULL;
@@ -431,7 +463,7 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 	uint32 hashTokenIncrement = 0;
 
 	relationName = get_rel_name(tableId);
-		
+
 	shardIntervalList = LookupShardIntervalList(tableId);
 	if (shardIntervalList == NIL)
 	{
@@ -443,9 +475,9 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 								"and try again.")));
 	}
 	if (!copyStatement->is_from) /* Construct query selecting data from this relation */
-	{ 
+	{
 		uint64 processedCount;
-		char const* qualifiedName = quote_qualified_identifier(relation->schemaname,
+		char const *qualifiedName = quote_qualified_identifier(relation->schemaname,
 															   relation->relname);
 		StringInfo newQuerySubstring = makeStringInfo();
 		List *queryList = NIL;
@@ -453,6 +485,7 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 		queryList = raw_parser(newQuerySubstring->data);
 		copyStatement->query = linitial(queryList);
 		copyStatement->relation = NULL;
+
 		/* Collecting data from shards will be done by select handler */
 		DoCopy(copyStatement, query, &processedCount);
 		return;
@@ -462,7 +495,7 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 	partitionColumn = PartitionColumn(tableId);
 	columnOid = partitionColumn->vartype;
 	equalityExpr = MakeOpExpression(partitionColumn, BTEqualStrategyNumber);
-	rightOp = get_rightop((Expr *) equalityExpr);				 
+	rightOp = get_rightop((Expr *) equalityExpr);
 	Assert(IsA(rightOp, Const));
 	rightConst = (Const *) rightOp;
 	rightConst->constvalue = 0;
@@ -475,7 +508,7 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 	hashFunction = &(typeEntry->hash_proc_finfo);
 
 	/* allocate column values and nulls arrays */
-	rel = heap_open(tableId,  AccessShareLock);
+	rel = heap_open(tableId, AccessShareLock);
 	tupleDescriptor = RelationGetDescr(rel);
 	columnCount = tupleDescriptor->natts;
 	columnValues = palloc0(columnCount * sizeof(Datum));
@@ -493,32 +526,32 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 										 ALLOCSET_DEFAULT_MINSIZE,
 										 ALLOCSET_DEFAULT_INITSIZE,
 										 ALLOCSET_DEFAULT_MAXSIZE);
-			
-	/* 
+
+	/*
 	 * Construct hash table used for shardId->Connection mapping.
 	 * We can not use connection cache from connection.c used by GteConnection because
 	 * we need to establish multiple connections with each nodes: one connection per shard
 	 */
 	shardToConn = CreateShardToConnectionHash();
+
 	/* init state to read from COPY data source */
 	copyState = BeginCopyFrom(rel, copyStatement->filename,
 							  copyStatement->is_program,
 							  copyStatement->attlist,
 							  copyStatement->options);
-				
-	if (copyState->binary) 
-	{ 
+
+	if (copyState->binary)
+	{
 		elog(ERROR, "Copy in binary mode is not currently supported");
 	}
-
 	PG_TRY();
-	{	
+	{
 		/* Lock all shards in shared mode */
 		shardIntervalList = SortList(shardIntervalList, CompareTasksByShardId);
 
 		shardCount = shardIntervalList->length;
-		shardListCache = palloc0(shardCount*sizeof(List*));
-		hashTokenIncrement = (uint32)(HASH_TOKEN_COUNT / shardCount);
+		shardListCache = palloc0(shardCount * sizeof(List *));
+		hashTokenIncrement = (uint32) (HASH_TOKEN_COUNT / shardCount);
 
 		foreach(shardIntervalCell, shardIntervalList)
 		{
@@ -537,25 +570,27 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 			MemoryContext oldContext = MemoryContextSwitchTo(tupleContext);
 			nextRowFound = NextCopyFrom(copyState, NULL, columnValues, columnNulls, NULL);
 			MemoryContextSwitchTo(oldContext);
-		
+
 			if (!nextRowFound)
 			{
 				MemoryContextReset(tupleContext);
 				break;
 			}
-			
+
 			/* write the row to the shard */
-			if (columnNulls[partitionColumn->varattno]) 
-			{ 
+			if (columnNulls[partitionColumn->varattno])
+			{
 				ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
 								errmsg("cannot copy row with NULL value "
 									   "in partition column")));
-			} 
+			}
 			partitionColumnValue = columnValues[partitionColumn->varattno];
-			hashedValue = DatumGetInt32(FunctionCall1(hashFunction, partitionColumnValue));
-			shardHashCode = (int)((uint32)(hashedValue - INT32_MIN) / hashTokenIncrement);
+			hashedValue = DatumGetInt32(FunctionCall1(hashFunction,
+													  partitionColumnValue));
+			shardHashCode =
+				(int) ((uint32) (hashedValue - INT32_MIN) / hashTokenIncrement);
 			prunedList = shardListCache[shardHashCode];
-			
+
 			if (prunedList == NULL)
 			{
 				rightConst->constvalue = partitionColumnValue;
@@ -565,23 +600,31 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 
 			shardInterval = (ShardInterval *) linitial(prunedList);
 			shardId = shardInterval->id;
-				
-			shardConnections = (ShardConnections*)hash_search(shardToConn, &shardInterval->id, HASH_ENTER, &found);
-			if (!found) 
-			{ 
-				InitializeShardConnections(copyStatement, shardConnections, shardId, transactionManager);
+
+			shardConnections =
+				(ShardConnections *) hash_search(shardToConn, &shardInterval->id,
+												 HASH_ENTER,
+												 &found);
+			if (!found)
+			{
+				InitializeShardConnections(copyStatement, shardConnections, shardId,
+										   transactionManager);
 			}
 			lineBuf = CopyGetLineBuf(copyState);
-			lineBuf->data[lineBuf->len++] = '\n'; 
-			/* There was already new line in the buffer, but it was truncated: 
+			lineBuf->data[lineBuf->len++] = '\n';
+
+			/* There was already new line in the buffer, but it was truncated:
 			 * no need to check available space */
-			
+
 			/* Replicate row to all shard placements */
-			for (i = 0; i < shardConnections->replicaCount; i++) 
-			{ 
-				if (PQputCopyData(shardConnections->placements[i].conn, lineBuf->data, lineBuf->len) <= 0)
+			for (i = 0; i < shardConnections->replicaCount; i++)
+			{
+				if (PQputCopyData(shardConnections->placements[i].conn, lineBuf->data,
+								  lineBuf->len) <= 0)
 				{
-					elog(WARNING, "Copy failed for placement %ld for %ld", (long)shardConnections->placements[i].id, (long)shardId);
+					elog(WARNING, "Copy failed for placement %ld for %ld",
+						 (long) shardConnections->placements[i].id,
+						 (long) shardId);
 					errorCount += 1;
 					PQfinish(shardConnections->placements[i].conn);
 					shardConnections->placements[i].conn = NULL;
@@ -591,7 +634,8 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 			shardConnections->replicaCount -= errorCount;
 			if (shardConnections->replicaCount == 0) /* if all placements failed, error out */
 			{
-				elog(ERROR, "Could not copy to any active placements for shard %ld", (long)shardId);
+				elog(ERROR, "Could not copy to any active placements for shard %ld",
+					 (long) shardId);
 			}
 			else if (errorCount != 0) /* otherwise, mark failed placements as inactive: they're stale */
 			{
@@ -600,23 +644,28 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 				{
 					if (shardConnections->placements[j].conn != NULL)
 					{
-						shardConnections->placements[i++] = shardConnections->placements[j];
+						shardConnections->placements[i++] =
+							shardConnections->placements[j];
 					}
 					else
 					{
-						UpdateShardPlacementRowState(shardConnections->placements[j].id, STATE_INACTIVE);
+						UpdateShardPlacementRowState(shardConnections->placements[j].id,
+													 STATE_INACTIVE);
 					}
 				}
-			}						
+			}
 		}
+
 		/* Perform two phase commit in replicas */
 		shardConnectionsList = HTABToList(shardToConn);
-		failedShard = DoForAllShards(shardConnectionsList, PgCopyPrepareTransaction, NULL);
+		failedShard = DoForAllShards(shardConnectionsList, PgCopyPrepareTransaction,
+									 NULL);
 	}
 	PG_CATCH(); /* do recovery */
 	{
 		EndCopyFrom(copyState);
 		heap_close(rel, AccessShareLock);
+
 		/* Rollback transactions */
 		shardConnectionsList = HTABToList(shardToConn);
 		DoForAllShards(shardConnectionsList, PgCopyAbortTransaction, NULL);
@@ -628,14 +677,13 @@ void PgShardCopy(CopyStmt *copyStatement, char const* query)
 	heap_close(rel, AccessShareLock);
 
 	/* Complete two phase commit */
-	if (failedShard != INVALID_SHARD_ID) 
-	{ 
+	if (failedShard != INVALID_SHARD_ID)
+	{
 		DoForAllShards(shardConnectionsList, PgCopyAbortTransaction, NULL);
-		elog(ERROR, "COPY failed for shard %ld", (long)failedShard);
+		elog(ERROR, "COPY failed for shard %ld", (long) failedShard);
 	}
 	else
 	{
 		DoForAllShards(shardConnectionsList, PgCopyEndTransaction, NULL);
 	}
 }
-
