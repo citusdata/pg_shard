@@ -298,19 +298,23 @@ PgCopyEnd(PGconn *con, char const* msg)
 		{
 			if (PQresultStatus(result) != PGRES_COMMAND_OK)
 			{
+				/*
 				ereport(WARNING, (errcode(ERRCODE_IO_ERROR),
 								  errmsg("Copy failed with error %s", PQresultErrorMessage(result))));
+				*/
 				return false;
 			}
 			PQclear(result);
 		}
 		return true;
 	}
+	/*
 	else
 	{
 		ereport(WARNING, (errcode(ERRCODE_IO_ERROR),
 						  errmsg("Failed to end copy")));		
 	}
+	*/
 	return false;
 }
 
