@@ -5,8 +5,6 @@
 #include "connection.h"
 #include "pg_tmgr.h"
 
-#define MAX_STMT_LEN 1024
-
 int PgShardCurrTransManager;
 
 static bool PgShardBeginStub(PGconn *conn);
@@ -15,16 +13,26 @@ static bool PgShardCommitPreparedStub(PGconn *conn);
 static bool PgShardRollbackPreparedStub(PGconn *conn);
 static bool PgShardRollbackStub(PGconn *conn);
 
+static bool PgShardBegin1PC(PGconn *conn);
+static bool PgShardPrepare1PC(PGconn *conn);
+static bool PgShardCommitPrepared1PC(PGconn *conn);
+static bool PgShardRollbackPrepared1PC(PGconn *conn);
+static bool PgShardRollback1PC(PGconn *conn);
+
 static bool PgShardBegin2PC(PGconn *conn);
 static bool PgShardPrepare2PC(PGconn *conn);
 static bool PgShardCommitPrepared2PC(PGconn *conn);
 static bool PgShardRollbackPrepared2PC(PGconn *conn);
 static bool PgShardRollback2PC(PGconn *conn);
 
+static int GlobalTransactionId = 0;
+
 PgShardTransactionManager const PgShardTransManagerImpl[] =
 {
 	{ PgShardBeginStub, PgShardPrepareStub, PgShardCommitPreparedStub,
 	  PgShardRollbackPreparedStub, PgShardRollbackStub },
+	{ PgShardBegin1PC, PgShardPrepare1PC, PgShardCommitPrepared1PC,
+	  PgShardRollbackPrepared1PC, PgShardRollback1PC },
 	{ PgShardBegin2PC, PgShardPrepare2PC, PgShardCommitPrepared2PC,
 	  PgShardRollbackPrepared2PC, PgShardRollback2PC }
 };
@@ -68,10 +76,46 @@ PgShardRollbackStub(PGconn *conn)
 
 
 /*
+ * One-phase commit
+ */
+
+static bool
+PgShardBegin1PC(PGconn *conn)
+{
+	return PgShardExecute(conn, PGRES_COMMAND_OK, "BEGIN TRANSACTION");
+}
+
+
+static bool
+PgShardPrepare1PC(PGconn *conn)
+{
+	return true;
+}
+
+
+static bool
+PgShardCommitPrepared1PC(PGconn *conn)
+{
+	return PgShardExecute(conn, PGRES_COMMAND_OK, "COMMIT");
+}
+
+
+static bool
+PgShardRollbackPrepared1PC(PGconn *conn)
+{
+	return PgShardExecute(conn, PGRES_COMMAND_OK, "ROLLBACK");
+}
+
+
+static bool
+PgShardRollback1PC(PGconn *conn)
+{
+	return PgShardExecute(conn, PGRES_COMMAND_OK, "ROLLBACK");
+}
+
+/*
  * Two-phase commit
  */
-static int GlobalTransactionId;
-
 static char *
 PgShard2pcCommand(char const *cmd)
 {

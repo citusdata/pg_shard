@@ -254,12 +254,11 @@ static char const *
 ConstructCopyStatement(CopyStmt *copyStatement, ShardId shardId)
 {
 	StringInfo buf = makeStringInfo();
-	ListCell *cell;
-	char sep;
+	ListCell *cell = NULL;
+	char sep = '\0';
 	char const *qualifiedName = quote_qualified_identifier(
 		copyStatement->relation->schemaname,
-		copyStatement->relation->
-		relname);
+		copyStatement->relation->relname);
 	appendStringInfo(buf, "COPY %s_%ld ", qualifiedName, (long) shardId);
 	if (copyStatement->attlist)
 	{
@@ -289,14 +288,39 @@ ConstructCopyStatement(CopyStmt *copyStatement, ShardId shardId)
 	return buf->data;
 }
 
+static bool
+PgCopyEnd(PGconn *con, char const* msg)
+{
+	PGresult *result = NULL;
+	if (PQputCopyEnd(con, msg) == 1)
+	{
+		while ((result = PQgetResult(con)) != NULL)
+		{
+			if (PQresultStatus(result) != PGRES_COMMAND_OK)
+			{
+				ereport(WARNING, (errcode(ERRCODE_IO_ERROR),
+								  errmsg("Copy failed with error %s", PQresultErrorMessage(result))));
+				return false;
+			}
+			PQclear(result);
+		}
+		return true;
+	}
+	else
+	{
+		ereport(WARNING, (errcode(ERRCODE_IO_ERROR),
+						  errmsg("Failed to end copy")));		
+	}
+	return false;
+}
 
 static bool
 PgCopyPrepareTransaction(ShardId shardId, PGconn *conn, void *arg, bool status)
 {
 	PgShardTransactionManager const *tmgr =
 		&PgShardTransManagerImpl[PgShardCurrTransManager];
-	PQputCopyEnd(conn, NULL);
-	return tmgr->Prepare(conn);
+	return PQputCopyEnd(conn, NULL)
+		&& tmgr->Prepare(conn);
 }
 
 
@@ -312,7 +336,7 @@ PgCopyAbortTransaction(ShardId shardId, PGconn *conn, void *arg, bool status)
 	}
 	else
 	{
-		PQputCopyEnd(conn, "Aborted because of failure on some shard");
+		PgCopyEnd(conn, "Aborted because of failure on some shard");
 		tmgr->Rollback(conn);
 	}
 	PQfinish(conn);
@@ -421,11 +445,23 @@ HTABToList(HTAB *hash)
 }
 
 
-/*
- * Handle copy to/from distributed table
- */
-void
-PgShardCopy(CopyStmt *copyStatement, char const *query)
+static void
+PgShardCopyTo(CopyStmt *copyStatement, char const *query)
+{
+	RangeVar *relation = copyStatement->relation;
+	uint64 processedCount = 0;
+	char const *qualifiedName = quote_qualified_identifier(relation->schemaname,
+														   relation->relname);
+	List *queryList = raw_parser(psprintf("select * from %s", qualifiedName));
+	copyStatement->query = linitial(queryList);
+	copyStatement->relation = NULL;
+	
+	/* Collecting data from shards will be done by select handler */
+	DoCopy(copyStatement, query, &processedCount);
+}	
+
+static void
+PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 {
 	RangeVar *relation = copyStatement->relation;
 	ListCell *shardIntervalCell = NULL;
@@ -476,22 +512,6 @@ PgShardCopy(CopyStmt *copyStatement, char const *query)
 								  relationName),
 						errhint("Run master_create_worker_shards to create shards "
 								"and try again.")));
-	}
-	if (!copyStatement->is_from) /* Construct query selecting data from this relation */
-	{
-		uint64 processedCount;
-		char const *qualifiedName = quote_qualified_identifier(relation->schemaname,
-															   relation->relname);
-		StringInfo newQuerySubstring = makeStringInfo();
-		List *queryList = NIL;
-		appendStringInfo(newQuerySubstring, "select * from %s", qualifiedName);
-		queryList = raw_parser(newQuerySubstring->data);
-		copyStatement->query = linitial(queryList);
-		copyStatement->relation = NULL;
-
-		/* Collecting data from shards will be done by select handler */
-		DoCopy(copyStatement, query, &processedCount);
-		return;
 	}
 
 	/* construct pseudo predicate specifying condition for partition key */
@@ -694,3 +714,20 @@ PgShardCopy(CopyStmt *copyStatement, char const *query)
 		DoForAllShards(shardConnectionsList, PgCopyEndTransaction, NULL);
 	}
 }
+
+/*
+ * Handle copy to/from distributed table
+ */
+void
+PgShardCopy(CopyStmt *copyStatement, char const *query)
+{
+    if (copyStatement->is_from)
+    {
+        PgShardCopyFrom(copyStatement, query);
+    }
+    else
+    {
+        PgShardCopyTo(copyStatement, query);
+    }
+}
+

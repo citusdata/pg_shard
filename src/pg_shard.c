@@ -168,8 +168,9 @@ static ProcessUtility_hook_type PreviousProcessUtilityHook = NULL;
 
 struct config_enum_entry const PgShardTransManagerEnum[] = 
 { 
-    { "local", 0, false },
-    { "2PC", 1, false }
+    { "no",  0, false },
+    { "1PC", 1, false },
+    { "2PC", 2, false }
 };
                                                 
 
@@ -219,7 +220,7 @@ _PG_init(void)
 	DefineCustomEnumVariable("pg_shard.copy_transaction_manager",
                              "Transaction manager for distributed copy", 
                              NULL, 
-                             &PgShardCurrTransManager, 0, PgShardTransManagerEnum, PGC_USERSET, 0, NULL,
+                             &PgShardCurrTransManager, 1, PgShardTransManagerEnum, PGC_USERSET, 0, NULL,
                              NULL, NULL);
 
 	EmitWarningsOnPlaceholders("pg_shard");
