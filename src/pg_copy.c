@@ -595,6 +595,7 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 			ShardId shardId = 0;
 			int errorCount = 0;
 			bool found = false;
+			bool cacheMiss = false;
 			MemoryContext oldContext = MemoryContextSwitchTo(tupleContext);
 			nextRowFound = NextCopyFrom(copyState, NULL, columnValues, columnNulls, NULL);
 			MemoryContextSwitchTo(oldContext);
@@ -606,13 +607,13 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 			}
 
 			/* write the row to the shard */
-			if (columnNulls[partitionColumn->varattno])
+			if (columnNulls[partitionColumn->varattno-1])
 			{
 				ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
 								errmsg("cannot copy row with NULL value "
 									   "in partition column")));
 			}
-			partitionColumnValue = columnValues[partitionColumn->varattno];
+			partitionColumnValue = columnValues[partitionColumn->varattno-1];
 			hashedValue = DatumGetInt32(FunctionCall1(hashFunction,
 													  partitionColumnValue));
 			shardHashCode =
@@ -624,6 +625,7 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 				rightConst->constvalue = partitionColumnValue;
 				prunedList = PruneShardList(tableId, whereClauseList, shardIntervalList);
 				shardListCache[shardHashCode] = prunedList;
+				cacheMiss = true;
 			}
 
 			shardInterval = (ShardInterval *) linitial(prunedList);
