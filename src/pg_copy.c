@@ -298,23 +298,12 @@ PgCopyEnd(PGconn *con, char const* msg)
 		{
 			if (PQresultStatus(result) != PGRES_COMMAND_OK)
 			{
-				/*
-				ereport(WARNING, (errcode(ERRCODE_IO_ERROR),
-								  errmsg("Copy failed with error %s", PQresultErrorMessage(result))));
-				*/
 				return false;
 			}
 			PQclear(result);
 		}
 		return true;
 	}
-	/*
-	else
-	{
-		ereport(WARNING, (errcode(ERRCODE_IO_ERROR),
-						  errmsg("Failed to end copy")));		
-	}
-	*/
 	return false;
 }
 
@@ -323,7 +312,7 @@ PgCopyPrepareTransaction(ShardId shardId, PGconn *conn, void *arg, bool status)
 {
 	PgShardTransactionManager const *tmgr =
 		&PgShardTransManagerImpl[PgShardCurrTransManager];
-	return PQputCopyEnd(conn, NULL)
+	return PgCopyEnd(conn, NULL)
 		&& tmgr->Prepare(conn);
 }
 
@@ -595,7 +584,6 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 			ShardId shardId = 0;
 			int errorCount = 0;
 			bool found = false;
-			bool cacheMiss = false;
 			MemoryContext oldContext = MemoryContextSwitchTo(tupleContext);
 			nextRowFound = NextCopyFrom(copyState, NULL, columnValues, columnNulls, NULL);
 			MemoryContextSwitchTo(oldContext);
@@ -625,7 +613,6 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 				rightConst->constvalue = partitionColumnValue;
 				prunedList = PruneShardList(tableId, whereClauseList, shardIntervalList);
 				shardListCache[shardHashCode] = prunedList;
-				cacheMiss = true;
 			}
 
 			shardInterval = (ShardInterval *) linitial(prunedList);
