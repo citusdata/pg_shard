@@ -16,3 +16,9 @@ select * from company;
 \copy (select name from company) to 'names.csv';
 \copy company from 'test/data/format-error.csv' delimiter ',' csv; 
 \copy company from 'test/data/constraint-error.csv' delimiter ',' csv; 
+copy company from stdin delimiter ';' null '???';
+C108;Siemems
+C109;???
+C110;IBM
+\.
+select * from company;
