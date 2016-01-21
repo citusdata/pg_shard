@@ -55,3 +55,19 @@ select * from company;
 ERROR:  missing data for column "name"
 \copy company from 'test/data/constraint-error.csv' delimiter ',' csv; 
 ERROR:  COPY failed for shard 102070
+copy company from stdin delimiter ';' null '???';
+select * from company;
+ customer_id |  name   
+-------------+---------
+ C106        | Asus
+ C110        | IBM
+ C101        | Dell
+ C103        | HP
+ C108        | Siemems
+ C102        | Apple
+ C104        | Acer
+ C109        | 
+ C107        | Lenovo
+ C105        | Samsung
+(10 rows)
+
