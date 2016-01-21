@@ -493,7 +493,9 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 	int shardCount = 0;
 	int shardHashCode = 0;
 	uint32 hashTokenIncrement = 0;
-
+	int32 shardMinHashToken = 0;
+	int32 shardMaxHashToken = 0;
+	
 	relationName = get_rel_name(tableId);
 
 	shardIntervalList = LookupShardIntervalList(tableId);
@@ -612,7 +614,21 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 			{
 				rightConst->constvalue = partitionColumnValue;
 				prunedList = PruneShardList(tableId, whereClauseList, shardIntervalList);
-				shardListCache[shardHashCode] = prunedList;
+				shardInterval = (ShardInterval *) linitial(prunedList);
+				shardId = shardInterval->id;
+
+				shardMinHashToken = INT32_MIN + (shardId * hashTokenIncrement);
+				shardMaxHashToken = shardMinHashToken + (hashTokenIncrement - 1);
+				if (shardId == (shardCount - 1))
+				{
+					shardMaxHashToken = INT32_MAX;
+				}
+				if (DatumGetInt32(shardInterval->minValue) == shardMinHashToken &&
+					DatumGetInt32(shardInterval->maxValue) == shardMaxHashToken)
+				{
+					/* Use cache only for standard hash paritioning schema */
+					shardListCache[shardHashCode] = prunedList;
+				}
 			}
 
 			shardInterval = (ShardInterval *) linitial(prunedList);
