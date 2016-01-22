@@ -62,7 +62,7 @@ GetConnection(char *nodeName, int32 nodePort)
 	NodeConnectionEntry *nodeConnectionEntry = NULL;
 	bool entryFound = false;
 	bool needNewConnection = true;
-	
+
 	/* check input */
 	if (strnlen(nodeName, MAX_NODE_LENGTH + 1) > MAX_NODE_LENGTH)
 	{

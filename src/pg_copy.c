@@ -6,7 +6,7 @@
  *
  * Copyright (c) 2014-2015, Citus Data, Inc.
  *
- ****-------------------------------------------------------------------------
+ *-------------------------------------------------------------------------
  */
 
 #include "postgres.h"
@@ -249,7 +249,9 @@ CreateShardToConnectionHash()
 	return hash_create("shardToConn", MAX_SHARDS, &info, HASH_ELEM | HASH_FUNCTION);
 }
 
-
+/* 
+ * Reconstruct text of COPY statement based on CopyStmt for the particular shard
+ */
 static char const *
 ConstructCopyStatement(CopyStmt *copyStatement, ShardId shardId)
 {
@@ -288,6 +290,10 @@ ConstructCopyStatement(CopyStmt *copyStatement, ShardId shardId)
 	return buf->data;
 }
 
+/*
+ * Send PQputCopyEnd command to the client and check result (status of 
+ * COPY command completion)
+ */
 static bool
 PgCopyEnd(PGconn *con, char const* msg)
 {
@@ -307,8 +313,13 @@ PgCopyEnd(PGconn *con, char const* msg)
 	return false;
 }
 
+/*
+ * End copy and prepare transaction.
+ * This function is applied for each shard placement unless some error happen.
+ * Status of this function is stored in ShardConnections::status field
+ */
 static bool
-PgCopyPrepareTransaction(ShardId shardId, PGconn *conn, void *arg, bool status)
+PgCopyPrepareTransaction(ShardId shardId, PGconn *conn, void *arg, bool isPrepared)
 {
 	PgShardTransactionManager const *tmgr =
 		&PgShardTransManagerImpl[PgShardCurrTransManager];
@@ -316,14 +327,18 @@ PgCopyPrepareTransaction(ShardId shardId, PGconn *conn, void *arg, bool status)
 		&& tmgr->Prepare(conn);
 }
 
-
+/*
+ * Abort transaction.
+ * If COPY is already completed for this connection, then abort prepared transaction,
+ * otherwise end copy and rollback current transaction
+ */
 static bool
-PgCopyAbortTransaction(ShardId shardId, PGconn *conn, void *arg, bool status)
+PgCopyAbortTransaction(ShardId shardId, PGconn *conn, void *arg, bool isPrepared)
 {
 	PgShardTransactionManager const *tmgr =
 		&PgShardTransManagerImpl[PgShardCurrTransManager];
 
-	if (status)
+	if (isPrepared)
 	{
 		tmgr->RollbackPrepared(conn);
 	}
@@ -336,21 +351,26 @@ PgCopyAbortTransaction(ShardId shardId, PGconn *conn, void *arg, bool status)
 	return true;
 }
 
-
+/*
+ * Completecopy transaction.
+ * This function is called only of COPY is successfully completed at all nodes
+ */
 static bool
-PgCopyEndTransaction(ShardId shardId, PGconn *conn, void *arg, bool status)
+PgCopyEndTransaction(ShardId shardId, PGconn *conn, void *arg, bool isPrepared)
 {
 	PgShardTransactionManager const *tmgr =
 		&PgShardTransManagerImpl[PgShardCurrTransManager];
 
-	Assert(status);
+	Assert(isPrepared);
 	tmgr->CommitPrepared(conn);
 
 	PQfinish(conn);
 	return true;
 }
 
-
+/*
+ * Create hash entry for connections for this shard placements
+ */
 static void
 InitializeShardConnections(CopyStmt *copyStatement,
 						   ShardConnections *shardConnections,
@@ -421,7 +441,9 @@ InitializeShardConnections(CopyStmt *copyStatement,
 	shardConnections->replicaCount = placementCount;
 }
 
-
+/*
+ * Create single-linked list from hash table entries
+ */
 static List *
 HTABToList(HTAB *hash)
 {
@@ -437,7 +459,9 @@ HTABToList(HTAB *hash)
 	return list;
 }
 
-
+/*
+ * Copy data from sepcified table
+ */
 static void
 PgShardCopyTo(CopyStmt *copyStatement, char const *query)
 {
@@ -453,6 +477,9 @@ PgShardCopyTo(CopyStmt *copyStatement, char const *query)
 	DoCopy(copyStatement, query, &processedCount);
 }	
 
+/*
+ * Append data to the specified table
+ */
 static void
 PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 {
