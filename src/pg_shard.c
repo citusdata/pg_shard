@@ -19,8 +19,8 @@
 #include "plpgsql.h"
 
 #include "pg_shard.h"
-#include "pg_tmgr.h"
-#include "pg_copy.h"
+#include "distributed_copy.h"
+#include "distributed_transaction_manager.h"
 #include "connection.h"
 #include "create_shards.h"
 #include "distribution_metadata.h"

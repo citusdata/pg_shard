@@ -3,7 +3,7 @@
 #include "miscadmin.h"
 
 #include "connection.h"
-#include "pg_tmgr.h"
+#include "distributed_transaction_manager.h"
 
 int PgShardCurrTransManager;
 
