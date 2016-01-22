@@ -340,12 +340,22 @@ PgCopyAbortTransaction(ShardId shardId, PGconn *conn, void *arg, bool isPrepared
 
 	if (isPrepared)
 	{
-		tmgr->RollbackPrepared(conn);
+		if (!tmgr->RollbackPrepared(conn))
+		{
+			ereport(WARNING, (errcode(ERRCODE_IO_ERROR),
+							  errmsg("Failed to rollback prepared transactionb for shard %ld", 
+									 (long)shardId)));
+		}
 	}
 	else
 	{
 		PgCopyEnd(conn, "Aborted because of failure on some shard");
-		tmgr->Rollback(conn);
+		if (!tmgr->Rollback(conn))
+		{
+			ereport(WARNING, (errcode(ERRCODE_IO_ERROR),
+							  errmsg("Failed to rollback transactionb for shard %ld", 
+									 (long)shardId)));
+		}
 	}
 	PQfinish(conn);
 	return true;
@@ -362,8 +372,13 @@ PgCopyEndTransaction(ShardId shardId, PGconn *conn, void *arg, bool isPrepared)
 		&PgShardTransManagerImpl[PgShardCurrTransManager];
 
 	Assert(isPrepared);
-	tmgr->CommitPrepared(conn);
-
+	if (!tmgr->CommitPrepared(conn))
+	{
+		ereport(WARNING, (errcode(ERRCODE_IO_ERROR),
+						  errmsg("Failed to commit prepared transactionb for shard %ld", 
+								 (long)shardId)));
+	}
+	
 	PQfinish(conn);
 	return true;
 }
