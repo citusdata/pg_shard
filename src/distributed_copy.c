@@ -526,7 +526,7 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 	StringInfo lineBuf;
 	ShardConnections *shardConnections = NULL;
 	List *shardConnectionsList = NULL;
-	List **shardListCache = NULL;
+	ShardInterval **shardIntervalCache = NULL;
 	Datum partitionColumnValue = 0;
 	int i = 0;
 	TypeCacheEntry *typeEntry = NULL;
@@ -611,7 +611,7 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 		shardIntervalList = SortList(shardIntervalList, CompareTasksByShardId);
 
 		shardCount = shardIntervalList->length;
-		shardListCache = palloc0(shardCount * sizeof(List *));
+		shardIntervalCache = palloc0(shardCount * sizeof(List *));
 		hashTokenIncrement = (uint32) (HASH_TOKEN_COUNT / shardCount);
 
 		foreach(shardIntervalCell, shardIntervalList)
@@ -650,9 +650,9 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 													  partitionColumnValue));
 			shardHashCode =
 				(int) ((uint32) (hashedValue - INT32_MIN) / hashTokenIncrement);
-			prunedList = shardListCache[shardHashCode];
+			shardInterval = shardIntervalCache[shardHashCode];
 
-			if (prunedList == NULL)
+			if (shardInterval == NULL)
 			{
 				rightConst->constvalue = partitionColumnValue;
 				prunedList = PruneShardList(tableId, whereClauseList, shardIntervalList);
@@ -669,11 +669,9 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 					DatumGetInt32(shardInterval->maxValue) == shardMaxHashToken)
 				{
 					/* Use cache only for standard hash paritioning schema */
-					shardListCache[shardHashCode] = prunedList;
+					shardIntervalCache[shardHashCode] = shardInterval;
 				}
 			}
-
-			shardInterval = (ShardInterval *) linitial(prunedList);
 			shardId = shardInterval->id;
 
 			shardConnections =
