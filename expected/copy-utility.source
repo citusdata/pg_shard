@@ -1,0 +1,58 @@
+CREATE TABLE customer
+(
+    customer_id TEXT primary key,
+    name TEXT
+);
+SELECT master_create_distributed_table(table_name := 'customer',
+                                       partition_column := 'customer_id');
+ master_create_distributed_table 
+---------------------------------
+ 
+(1 row)
+
+\set VERBOSITY terse
+SELECT master_create_worker_shards(table_name := 'customer',
+                                   shard_count := 16,
+                                   replication_factor := 1);
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+ master_create_worker_shards 
+-----------------------------
+ 
+(1 row)
+
+\set VERBOSITY default
+copy customer from '@abs_srcdir@/data/customer.csv' delimiter ',' csv; 
+select * from customer;
+ customer_id |  name   
+-------------+---------
+ C106        | Asus
+ C101        | Dell
+ C103        | HP
+ C102        | Apple
+ C104        | Acer
+ C107        | Lenovo
+ C105        | Samsung
+(7 rows)
+
+copy customer to '@abs_builddir@/results/results.csv';
+copy (select name from customer) to '@abs_builddir@/results/names.csv';
+copy customer from '@abs_srcdir@/data/format-error.csv' delimiter ',' csv; 
+ERROR:  missing data for column "name"
+copy customer from '@abs_srcdir@/data/constraint-error.csv' delimiter ',' csv; 
+ERROR:  COPY failed for shard 102086
+copy customer TO '@abs_builddir@/results/customer.csv';
