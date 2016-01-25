@@ -314,6 +314,10 @@ PgCopyEnd(PGconn *con, char const* msg)
 		}
 		return true;
 	}
+	else
+	{
+		ReportRemoteError(con, NULL);
+	}
 	return false;
 }
 
