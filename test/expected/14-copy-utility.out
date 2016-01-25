@@ -54,6 +54,8 @@ select * from company;
 \copy company from 'test/data/format-error.csv' delimiter ',' csv; 
 ERROR:  missing data for column "name"
 \copy company from 'test/data/constraint-error.csv' delimiter ',' csv; 
+WARNING:  Bad result from localhost:5432
+DETAIL:  Remote message: duplicate key value violates unique constraint "company_pkey_102070"
 ERROR:  COPY failed for shard 102070
 copy company from stdin delimiter ';' null '???';
 copy company from program 'echo C120,Apple' delimiter ',' csv; 
