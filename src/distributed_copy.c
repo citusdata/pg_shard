@@ -630,7 +630,6 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 		{
 			ShardInterval *shardInterval = NULL;
 			ShardId shardId = 0;
-			int errorCount = 0;
 			bool found = false;
 			MemoryContext oldContext = MemoryContextSwitchTo(tupleContext);
 			nextRowFound = NextCopyFrom(copyState, NULL, columnValues, columnNulls, NULL);
@@ -699,40 +698,13 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 				if (PQputCopyData(shardConnections->placements[i].conn, lineBuf->data,
 								  lineBuf->len) <= 0)
 				{
-					ereport(WARNING, (errcode(ERRCODE_IO_ERROR),
+					ereport(ERROR, (errcode(ERRCODE_IO_ERROR),
 									  errmsg("Copy failed for placement %ld for %ld",
 											 (long) shardConnections->placements[i].id,
 											 (long) shardId)));
-					errorCount += 1;
-					PQfinish(shardConnections->placements[i].conn);
-					shardConnections->placements[i].conn = NULL;
 				}
 			}
 			MemoryContextReset(tupleContext);
-			shardConnections->replicaCount -= errorCount;
-			if (shardConnections->replicaCount == 0) /* if all placements failed, error out */
-			{
-				ereport(ERROR, (errcode(ERRCODE_IO_ERROR),
-								errmsg("Could not copy to any active placements for shard %ld",
-									   (long) shardId)));
-			}
-			else if (errorCount != 0) /* otherwise, mark failed placements as inactive: they're stale */
-			{
-				int j;
-				for (i = j = 0; i < shardConnections->replicaCount; j++)
-				{
-					if (shardConnections->placements[j].conn != NULL)
-					{
-						shardConnections->placements[i++] =
-							shardConnections->placements[j];
-					}
-					else
-					{
-						UpdateShardPlacementRowState(shardConnections->placements[j].id,
-													 STATE_INACTIVE);
-					}
-				}
-			}
 		}
 
 		/* Perform two phase commit in replicas */
