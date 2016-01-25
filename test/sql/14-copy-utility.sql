@@ -21,4 +21,6 @@ C108;Siemems
 C109;???
 C110;IBM
 \.
+copy company from program 'echo C120,Apple' delimiter ',' csv; 
 select * from company;
+
