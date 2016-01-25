@@ -304,6 +304,10 @@ PgCopyEnd(PGconn *con, char const* msg)
 		{
 			if (PQresultStatus(result) != PGRES_COMMAND_OK)
 			{
+				if (msg == NULL)
+				{
+					ReportRemoteError(con, result);
+				}
 				return false;
 			}
 			PQclear(result);
@@ -375,7 +379,7 @@ PgCopyEndTransaction(ShardId shardId, PGconn *conn, void *arg, bool isPrepared)
 	if (!tmgr->CommitPrepared(conn))
 	{
 		ereport(WARNING, (errcode(ERRCODE_IO_ERROR),
-						  errmsg("Failed to commit prepared transactionb for shard %ld", 
+						  errmsg("Failed to commit prepared transaction for shard %ld", 
 								 (long)shardId)));
 	}
 	
