@@ -328,24 +328,3 @@ ConnectionGetOptionValue(PGconn *connection, char *optionKeyword)
 
 	return optionValue;
 }
-
-ShardId DoForAllShards(List* shardConnections, ShardAction action, void* arg)
-{
-	ListCell *listCell;
-	int i = 0;
-
-	foreach (listCell, shardConnections)
-	{
-		ShardConnections* shardConn = (ShardConnections*)lfirst(listCell);
-		bool allOk = true;
-		for (i = 0; i < shardConn->replicaCount; i++) 
-		{						
-			allOk &= shardConn->status[i] = action(shardConn->shardId, shardConn->placements[i].conn, arg, shardConn->status[i]);
-		}
-		if (!allOk) 
-		{
-			return shardConn->shardId;
-		}
-	}
-	return INVALID_SHARD_ID;
-}

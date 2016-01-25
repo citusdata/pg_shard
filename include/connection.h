@@ -49,20 +49,6 @@ typedef struct NodeConnectionEntry
 } NodeConnectionEntry;
 
 
-typedef struct
-{
-	int64   id;
-	PGconn* conn;
-} PlacementConnection;
-
-typedef struct 
-{
-	ShardId shardId;
-	int replicaCount;
-	bool* status;
-	PlacementConnection* placements;
-} ShardConnections;
-
 /* function declarations for obtaining and using a connection */
 extern PGconn * GetConnection(char *nodeName, int32 nodePort);
 extern void PurgeConnection(PGconn *connection);
@@ -70,11 +56,5 @@ extern void ReportRemoteError(PGconn *connection, PGresult *result);
 extern PGconn* ConnectToNode(char *nodeName, int nodePort);
 
 typedef bool (*ShardAction)(ShardId id, PGconn* conn, void* arg, bool status);
-
-/* 
- * Perform action for all shards and all shard replicas.
- * Returns number of shard for which operation od failed or INVALID_SHARD_ID in case of success
- */
-extern ShardId DoForAllShards(List* shardConnections, ShardAction action, void* arg);
 
 #endif /* PG_SHARD_CONNECTION_H */

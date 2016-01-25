@@ -326,13 +326,31 @@ PgCopyEnd(PGconn *con, char const* msg)
  * This function is applied for each shard placement unless some error happen.
  * Status of this function is stored in ShardConnections::status field
  */
-static bool
-PgCopyPrepareTransaction(ShardId shardId, PGconn *conn, void *arg, bool isPrepared)
+static ShardId
+PgCopyPrepareTransaction(List* shardConnections)
 {
+	ListCell *listCell;
+	int i = 0;
 	PgShardTransactionManager const *tmgr =
 		&PgShardTransManagerImpl[PgShardCurrTransManager];
-	return PgCopyEnd(conn, NULL)
-		&& tmgr->Prepare(conn);
+	foreach (listCell, shardConnections)
+	{
+		ShardConnections* shardConn = (ShardConnections*)lfirst(listCell);
+		for (i = 0; i < shardConn->replicaCount; i++) 
+		{
+			PGconn* conn = shardConn->placements[i].conn;
+			shardConn->placements[i].copied = true;
+			if (PgCopyEnd(conn, NULL) && tmgr->Prepare(conn))
+			{
+				shardConn->placements[i].prepared = true;
+			}
+			else
+			{
+				return shardConn->shardId;
+			}
+		}
+	}
+	return INVALID_SHARD_ID;
 }
 
 /*
@@ -340,55 +358,73 @@ PgCopyPrepareTransaction(ShardId shardId, PGconn *conn, void *arg, bool isPrepar
  * If COPY is already completed for this connection, then abort prepared transaction,
  * otherwise end copy and rollback current transaction
  */
-static bool
-PgCopyAbortTransaction(ShardId shardId, PGconn *conn, void *arg, bool isPrepared)
+static void
+PgCopyAbortTransaction(List* shardConnections)
 {
+	ListCell *listCell;
+	int i = 0;
 	PgShardTransactionManager const *tmgr =
 		&PgShardTransManagerImpl[PgShardCurrTransManager];
-
-	if (isPrepared)
+	foreach (listCell, shardConnections)
 	{
-		if (!tmgr->RollbackPrepared(conn))
+		ShardConnections* shardConn = (ShardConnections*)lfirst(listCell);
+		for (i = 0; i < shardConn->replicaCount; i++) 
 		{
-			ereport(WARNING, (errcode(ERRCODE_IO_ERROR),
-							  errmsg("Failed to rollback prepared transactionb for shard %ld", 
-									 (long)shardId)));
+			PGconn* conn = shardConn->placements[i].conn;
+			if (shardConn->placements[i].prepared)
+			{
+				if (!tmgr->RollbackPrepared(conn))
+				{
+					ereport(WARNING, (errcode(ERRCODE_IO_ERROR),
+									  errmsg("Failed to rollback prepared transactionb for shard %ld", 
+											 (long)shardConn->shardId)));
+				}
+			}
+			else
+			{
+				if (!shardConn->placements[i].copied)
+				{
+					PgCopyEnd(conn, "Aborted because of failure on some shard");
+				}
+				if (!tmgr->Rollback(conn))
+				{
+					ereport(WARNING, (errcode(ERRCODE_IO_ERROR),
+									  errmsg("Failed to rollback transactionb for shard %ld", 
+											 (long)shardConn->shardId)));
+				}
+			}
+			PQfinish(conn);
 		}
 	}
-	else
-	{
-		PgCopyEnd(conn, "Aborted because of failure on some shard");
-		if (!tmgr->Rollback(conn))
-		{
-			ereport(WARNING, (errcode(ERRCODE_IO_ERROR),
-							  errmsg("Failed to rollback transactionb for shard %ld", 
-									 (long)shardId)));
-		}
-	}
-	PQfinish(conn);
-	return true;
 }
 
 /*
  * Completecopy transaction.
  * This function is called only of COPY is successfully completed at all nodes
  */
-static bool
-PgCopyEndTransaction(ShardId shardId, PGconn *conn, void *arg, bool isPrepared)
+static void
+PgCopyEndTransaction(List* shardConnections)
 {
+	ListCell *listCell;
+	int i = 0;
 	PgShardTransactionManager const *tmgr =
 		&PgShardTransManagerImpl[PgShardCurrTransManager];
-
-	Assert(isPrepared);
-	if (!tmgr->CommitPrepared(conn))
+	foreach (listCell, shardConnections)
 	{
-		ereport(WARNING, (errcode(ERRCODE_IO_ERROR),
-						  errmsg("Failed to commit prepared transaction for shard %ld", 
-								 (long)shardId)));
+		ShardConnections* shardConn = (ShardConnections*)lfirst(listCell);
+		for (i = 0; i < shardConn->replicaCount; i++) 
+		{
+			PGconn* conn = shardConn->placements[i].conn;
+			Assert(shardConn->placements[i].prepared);
+			if (!tmgr->CommitPrepared(conn))
+			{
+				ereport(WARNING, (errcode(ERRCODE_IO_ERROR),
+								  errmsg("Failed to commit prepared transaction for shard %ld", 
+										 (long)shardConn->shardId)));
+			}
+			PQfinish(conn);
+		}
 	}
-	
-	PQfinish(conn);
-	return true;
 }
 
 /*
@@ -408,7 +444,6 @@ InitializeShardConnections(CopyStmt *copyStatement,
 
 	shardConnections->placements =
 		(PlacementConnection *) palloc0(sizeof(PlacementConnection) * placementCount);
-	shardConnections->status = (bool *) palloc0(placementCount * sizeof(bool));
 	placementCount = 0;
 
 	foreach(taskPlacementCell, finalizedPlacementList)
@@ -713,8 +748,7 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 
 		/* Perform two phase commit in replicas */
 		shardConnectionsList = HTABToList(shardToConn);
-		failedShard = DoForAllShards(shardConnectionsList, PgCopyPrepareTransaction,
-									 NULL);
+		failedShard = PgCopyPrepareTransaction(shardConnectionsList);
 	}
 	PG_CATCH(); /* do recovery */
 	{
@@ -723,7 +757,7 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 
 		/* Rollback transactions */
 		shardConnectionsList = HTABToList(shardToConn);
-		DoForAllShards(shardConnectionsList, PgCopyAbortTransaction, NULL);
+		PgCopyAbortTransaction(shardConnectionsList);
 		PG_RE_THROW();
 	}
 	PG_END_TRY();
@@ -734,13 +768,13 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 	/* Complete two phase commit */
 	if (failedShard != INVALID_SHARD_ID)
 	{
-		DoForAllShards(shardConnectionsList, PgCopyAbortTransaction, NULL);
+		PgCopyAbortTransaction(shardConnectionsList);
 		ereport(ERROR, (errcode(ERRCODE_IO_ERROR),
 						errmsg("COPY failed for shard %ld", (long) failedShard)));
 	}
 	else
 	{
-		DoForAllShards(shardConnectionsList, PgCopyEndTransaction, NULL);
+		PgCopyEndTransaction(shardConnectionsList);
 	}
 }
 
