@@ -39,6 +39,7 @@
 #include "catalog/pg_class.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_am.h"
+#include "catalog/pg_collation.h"
 #include "commands/extension.h"
 #include "commands/copy.h"
 #include "commands/defrem.h"
@@ -535,6 +536,18 @@ PgShardCopyTo(CopyStmt *copyStatement, char const *query)
 	DoCopy(copyStatement, query, &processedCount);
 }	
 
+static int
+CompareTaskByMinHashToken(const void *key1, const void *key2, void *arg)
+{
+	Datum		d1 = ((ShardInterval*)key1)->minValue;
+	Datum		d2 = ((ShardInterval*)key2)->minValue;
+	FmgrInfo   *compareFunction = (FmgrInfo *) arg;
+	Datum		c;
+
+	c = FunctionCall2Coll(compareFunction, DEFAULT_COLLATION_OID, d1, d2);
+	return DatumGetInt32(c);
+}
+
 /*
  * Append data to the specified table
  */
@@ -574,13 +587,11 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 	int i = 0;
 	TypeCacheEntry *typeEntry = NULL;
 	FmgrInfo *hashFunction = NULL;
-	int hashedValue = 0;
 	int shardCount = 0;
 	int shardHashCode = 0;
 	uint32 hashTokenIncrement = 0;
-	int32 shardMinHashToken = 0;
-	int32 shardMaxHashToken = 0;
-	
+	FmgrInfo *compareFunction = NULL;
+
 	relationName = get_rel_name(tableId);
 
 	shardIntervalList = LookupShardIntervalList(tableId);
@@ -650,12 +661,15 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 	}
 	PG_TRY();
 	{
+		char partitionType = PartitionType(tableId);
+		
 		/* Lock all shards in shared mode */
 		shardIntervalList = SortList(shardIntervalList, CompareTasksByShardId);
 
 		shardCount = shardIntervalList->length;
-		shardIntervalCache = palloc0(shardCount * sizeof(List *));
+		shardIntervalCache = palloc0(shardCount * sizeof(ShardInterval*));
 		hashTokenIncrement = (uint32) (HASH_TOKEN_COUNT / shardCount);
+		i = 0;
 
 		foreach(shardIntervalCell, shardIntervalList)
 		{
@@ -663,8 +677,34 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 			ShardId shardId = shardInterval->id;
 			LockShardData(shardId, ShareLock);
 			LockShardDistributionMetadata(shardId, ShareLock);
+			if (partitionType == HASH_PARTITION_TYPE)
+			{
+				int32 shardMinHashToken = INT32_MIN + (shardId * hashTokenIncrement);
+				int32 shardMaxHashToken = shardMinHashToken + (hashTokenIncrement - 1);
+				if (shardId == (shardCount - 1))
+				{
+					shardMaxHashToken = INT32_MAX;
+				}
+				if (DatumGetInt32(shardInterval->minValue) != shardMinHashToken ||
+					DatumGetInt32(shardInterval->maxValue) != shardMaxHashToken)
+				{
+					partitionType = RANGE_PARTITION_TYPE;
+				}
+			}
 		}
 
+		if (partitionType != HASH_PARTITION_TYPE)
+		{	
+			TypeCacheEntry *typentry = lookup_type_cache(partitionColumn->vartype, TYPECACHE_CMP_PROC_FINFO);
+			compareFunction = &typentry->cmp_proc_finfo;
+
+			i = 0;
+			foreach(shardIntervalCell, shardIntervalList)
+			{
+				shardIntervalCache[i++] = (ShardInterval *) lfirst(shardIntervalCell);
+			}
+			qsort_arg(shardIntervalCache, shardCount, sizeof(ShardInterval*), CompareTaskByMinHashToken, compareFunction);
+		}
 		while (true)
 		{
 			ShardInterval *shardInterval = NULL;
@@ -688,29 +728,49 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 									   "in partition column")));
 			}
 			partitionColumnValue = columnValues[partitionColumn->varattno-1];
-			hashedValue = DatumGetInt32(FunctionCall1(hashFunction,
-													  partitionColumnValue));
-			shardHashCode =
-				(int) ((uint32) (hashedValue - INT32_MIN) / hashTokenIncrement);
-			shardInterval = shardIntervalCache[shardHashCode];
-
-			if (shardInterval == NULL)
+			if (partitionType == HASH_PARTITION_TYPE)
 			{
+				int hashedValue = DatumGetInt32(FunctionCall1(hashFunction,
+														  partitionColumnValue));
+				shardHashCode =
+					(int) ((uint32) (hashedValue - INT32_MIN) / hashTokenIncrement);
+				shardInterval = shardIntervalCache[shardHashCode];
+			}
+			else
+			{
+				int l = 0, r = shardCount;
+				while (l < r) 
+				{
+					int m = (l + r) >> 1;
+					if (DatumGetInt32(FunctionCall2Coll(compareFunction, 
+														DEFAULT_COLLATION_OID, 
+														partitionColumnValue, 
+														shardIntervalCache[m]->minValue)) < 0)
+					{
+						r = m;
+					} 
+					else if (DatumGetInt32(FunctionCall2Coll(compareFunction, 
+															 DEFAULT_COLLATION_OID, 
+															 partitionColumnValue, 
+															 shardIntervalCache[m]->maxValue)) <= 0)
+					{
+						shardInterval = shardIntervalCache[m];
+						break;
+					}
+					else
+					{
+						l = m + 1;
+					}
+				}
+			}
+			if (shardInterval == NULL)
+			{						
 				rightConst->constvalue = partitionColumnValue;
 				prunedList = PruneShardList(tableId, whereClauseList, shardIntervalList);
 				shardInterval = (ShardInterval *) linitial(prunedList);
 				shardId = shardInterval->id;
-
-				shardMinHashToken = INT32_MIN + (shardId * hashTokenIncrement);
-				shardMaxHashToken = shardMinHashToken + (hashTokenIncrement - 1);
-				if (shardId == (shardCount - 1))
+				if (partitionType == HASH_PARTITION_TYPE)
 				{
-					shardMaxHashToken = INT32_MAX;
-				}
-				if (DatumGetInt32(shardInterval->minValue) == shardMinHashToken &&
-					DatumGetInt32(shardInterval->maxValue) == shardMaxHashToken)
-				{
-					/* Use cache only for standard hash paritioning schema */
 					shardIntervalCache[shardHashCode] = shardInterval;
 				}
 			}
