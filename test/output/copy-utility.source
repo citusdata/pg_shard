@@ -54,5 +54,7 @@ copy (select name from customer) to '@abs_builddir@/results/names.csv';
 copy customer from '@abs_srcdir@/data/format-error.csv' delimiter ',' csv; 
 ERROR:  missing data for column "name"
 copy customer from '@abs_srcdir@/data/constraint-error.csv' delimiter ',' csv; 
+WARNING:  Bad result from localhost:5432
+DETAIL:  Remote message: duplicate key value violates unique constraint "customer_pkey_102086"
 ERROR:  COPY failed for shard 102086
 copy customer TO '@abs_builddir@/results/customer.csv';
