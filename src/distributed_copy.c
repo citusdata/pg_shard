@@ -665,6 +665,7 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 		Oid intervalTypeId = (partitionType == HASH_PARTITION_TYPE) 
 			? INT4OID : partitionColumn->vartype;
 		bool useBinarySearch = (partitionType != HASH_PARTITION_TYPE);
+		int shardIndex = 0;
 
 		/* Lock all shards in shared mode */
 		shardIntervalList = SortList(shardIntervalList, CompareTasksByShardId);
@@ -672,7 +673,6 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 		shardCount = shardIntervalList->length;
 		shardIntervalCache = palloc0(shardCount * sizeof(ShardInterval*));
 		hashTokenIncrement = (uint32) (HASH_TOKEN_COUNT / shardCount);
-		i = 0;
 
 		foreach(shardIntervalCell, shardIntervalList)
 		{
@@ -680,11 +680,13 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 			ShardId shardId = shardInterval->id;
 			LockShardData(shardId, ShareLock);
 			LockShardDistributionMetadata(shardId, ShareLock);
+			shardIntervalCache[shardIndex] = shardInterval;
+
 			if (partitionType == HASH_PARTITION_TYPE)
 			{
-				int32 shardMinHashToken = INT32_MIN + (shardId * hashTokenIncrement);
+				int32 shardMinHashToken = INT32_MIN + (shardIndex * hashTokenIncrement);
 				int32 shardMaxHashToken = shardMinHashToken + (hashTokenIncrement - 1);
-				if (shardId == (shardCount - 1))
+				if (shardIndex == (shardCount - 1))
 				{
 					shardMaxHashToken = INT32_MAX;
 				}
@@ -694,20 +696,17 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 					useBinarySearch = true;
 				}
 			}
+			shardIndex += 1;
 		}
+		Assert(shardIndex == shardCount);
 
 		if (useBinarySearch)
 		{	
 			typeEntry = lookup_type_cache(intervalTypeId, TYPECACHE_CMP_PROC_FINFO);
 			compareFunction = &(typeEntry->cmp_proc_finfo);
 
-			i = 0;
-			foreach(shardIntervalCell, shardIntervalList)
-			{
-				shardIntervalCache[i++] = (ShardInterval *) lfirst(shardIntervalCell);
-			}
-			Assert(i == shardCount);
-			qsort_arg(shardIntervalCache, shardCount, sizeof(ShardInterval*), CompareShardIntervalsByMinHashToken, compareFunction);
+			qsort_arg(shardIntervalCache, shardCount, sizeof(ShardInterval*), 
+					  CompareShardIntervalsByMinHashToken, compareFunction);
 		}
 		while (true)
 		{
@@ -777,20 +776,13 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 			}
 			if (shardInterval == NULL)
 			{	
-				if (useBinarySearch)
-				{
-					ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-									errmsg("Inconsistency in distribution table for \"%s\"",
-										   relationName)));
-				}
-				rightConst->constvalue = partitionColumnValue;
-				prunedList = PruneShardList(tableId, whereClauseList, shardIntervalList);
-				shardInterval = (ShardInterval *) linitial(prunedList);
-				if (partitionType == HASH_PARTITION_TYPE)
-				{
-					shardIntervalCache[shardHashCode] = shardInterval;
-				}
+				ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+								errmsg("Inconsistency in distribution table for \"%s\"",
+									   relationName)));
 			}
+			rightConst->constvalue = partitionColumnValue;
+			prunedList = PruneShardList(tableId, whereClauseList, shardIntervalList);
+			shardInterval = (ShardInterval *) linitial(prunedList);
 			shardId = shardInterval->id;
 
 			shardConnections =
