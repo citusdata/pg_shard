@@ -571,12 +571,6 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 	Datum *columnValues = NULL;
 	bool *columnNulls = NULL;
 	Var *partitionColumn = NULL;
-	Oid columnOid = 0;
-	OpExpr *equalityExpr = NULL;
-	List *whereClauseList = NULL;
-	List *prunedList = NULL;
-	Node *rightOp = NULL;
-	Const *rightConst = NULL;
 	ShardId failedShard = INVALID_SHARD_ID;
 	Relation rel = NULL;
 	StringInfo lineBuf;
@@ -605,17 +599,7 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 								"and try again.")));
 	}
 
-	/* construct pseudo predicate specifying condition for partition key */
 	partitionColumn = PartitionColumn(tableId);
-	columnOid = partitionColumn->vartype;
-	equalityExpr = MakeOpExpression(partitionColumn, BTEqualStrategyNumber);
-	rightOp = get_rightop((Expr *) equalityExpr);
-	Assert(IsA(rightOp, Const));
-	rightConst = (Const *) rightOp;
-	rightConst->constvalue = 0;
-	rightConst->constisnull = false;
-	rightConst->constbyval = get_typbyval(columnOid);
-	whereClauseList = list_make1(equalityExpr);
 
 	/* resolve hash function for parition column */
 	typeEntry = lookup_type_cache(partitionColumn->vartype, TYPECACHE_HASH_PROC_FINFO|TYPECACHE_CMP_PROC_FINFO);
@@ -780,11 +764,7 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 								errmsg("Inconsistency in distribution table for \"%s\"",
 									   relationName)));
 			}
-			rightConst->constvalue = partitionColumnValue;
-			prunedList = PruneShardList(tableId, whereClauseList, shardIntervalList);
-			shardInterval = (ShardInterval *) linitial(prunedList);
 			shardId = shardInterval->id;
-
 			shardConnections =
 				(ShardConnections *) hash_search(shardToConn, &shardInterval->id,
 												 HASH_ENTER,
