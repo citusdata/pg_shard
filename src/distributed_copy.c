@@ -223,7 +223,7 @@ CopyGetLineBuf(CopyStateData *cs)
 }
 
 
-#define MAX_SHARDS 1001
+#define INITIAL_CONNECTION_CACHE_SIZE 1001
 
 static uint32
 shard_id_hash_fn(const void *key, Size keysize)
@@ -247,7 +247,7 @@ CreateShardToConnectionHash()
 	info.entrysize = sizeof(ShardConnections);
 	info.hash = shard_id_hash_fn;
 
-	return hash_create("shardToConn", MAX_SHARDS, &info, HASH_ELEM | HASH_FUNCTION);
+	return hash_create("shardToConn", INITIAL_CONNECTION_CACHE_SIZE, &info, HASH_ELEM | HASH_FUNCTION);
 }
 
 /* 
@@ -299,27 +299,24 @@ static bool
 PgCopyEnd(PGconn *con, char const* msg)
 {
 	PGresult *result = NULL;
-	if (PQputCopyEnd(con, msg) == 1)
-	{
-		while ((result = PQgetResult(con)) != NULL)
-		{
-			if (PQresultStatus(result) != PGRES_COMMAND_OK)
-			{
-				if (msg == NULL)
-				{
-					ReportRemoteError(con, result);
-				}
-				return false;
-			}
-			PQclear(result);
-		}
-		return true;
-	}
-	else
+	if (PQputCopyEnd(con, msg) != 1)
 	{
 		ReportRemoteError(con, NULL);
+		return false;
 	}
-	return false;
+	while ((result = PQgetResult(con)) != NULL)
+	{
+		if (PQresultStatus(result) != PGRES_COMMAND_OK)
+		{
+			if (msg == NULL)
+			{
+				ReportRemoteError(con, result);
+			}
+			return false;
+		}
+		PQclear(result);
+	}
+	return true;
 }
 
 /*
@@ -537,15 +534,18 @@ PgShardCopyTo(CopyStmt *copyStatement, char const *query)
 }	
 
 static int
-CompareTaskByMinHashToken(const void *key1, const void *key2, void *arg)
+CompareShardIntervalsByMinHashToken(const void *leftElement, 
+									const void *rightElement, 
+									void *comparator)
 {
-	Datum		d1 = (*(ShardInterval**)key1)->minValue;
-	Datum		d2 = (*(ShardInterval**)key2)->minValue;
-	FmgrInfo   *compareFunction = (FmgrInfo *) arg;
-	Datum		c;
+	Datum		leftValue = (*(ShardInterval**)leftElement)->minValue;
+	Datum		rightValue = (*(ShardInterval**)rightElement)->minValue;
+	FmgrInfo   *compareFunction = (FmgrInfo *) comparator;
+	Datum		comparisonResult;
 
-	c = FunctionCall2Coll(compareFunction, DEFAULT_COLLATION_OID, d1, d2);
-	return DatumGetInt32(c);
+	comparisonResult = FunctionCall2Coll(compareFunction, DEFAULT_COLLATION_OID, 
+										 leftValue, rightValue);
+	return DatumGetInt32(comparisonResult);
 }
 
 /*
@@ -705,7 +705,7 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 				shardIntervalCache[i++] = (ShardInterval *) lfirst(shardIntervalCell);
 			}
 			Assert(i == shardCount);
-			qsort_arg(shardIntervalCache, shardCount, sizeof(ShardInterval*), CompareTaskByMinHashToken, compareFunction);
+			qsort_arg(shardIntervalCache, shardCount, sizeof(ShardInterval*), CompareShardIntervalsByMinHashToken, compareFunction);
 		}
 		while (true)
 		{
