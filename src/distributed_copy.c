@@ -662,7 +662,9 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 	PG_TRY();
 	{
 		char partitionType = PartitionType(tableId);
-		Oid intervalTypeId = (partitionType == HASH_PARTITION_TYPE) ? INT4OID : partitionColumn->vartype;
+		Oid intervalTypeId = (partitionType == HASH_PARTITION_TYPE) 
+			? INT4OID : partitionColumn->vartype;
+		bool useBinarySearch = (partitionType != HASH_PARTITION_TYPE);
 
 		/* Lock all shards in shared mode */
 		shardIntervalList = SortList(shardIntervalList, CompareTasksByShardId);
@@ -689,12 +691,12 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 				if (DatumGetInt32(shardInterval->minValue) != shardMinHashToken ||
 					DatumGetInt32(shardInterval->maxValue) != shardMaxHashToken)
 				{
-					partitionType = RANGE_PARTITION_TYPE;
+					useBinarySearch = true;
 				}
 			}
 		}
 
-		if (partitionType != HASH_PARTITION_TYPE)
+		if (useBinarySearch)
 		{	
 			typeEntry = lookup_type_cache(intervalTypeId, TYPECACHE_CMP_PROC_FINFO);
 			compareFunction = &(typeEntry->cmp_proc_finfo);
@@ -712,6 +714,7 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 			ShardInterval *shardInterval = NULL;
 			ShardId shardId = 0;
 			bool found = false;
+			int hashedValue = 0;
 			MemoryContext oldContext = MemoryContextSwitchTo(tupleContext);
 			nextRowFound = NextCopyFrom(copyState, NULL, columnValues, columnNulls, NULL);
 			MemoryContextSwitchTo(oldContext);
@@ -732,8 +735,15 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 			partitionColumnValue = columnValues[partitionColumn->varattno-1];
 			if (partitionType == HASH_PARTITION_TYPE)
 			{
-				int hashedValue = DatumGetInt32(FunctionCall1(hashFunction,
-															  partitionColumnValue));
+				hashedValue = DatumGetInt32(FunctionCall1(hashFunction,
+														  partitionColumnValue));
+				if (useBinarySearch)
+				{
+					partitionColumnValue = Int32GetDatum(hashedValue);
+				}
+			}
+			if (!useBinarySearch)
+			{
 				shardHashCode =
 					(int) ((uint32) (hashedValue - INT32_MIN) / hashTokenIncrement);
 				shardInterval = shardIntervalCache[shardHashCode];
@@ -766,7 +776,13 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 				}
 			}
 			if (shardInterval == NULL)
-			{						
+			{	
+				if (useBinarySearch)
+				{
+					ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+									errmsg("Inconsistency in distribution table for \"%s\"",
+										   relationName)));
+				}
 				rightConst->constvalue = partitionColumnValue;
 				prunedList = PruneShardList(tableId, whereClauseList, shardIntervalList);
 				shardInterval = (ShardInterval *) linitial(prunedList);
