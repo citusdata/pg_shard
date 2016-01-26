@@ -539,8 +539,8 @@ PgShardCopyTo(CopyStmt *copyStatement, char const *query)
 static int
 CompareTaskByMinHashToken(const void *key1, const void *key2, void *arg)
 {
-	Datum		d1 = ((ShardInterval*)key1)->minValue;
-	Datum		d2 = ((ShardInterval*)key2)->minValue;
+	Datum		d1 = (*(ShardInterval**)key1)->minValue;
+	Datum		d2 = (*(ShardInterval**)key2)->minValue;
 	FmgrInfo   *compareFunction = (FmgrInfo *) arg;
 	Datum		c;
 
@@ -618,7 +618,7 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 	whereClauseList = list_make1(equalityExpr);
 
 	/* resolve hash function for parition column */
-	typeEntry = lookup_type_cache(partitionColumn->vartype, TYPECACHE_HASH_PROC_FINFO);
+	typeEntry = lookup_type_cache(partitionColumn->vartype, TYPECACHE_HASH_PROC_FINFO|TYPECACHE_CMP_PROC_FINFO);
 	hashFunction = &(typeEntry->hash_proc_finfo);
 
 	/* allocate column values and nulls arrays */
@@ -662,7 +662,8 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 	PG_TRY();
 	{
 		char partitionType = PartitionType(tableId);
-		
+		Oid intervalTypeId = (partitionType == HASH_PARTITION_TYPE) ? INT4OID : partitionColumn->vartype;
+
 		/* Lock all shards in shared mode */
 		shardIntervalList = SortList(shardIntervalList, CompareTasksByShardId);
 
@@ -695,14 +696,15 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 
 		if (partitionType != HASH_PARTITION_TYPE)
 		{	
-			TypeCacheEntry *typentry = lookup_type_cache(partitionColumn->vartype, TYPECACHE_CMP_PROC_FINFO);
-			compareFunction = &typentry->cmp_proc_finfo;
+			typeEntry = lookup_type_cache(intervalTypeId, TYPECACHE_CMP_PROC_FINFO);
+			compareFunction = &(typeEntry->cmp_proc_finfo);
 
 			i = 0;
 			foreach(shardIntervalCell, shardIntervalList)
 			{
 				shardIntervalCache[i++] = (ShardInterval *) lfirst(shardIntervalCell);
 			}
+			Assert(i == shardCount);
 			qsort_arg(shardIntervalCache, shardCount, sizeof(ShardInterval*), CompareTaskByMinHashToken, compareFunction);
 		}
 		while (true)
@@ -731,7 +733,7 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 			if (partitionType == HASH_PARTITION_TYPE)
 			{
 				int hashedValue = DatumGetInt32(FunctionCall1(hashFunction,
-														  partitionColumnValue));
+															  partitionColumnValue));
 				shardHashCode =
 					(int) ((uint32) (hashedValue - INT32_MIN) / hashTokenIncrement);
 				shardInterval = shardIntervalCache[shardHashCode];
@@ -768,7 +770,6 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 				rightConst->constvalue = partitionColumnValue;
 				prunedList = PruneShardList(tableId, whereClauseList, shardIntervalList);
 				shardInterval = (ShardInterval *) linitial(prunedList);
-				shardId = shardInterval->id;
 				if (partitionType == HASH_PARTITION_TYPE)
 				{
 					shardIntervalCache[shardHashCode] = shardInterval;
