@@ -534,9 +534,9 @@ PgShardCopyTo(CopyStmt *copyStatement, char const *query)
 }	
 
 static int
-CompareShardIntervalsByMinHashToken(const void *leftElement, 
-									const void *rightElement, 
-									void *comparator)
+CompareShardIntervalsByMinValue(const void *leftElement, 
+								const void *rightElement, 
+								void *comparator)
 {
 	Datum		leftValue = (*(ShardInterval**)leftElement)->minValue;
 	Datum		rightValue = (*(ShardInterval**)rightElement)->minValue;
@@ -690,7 +690,7 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 			compareFunction = &(typeEntry->cmp_proc_finfo);
 
 			qsort_arg(shardIntervalCache, shardCount, sizeof(ShardInterval*), 
-					  CompareShardIntervalsByMinHashToken, compareFunction);
+					  CompareShardIntervalsByMinValue, compareFunction);
 		}
 		while (true)
 		{
