@@ -2130,7 +2130,7 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 			isDistributedTable = IsDistributedTable(tableId);
 			if (isDistributedTable)
 			{
-				PgShardCopy(copyStatement, queryString);
+				PgShardCopy(copyStatement, queryString, completionTag);
 				return;
 			}
 		}

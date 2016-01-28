@@ -27,6 +27,6 @@ typedef struct
 	PlacementConnection* placements;
 } ShardConnections;
 
-extern void PgShardCopy(CopyStmt *copyStatement, char const* query);
+extern void PgShardCopy(CopyStmt *copyStatement, char const* query, char* completionTag);
 
 #endif

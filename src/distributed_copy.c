@@ -519,7 +519,7 @@ HTABToList(HTAB *hash)
  * Copy data from sepcified table
  */
 static void
-PgShardCopyTo(CopyStmt *copyStatement, char const *query)
+PgShardCopyTo(CopyStmt *copyStatement, char const *query, char *completionTag)
 {
 	RangeVar *relation = copyStatement->relation;
 	uint64 processedCount = 0;
@@ -531,6 +531,11 @@ PgShardCopyTo(CopyStmt *copyStatement, char const *query)
 	
 	/* Collecting data from shards will be done by select handler */
 	DoCopy(copyStatement, query, &processedCount);
+	if (completionTag)
+	{
+		snprintf(completionTag, COMPLETION_TAG_BUFSIZE,
+				 "COPY " UINT64_FORMAT, processedCount);
+	}
 }	
 
 static int
@@ -584,7 +589,7 @@ FindShardIntervalInCache(ShardInterval** shardIntervalCache, int shardCount,
  * Append data to the specified table
  */
 static void
-PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
+PgShardCopyFrom(CopyStmt *copyStatement, char const *query, char* completionTag)
 {
 	RangeVar *relation = copyStatement->relation;
 	ListCell *shardIntervalCell = NULL;
@@ -617,6 +622,7 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 	int shardHashCode = 0;
 	uint32 hashTokenIncrement = 0;
 	FmgrInfo *compareFunction = NULL;
+	uint64 processedCount = 0;
 
 	relationName = get_rel_name(tableId);
 
@@ -801,6 +807,7 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 											 (long) shardId)));
 				}
 			}
+			processedCount += 1;
 			MemoryContextReset(tupleContext);
 		}
 
@@ -830,7 +837,7 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 		ereport(ERROR, (errcode(ERRCODE_IO_ERROR),
 						errmsg("COPY failed for shard %ld", (long) failedShard)));
 	}
-	else if (queryCancelPending)
+	else if (QueryCancelPending)
 	{
 		PgCopyAbortTransaction(shardConnectionsList);
 		ereport(ERROR, (errcode(ERRCODE_IO_ERROR),
@@ -840,21 +847,27 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 	{
 		PgCopyEndTransaction(shardConnectionsList);
 	}
+	if (completionTag)
+	{
+		snprintf(completionTag, COMPLETION_TAG_BUFSIZE,
+				 "COPY " UINT64_FORMAT, processedCount);
+	}
+
 }
 
 /*
  * Handle copy to/from distributed table
  */
 void
-PgShardCopy(CopyStmt *copyStatement, char const *query)
+PgShardCopy(CopyStmt *copyStatement, char const *query, char *completionTag)
 {
     if (copyStatement->is_from)
     {
-        PgShardCopyFrom(copyStatement, query);
+        PgShardCopyFrom(copyStatement, query, completionTag);
     }
     else
     {
-        PgShardCopyTo(copyStatement, query);
+        PgShardCopyTo(copyStatement, query, completionTag);
     }
 }
 
