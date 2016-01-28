@@ -139,8 +139,10 @@ typedef struct CopyStateData
 	bool *force_quote_flags;            /* per-column CSV FQ flags */
 	List *force_notnull;        /* list of column names */
 	bool *force_notnull_flags;          /* per-column CSV FNN flags */
+#if PG_VERSION_NUM >= 90400
 	List *force_null;           /* list of column names */
 	bool *force_null_flags;             /* per-column CSV FN flags */
+#endif
 	bool convert_selectively;           /* do selective binary conversion? */
 	List *convert_select;       /* list of column names (can be NIL) */
 	bool *convert_select_flags;         /* per-column CSV/TEXT CS flags */
