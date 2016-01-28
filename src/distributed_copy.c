@@ -618,6 +618,24 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query, char* completionTag)
 	FmgrInfo *compareFunction = NULL;
 	uint64 processedCount = 0;
 	ErrorContextCallback errorCallback;
+	bool pipe = (copyStatement->filename == NULL);
+
+	/* Disallow COPY to/from file or program except to superusers. */
+	if (!pipe && !superuser())
+	{
+		if (copyStatement->is_program)
+			ereport(ERROR,
+					(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+					 errmsg("must be superuser to COPY to or from an external program"),
+					 errhint("Anyone can COPY to stdout or from stdin. "
+						   "psql's \\copy command also works for anyone.")));
+		else
+			ereport(ERROR,
+					(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+					 errmsg("must be superuser to COPY to or from a file"),
+					 errhint("Anyone can COPY to stdout or from stdin. "
+						   "psql's \\copy command also works for anyone.")));
+	}
 
 	relationName = get_rel_name(tableId);
 
