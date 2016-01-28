@@ -623,6 +623,7 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query, char* completionTag)
 	uint32 hashTokenIncrement = 0;
 	FmgrInfo *compareFunction = NULL;
 	uint64 processedCount = 0;
+	ErrorContextCallback errorCallback;
 
 	relationName = get_rel_name(tableId);
 
@@ -681,6 +682,13 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query, char* completionTag)
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						errmsg("Copy in binary mode is not currently supported")));
 	}
+
+	/* Set up callback to identify error line number */
+	errorCallback.callback = CopyFromErrorCallback;
+	errorCallback.arg = (void *) copyState;
+	errorCallback.previous = error_context_stack;
+	error_context_stack = &errorCallback;
+
 	PG_TRY();
 	{
 		char partitionType = PartitionType(tableId);
@@ -736,7 +744,12 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query, char* completionTag)
 			ShardId shardId = 0;
 			bool found = false;
 			int hashedValue = 0;
-			MemoryContext oldContext = MemoryContextSwitchTo(tupleContext);
+			MemoryContext oldContext;
+
+			CHECK_FOR_INTERRUPTS();
+
+			oldContext = MemoryContextSwitchTo(tupleContext);
+		  
 			nextRowFound = NextCopyFrom(copyState, NULL, columnValues, columnNulls, NULL);
 			MemoryContextSwitchTo(oldContext);
 
@@ -829,6 +842,9 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query, char* completionTag)
 
 	EndCopyFrom(copyState);
 	heap_close(rel, AccessShareLock);
+
+	/* Done, clean up */
+	error_context_stack = errorCallback.previous;
 
 	/* Complete two phase commit */
 	if (failedShard != INVALID_SHARD_ID)
