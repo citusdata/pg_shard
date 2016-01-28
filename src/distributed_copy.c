@@ -548,6 +548,38 @@ CompareShardIntervalsByMinValue(const void *leftElement,
 	return DatumGetInt32(comparisonResult);
 }
 
+
+static ShardInterval*
+FindShardIntervalInCache(ShardInterval** shardIntervalCache, int shardCount, 
+						 Datum partitionColumnValue, FmgrInfo *compareFunction)
+{
+	int lowerBoundIndex = 0, upperBoundIndex = shardCount;
+	while (lowerBoundIndex < upperBoundIndex) 
+	{
+		int middleIndex = (lowerBoundIndex + upperBoundIndex) >> 1;
+		if (DatumGetInt32(FunctionCall2Coll(compareFunction, 
+											DEFAULT_COLLATION_OID, 
+											partitionColumnValue, 
+											shardIntervalCache[middleIndex]->minValue)) < 0)
+		{
+			upperBoundIndex = middleIndex;
+		} 
+		else if (DatumGetInt32(FunctionCall2Coll(compareFunction, 
+												 DEFAULT_COLLATION_OID, 
+												 partitionColumnValue, 
+												 shardIntervalCache[middleIndex]->maxValue)) <= 0)
+		{
+			return shardIntervalCache[middleIndex];
+
+		}
+		else
+		{
+			lowerBoundIndex = middleIndex + 1;
+		}
+	}
+	return NULL;
+}
+
 /*
  * Append data to the specified table
  */
@@ -733,30 +765,7 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 			}
 			else
 			{
-				int l = 0, r = shardCount;
-				while (l < r) 
-				{
-					int m = (l + r) >> 1;
-					if (DatumGetInt32(FunctionCall2Coll(compareFunction, 
-														DEFAULT_COLLATION_OID, 
-														partitionColumnValue, 
-														shardIntervalCache[m]->minValue)) < 0)
-					{
-						r = m;
-					} 
-					else if (DatumGetInt32(FunctionCall2Coll(compareFunction, 
-															 DEFAULT_COLLATION_OID, 
-															 partitionColumnValue, 
-															 shardIntervalCache[m]->maxValue)) <= 0)
-					{
-						shardInterval = shardIntervalCache[m];
-						break;
-					}
-					else
-					{
-						l = m + 1;
-					}
-				}
+				shardInterval = FindShardIntervalInCache(shardIntervalCache, shardCount, partitionColumnValue, compareFunction);
 			}
 			if (shardInterval == NULL)
 			{	
