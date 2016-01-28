@@ -55,7 +55,7 @@ copy customer from '@abs_srcdir@/data/format-error.csv' delimiter ',' csv;
 ERROR:  missing data for column "name"
 CONTEXT:  COPY customer, line 2: "C109.Noname"
 copy customer from '@abs_srcdir@/data/constraint-error.csv' delimiter ',' csv; 
-WARNING:  Bad result from localhost:5432
+WARNING:  Bad result from localhost:55435
 DETAIL:  Remote message: duplicate key value violates unique constraint "customer_pkey_102086"
 CONTEXT:  COPY customer, line 3: ""
 ERROR:  COPY failed for shard 102086

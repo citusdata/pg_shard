@@ -55,7 +55,7 @@ select * from company;
 ERROR:  missing data for column "name"
 CONTEXT:  COPY company, line 2: "C109.Noname"
 \copy company from 'test/data/constraint-error.csv' delimiter ',' csv; 
-WARNING:  Bad result from localhost:5432
+WARNING:  Bad result from localhost:55435
 DETAIL:  Remote message: duplicate key value violates unique constraint "company_pkey_102070"
 CONTEXT:  COPY company, line 3: ""
 ERROR:  COPY failed for shard 102070
