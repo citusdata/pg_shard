@@ -338,7 +338,7 @@ PgCopyPrepareTransaction(List* shardConnections)
 		{
 			PGconn* conn = shardConn->placements[i].conn;
 			shardConn->placements[i].copied = true;
-			if (PgCopyEnd(conn, NULL) && tmgr->Prepare(conn))
+			if (PgCopyEnd(conn, NULL) && tmgr->Prepare(conn, shardConn->placements[i].id))
 			{
 				shardConn->placements[i].prepared = true;
 			}
@@ -371,7 +371,7 @@ PgCopyAbortTransaction(List* shardConnections)
 			PGconn* conn = shardConn->placements[i].conn;
 			if (shardConn->placements[i].prepared)
 			{
-				if (!tmgr->RollbackPrepared(conn))
+				if (!tmgr->RollbackPrepared(conn, shardConn->placements[i].id))
 				{
 					ereport(WARNING, (errcode(ERRCODE_IO_ERROR),
 									  errmsg("Failed to rollback prepared transactionb for shard %ld", 
@@ -414,7 +414,7 @@ PgCopyEndTransaction(List* shardConnections)
 		{
 			PGconn* conn = shardConn->placements[i].conn;
 			Assert(shardConn->placements[i].prepared);
-			if (!tmgr->CommitPrepared(conn))
+			if (!tmgr->CommitPrepared(conn, shardConn->placements[i].id))
 			{
 				ereport(WARNING, (errcode(ERRCODE_IO_ERROR),
 								  errmsg("Failed to commit prepared transaction for shard %ld", 
