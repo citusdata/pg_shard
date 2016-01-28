@@ -830,6 +830,12 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query)
 		ereport(ERROR, (errcode(ERRCODE_IO_ERROR),
 						errmsg("COPY failed for shard %ld", (long) failedShard)));
 	}
+	else if (queryCancelPending)
+	{
+		PgCopyAbortTransaction(shardConnectionsList);
+		ereport(ERROR, (errcode(ERRCODE_IO_ERROR),
+						errmsg("COPY was canceled")));
+	}
 	else
 	{
 		PgCopyEndTransaction(shardConnectionsList);
