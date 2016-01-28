@@ -520,7 +520,12 @@ PgShardCopyTo(CopyStmt *copyStatement, char const *query, char *completionTag)
 	uint64 processedCount = 0;
 	char const *qualifiedName = quote_qualified_identifier(relation->schemaname,
 														   relation->relname);
-	List *queryList = raw_parser(psprintf("select * from %s", qualifiedName));
+	StringInfo queryString = makeStringInfo();
+	List *queryList = NULL;
+
+	appendStringInfo(queryString, "select * from %s", qualifiedName);
+	queryList = raw_parser(queryString->data);
+
 	copyStatement->query = linitial(queryList);
 	copyStatement->relation = NULL;
 	
@@ -758,8 +763,6 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query, char* completionTag)
 			int hashedValue = 0;
 			MemoryContext oldContext;
 
-			CHECK_FOR_INTERRUPTS();
-
 			oldContext = MemoryContextSwitchTo(tupleContext);
 		  
 			nextRowFound = NextCopyFrom(copyState, NULL, columnValues, columnNulls, NULL);
@@ -770,6 +773,8 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query, char* completionTag)
 				MemoryContextReset(tupleContext);
 				break;
 			}
+
+			CHECK_FOR_INTERRUPTS();
 
 			/* write the row to the shard */
 			if (columnNulls[partitionColumn->varattno-1])

@@ -120,7 +120,9 @@ PgShardRollback1PC(PGconn *conn)
 static char *
 PgShard2pcCommand(char const *cmd, ShardId shardId)
 {
-	return psprintf("%s 'pgshard_%d_%d_%ld'", cmd, MyProcPid, GlobalTransactionId, (long)shardId);
+	StringInfo commandString = makeStringInfo();
+	appendStringInfo(commandString, "%s 'pgshard_%d_%d_%ld'", cmd, MyProcPid, GlobalTransactionId, (long)shardId);
+	return commandString->data;
 }
 
 
