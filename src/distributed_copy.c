@@ -325,15 +325,18 @@ PgCopyEnd(PGconn *con, char const* msg)
  * Status of this function is stored in ShardConnections::status field
  */
 static ShardId
-PgCopyPrepareTransaction(List* shardConnections)
+PgCopyPrepareTransaction(HTAB *connectionHash)
 {
-	ListCell *listCell;
+	HASH_SEQ_STATUS hashCursor;
+	ShardConnections* shardConn;
 	int i = 0;
+
 	PgShardTransactionManager const *tmgr =
 		&PgShardTransManagerImpl[PgShardCurrTransManager];
-	foreach (listCell, shardConnections)
+
+	hash_seq_init(&hashCursor, connectionHash);
+	while ((shardConn = (ShardConnections*)hash_seq_search(&hashCursor)) != NULL)
 	{
-		ShardConnections* shardConn = (ShardConnections*)lfirst(listCell);
 		for (i = 0; i < shardConn->replicaCount; i++) 
 		{
 			PGconn* conn = shardConn->placements[i].conn;
@@ -357,15 +360,18 @@ PgCopyPrepareTransaction(List* shardConnections)
  * otherwise end copy and rollback current transaction
  */
 static void
-PgCopyAbortTransaction(List* shardConnections)
+PgCopyAbortTransaction(HTAB *connectionHash)
 {
-	ListCell *listCell;
+	HASH_SEQ_STATUS hashCursor;
+	ShardConnections* shardConn;
 	int i = 0;
+
 	PgShardTransactionManager const *tmgr =
 		&PgShardTransManagerImpl[PgShardCurrTransManager];
-	foreach (listCell, shardConnections)
+
+	hash_seq_init(&hashCursor, connectionHash);
+	while ((shardConn = (ShardConnections*)hash_seq_search(&hashCursor)) != NULL)
 	{
-		ShardConnections* shardConn = (ShardConnections*)lfirst(listCell);
 		for (i = 0; i < shardConn->replicaCount; i++) 
 		{
 			PGconn* conn = shardConn->placements[i].conn;
@@ -397,19 +403,22 @@ PgCopyAbortTransaction(List* shardConnections)
 }
 
 /*
- * Completecopy transaction.
+ * Complete copy transaction.
  * This function is called only of COPY is successfully completed at all nodes
  */
 static void
-PgCopyEndTransaction(List* shardConnections)
+PgCopyEndTransaction(HTAB *connectionHash)
 {
-	ListCell *listCell;
+	HASH_SEQ_STATUS hashCursor;
+	ShardConnections* shardConn;
 	int i = 0;
+
 	PgShardTransactionManager const *tmgr =
 		&PgShardTransManagerImpl[PgShardCurrTransManager];
-	foreach (listCell, shardConnections)
+
+	hash_seq_init(&hashCursor, connectionHash);
+	while ((shardConn = (ShardConnections*)hash_seq_search(&hashCursor)) != NULL)
 	{
-		ShardConnections* shardConn = (ShardConnections*)lfirst(listCell);
 		for (i = 0; i < shardConn->replicaCount; i++) 
 		{
 			PGconn* conn = shardConn->placements[i].conn;
@@ -435,11 +444,15 @@ InitializeShardConnections(CopyStmt *copyStatement,
 						   PgShardTransactionManager const *transactionManager)
 {
 	ListCell *taskPlacementCell = NULL;
-	List *finalizedPlacementList = LoadFinalizedShardPlacementList(shardId);
-	int placementCount = list_length(finalizedPlacementList);
+	List *finalizedPlacementList = NULL;
+	int placementCount = 0;
 	List *failedPlacementList = NULL;
 	ListCell *failedPlacementCell = NULL;
 
+	shardConnections->replicaCount = 0;
+
+	finalizedPlacementList = LoadFinalizedShardPlacementList(shardId);
+	placementCount = list_length(finalizedPlacementList);
 	shardConnections->placements =
 		(PlacementConnection *) palloc0(sizeof(PlacementConnection) * placementCount);
 	placementCount = 0;
@@ -495,24 +508,6 @@ InitializeShardConnections(CopyStmt *copyStatement,
 		UpdateShardPlacementRowState(failedPlacement->id, STATE_INACTIVE);
 	}
 	shardConnections->replicaCount = placementCount;
-}
-
-/*
- * Create single-linked list from hash table entries
- */
-static List *
-HTABToList(HTAB *hash)
-{
-	HASH_SEQ_STATUS hashCursor;
-	void *entry;
-	List *list = NULL;
-
-	hash_seq_init(&hashCursor, hash);
-	while ((entry = hash_seq_search(&hashCursor)) != NULL)
-	{
-		list = lappend(list, entry);
-	}
-	return list;
 }
 
 /*
@@ -612,7 +607,6 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query, char* completionTag)
 	Relation rel = NULL;
 	StringInfo lineBuf;
 	ShardConnections *shardConnections = NULL;
-	List *shardConnectionsList = NULL;
 	ShardInterval **shardIntervalCache = NULL;
 	Datum partitionColumnValue = 0;
 	int i = 0;
@@ -796,7 +790,7 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query, char* completionTag)
 			shardConnections =
 				(ShardConnections *) hash_search(shardToConn, &shardInterval->id,
 												 HASH_ENTER,
-												 &found);
+												 &found);			
 			if (!found)
 			{
 				InitializeShardConnections(copyStatement, shardConnections, shardId,
@@ -825,8 +819,7 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query, char* completionTag)
 		}
 
 		/* Perform two phase commit in replicas */
-		shardConnectionsList = HTABToList(shardToConn);
-		failedShard = PgCopyPrepareTransaction(shardConnectionsList);
+		failedShard = PgCopyPrepareTransaction(shardToConn);
 	}
 	PG_CATCH(); /* do recovery */
 	{
@@ -834,8 +827,7 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query, char* completionTag)
 		heap_close(rel, AccessShareLock);
 
 		/* Rollback transactions */
-		shardConnectionsList = HTABToList(shardToConn);
-		PgCopyAbortTransaction(shardConnectionsList);
+		PgCopyAbortTransaction(shardToConn);
 		PG_RE_THROW();
 	}
 	PG_END_TRY();
@@ -849,19 +841,19 @@ PgShardCopyFrom(CopyStmt *copyStatement, char const *query, char* completionTag)
 	/* Complete two phase commit */
 	if (failedShard != INVALID_SHARD_ID)
 	{
-		PgCopyAbortTransaction(shardConnectionsList);
+		PgCopyAbortTransaction(shardToConn);
 		ereport(ERROR, (errcode(ERRCODE_IO_ERROR),
 						errmsg("COPY failed for shard %ld", (long) failedShard)));
 	}
 	else if (QueryCancelPending)
 	{
-		PgCopyAbortTransaction(shardConnectionsList);
+		PgCopyAbortTransaction(shardToConn);
 		ereport(ERROR, (errcode(ERRCODE_IO_ERROR),
 						errmsg("COPY was canceled")));
 	}
 	else
 	{
-		PgCopyEndTransaction(shardConnectionsList);
+		PgCopyEndTransaction(shardToConn);
 	}
 	if (completionTag)
 	{
