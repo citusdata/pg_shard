@@ -20,6 +20,7 @@
 #include "lib/stringinfo.h"
 #include "nodes/pg_list.h"
 
+#include "pg_shard.h"
 
 /* character for separating table name from shard ID in generated table names */
 #define SHARD_NAME_SEPARATOR '_'

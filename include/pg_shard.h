@@ -77,6 +77,9 @@ typedef struct DistributedPlan
 } DistributedPlan;
 
 
+#define INVALID_SHARD_ID (-1)
+typedef int64 ShardId;
+
 /*
  * Tasks just bundle a query string (already ready for execution) with a list of
  * placements on which that string could be executed. The semantics of a task
@@ -97,6 +100,7 @@ extern void _PG_init(void);
 extern void _PG_fini(void);
 extern bool ExecuteTaskAndStoreResults(Task *task, TupleDesc tupleDescriptor,
 									   Tuplestorestate *tupleStore);
+extern int  CompareTasksByShardId(const void *leftElement, const void *rightElement);
 
 
 #endif /* PG_SHARD_H */

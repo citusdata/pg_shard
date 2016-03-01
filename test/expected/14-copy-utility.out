@@ -1,0 +1,79 @@
+CREATE TABLE company
+(
+    customer_id TEXT primary key,
+    name TEXT
+);
+SELECT master_create_distributed_table(table_name := 'company',
+                                       partition_column := 'customer_id');
+ master_create_distributed_table 
+---------------------------------
+ 
+(1 row)
+
+\set VERBOSITY terse
+SELECT master_create_worker_shards(table_name := 'company',
+                                   shard_count := 16,
+                                   replication_factor := 1);
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+WARNING:  Connection failed to adeadhost:5432
+WARNING:  could not create shard on "adeadhost:5432"
+ master_create_worker_shards 
+-----------------------------
+ 
+(1 row)
+
+\set VERBOSITY default
+\copy company from 'test/data/customer.csv' delimiter ',' csv; 
+select * from company;
+ customer_id |  name   
+-------------+---------
+ C106        | Asus
+ C101        | Dell
+ C103        | HP
+ C102        | Apple
+ C104        | Acer
+ C107        | Lenovo
+ C105        | Samsung
+(7 rows)
+
+\copy company to 'results.csv';
+\copy (select name from company) to 'names.csv';
+\copy company from 'test/data/format-error.csv' delimiter ',' csv; 
+ERROR:  missing data for column "name"
+CONTEXT:  COPY company, line 2: "C109.Noname"
+\copy company from 'test/data/constraint-error.csv' delimiter ',' csv; 
+WARNING:  Bad result from localhost:55435
+DETAIL:  Remote message: duplicate key value violates unique constraint "company_pkey_102070"
+CONTEXT:  COPY company, line 3: ""
+ERROR:  COPY failed for shard 102070
+copy company from stdin delimiter ';' null '???';
+copy company from program 'echo C120,Apple' delimiter ',' csv; 
+select * from company;
+ customer_id |  name   
+-------------+---------
+ C106        | Asus
+ C110        | IBM
+ C101        | Dell
+ C103        | HP
+ C108        | Siemems
+ C102        | Apple
+ C104        | Acer
+ C109        | 
+ C120        | Apple
+ C107        | Lenovo
+ C105        | Samsung
+(11 rows)
+
