@@ -1,3 +1,19 @@
+## Deprecation Notice
+
+The new open source [Citus extension](https://github.com/citusdata/citus)
+for PostgreSQL provides a superset of the functionality of `pg_shard`.
+We’ll not be making any more `pg_shard` releases and the project
+is entering end-of-life status.
+
+We have migration steps to help existing customers perform a drop-in
+replacement. [Contact
+us](mailto:engage@citusdata.com?subject=pg_shard+Migration) for
+more information, or feel free to drop in to our [IRC
+channel](https://webchat.freenode.net/?channels=citus) to have
+questions answered in real-time.
+
+___
+
 # pg_shard
 
 [![Build Status](https://img.shields.io/travis/citusdata/pg_shard/master.svg)][status]
