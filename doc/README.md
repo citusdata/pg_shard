@@ -158,7 +158,7 @@ For example, we could split an input file (`input.csv`) into chunks and load eac
 ```
 mkdir chunks
 split -nl/64 input.csv chunks/
-ls chunks | xargs -t -n1 -P64 -I% copy_to_distributed_table -C % users
+find chunks -type f | xargs -t -n1 -P64 -I% copy_to_distributed_table -C % users
 ```
 
 Note that the above example loads the contents of `input.csv` using 64 processes. The optimal value will vary depending on factors such as cluster size and hardware.
