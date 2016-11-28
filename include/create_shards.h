@@ -21,7 +21,7 @@
 
 
 /* total number of hash tokens (2^32) */
-#define HASH_TOKEN_COUNT INT64CONST(4294967296UL)
+#define HASH_TOKEN_COUNT INT64CONST(4294967296U)
 
 /* name for the file containing worker node and port information */
 #define WORKER_LIST_FILENAME "pg_worker_list.conf"

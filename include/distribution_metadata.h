@@ -19,6 +19,7 @@
 #include "nodes/primnodes.h"
 #include "storage/lock.h"
 
+#include "pg_shard.h"
 
 /* query prefix (target list and joins) for shard interval information */
 #define SHARD_QUERY_PREFIX "SELECT s.id, s.relation_id, s.min_value, s.max_value, " \

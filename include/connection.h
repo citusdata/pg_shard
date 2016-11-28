@@ -15,7 +15,7 @@
 
 #include "c.h"
 #include "libpq-fe.h"
-
+#include "pg_shard.h"
 
 /* maximum duration to wait for connection */
 #define CLIENT_CONNECT_TIMEOUT_SECONDS "5"
@@ -29,7 +29,6 @@
 
 /* SQL statement for testing */
 #define TEST_SQL "DO $$ BEGIN RAISE EXCEPTION 'Raised remotely!'; END $$"
-
 
 /*
  * NodeConnectionKey acts as the key to index into the (process-local) hash
@@ -54,6 +53,8 @@ typedef struct NodeConnectionEntry
 extern PGconn * GetConnection(char *nodeName, int32 nodePort);
 extern void PurgeConnection(PGconn *connection);
 extern void ReportRemoteError(PGconn *connection, PGresult *result);
+extern PGconn* ConnectToNode(char *nodeName, int nodePort);
 
+typedef bool (*ShardAction)(ShardId id, PGconn* conn, void* arg, bool status);
 
 #endif /* PG_SHARD_CONNECTION_H */

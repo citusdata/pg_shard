@@ -19,6 +19,8 @@
 #include "plpgsql.h"
 
 #include "pg_shard.h"
+#include "distributed_copy.h"
+#include "distributed_transaction_manager.h"
 #include "connection.h"
 #include "create_shards.h"
 #include "distribution_metadata.h"
@@ -123,7 +125,6 @@ static bool IsPgShardPlan(PlannedStmt *plannedStmt);
 static void NextExecutorStartHook(QueryDesc *queryDesc, int eflags);
 static LOCKMODE CommutativityRuleToLockMode(CmdType commandType);
 static void AcquireExecutorShardLocks(List *taskList, LOCKMODE lockMode);
-static int CompareTasksByShardId(const void *leftElement, const void *rightElement);
 static void ExecuteMultipleShardSelect(DistributedPlan *distributedPlan,
 									   RangeVar *intermediateTable);
 static bool SendQueryInSingleRowMode(PGconn *connection, StringInfo query);
@@ -165,6 +166,13 @@ static ExecutorFinish_hook_type PreviousExecutorFinishHook = NULL;
 static ExecutorEnd_hook_type PreviousExecutorEndHook = NULL;
 static ProcessUtility_hook_type PreviousProcessUtilityHook = NULL;
 
+struct config_enum_entry const PgShardTransManagerEnum[] = 
+{ 
+    { "no",  0, false },
+    { "1PC", 1, false },
+    { "2PC", 2, false }
+};
+                                                
 
 /*
  * _PG_init is called when the module is loaded. In this function we save the
@@ -208,6 +216,12 @@ _PG_init(void)
 							 "Logs each statement used in a distributed plan", NULL,
 							 &LogDistributedStatements, false, PGC_USERSET, 0, NULL,
 							 NULL, NULL);
+
+	DefineCustomEnumVariable("pg_shard.copy_transaction_manager",
+                             "Transaction manager for distributed copy", 
+                             NULL, 
+                             &PgShardCurrTransManager, 1, PgShardTransManagerEnum, PGC_USERSET, 0, NULL,
+                             NULL, NULL);
 
 	EmitWarningsOnPlaceholders("pg_shard");
 
@@ -1409,7 +1423,7 @@ AcquireExecutorShardLocks(List *taskList, LOCKMODE lockMode)
 
 
 /* Helper function to compare two tasks using their shardIds. */
-static int
+int
 CompareTasksByShardId(const void *leftElement, const void *rightElement)
 {
 	const Task *leftTask = *((const Task **) leftElement);
@@ -2106,7 +2120,6 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 	{
 		CopyStmt *copyStatement = (CopyStmt *) parsetree;
 		RangeVar *relation = copyStatement->relation;
-		Node *rawQuery = copyObject(copyStatement->query);
 
 		if (relation != NULL)
 		{
@@ -2114,39 +2127,11 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 			Oid tableId = RangeVarGetRelid(relation, NoLock, failOK);
 			bool isDistributedTable = false;
 
-			Assert(rawQuery == NULL);
-
 			isDistributedTable = IsDistributedTable(tableId);
 			if (isDistributedTable)
 			{
-				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("COPY commands on distributed tables "
-									   "are unsupported")));
-			}
-		}
-		else if (rawQuery != NULL)
-		{
-			Query *parsedQuery = NULL;
-			PlannerType plannerType = PLANNER_INVALID_FIRST;
-			List *queryList = pg_analyze_and_rewrite(rawQuery, queryString,
-													 NULL, 0);
-
-			Assert(relation == NULL);
-
-			if (list_length(queryList) != 1)
-			{
-				ereport(ERROR, (errmsg("unexpected rewrite result")));
-			}
-
-			parsedQuery = (Query *) linitial(queryList);
-
-			/* determine if the query runs on a distributed table */
-			plannerType = DeterminePlannerType(parsedQuery);
-			if (plannerType == PLANNER_TYPE_PG_SHARD)
-			{
-				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("COPY commands involving distributed "
-									   "tables are unsupported")));
+				PgShardCopy(copyStatement, queryString, completionTag);
+				return;
 			}
 		}
 	}
